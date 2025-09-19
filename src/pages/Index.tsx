@@ -54,23 +54,21 @@ const Index = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950">
+    <div className="min-h-screen bg-[#F9F9F9]">
       <Header />
 
       <main>
         {/* Hero Section */}
-        <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-purple-900/20 via-transparent to-purple-900/20" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,theme(colors.purple.600/15)_0%,theme(colors.cyan.600/10)_50%,transparent_70%)]" />
+        <section className="relative min-h-[80vh] flex items-center justify-center">
 
-          <div className="relative z-10 container mx-auto px-4 text-center">
-            <h1 className="text-6xl md:text-8xl font-bold mb-6 bg-gradient-to-r from-purple-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent animate-gradient-x">
+          <div className="container mx-auto px-4 text-center">
+            <h1 className="text-6xl md:text-8xl font-bold mb-6 bg-gradient-to-r from-purple-600 via-cyan-600 to-blue-600 bg-clip-text text-transparent animate-gradient-x">
               Welcome to MoonFile
             </h1>
-            <h2 className="text-2xl md:text-3xl text-white mb-8 font-light">
+            <h2 className="text-2xl md:text-3xl text-gray-700 mb-8 font-light">
               A decentralized hub of games powered by Nostr
             </h2>
-            <p className="text-lg md:text-xl text-white max-w-3xl mx-auto mb-12 leading-relaxed">
+            <p className="text-lg md:text-xl text-gray-600 max-w-3xl mx-auto mb-12 leading-relaxed">
               Discover, play, and compete in games published via Nostr events — from retro NES emulated games
               to multiplayer web games embedded via iframe. All games are stored and verified on the decentralized Nostr network.
             </p>
@@ -87,13 +85,13 @@ const Index = () => {
         </section>
 
         {/* Features Section */}
-        <section className="py-24 px-4">
+        <section className="py-24 px-4 bg-white">
           <div className="container mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
                 Featured Categories
               </h2>
-              <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
+              <p className="text-xl text-gray-600 max-w-2xl mx-auto">
                 Explore different types of games available on our decentralized platform
               </p>
             </div>
@@ -112,13 +110,13 @@ const Index = () => {
         </section>
 
         {/* Featured Games Section */}
-        <section className="py-24 px-4 bg-gradient-to-b from-transparent to-purple-900/10">
+        <section className="py-24 px-4 bg-gray-50">
           <div className="container mx-auto">
             <div className="text-center mb-16">
               <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
                 Featured Games
               </h2>
-              <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
+              <p className="text-xl text-gray-600 max-w-2xl mx-auto">
                 Check out some of the most popular games on our platform
               </p>
             </div>
@@ -137,13 +135,13 @@ const Index = () => {
         </section>
 
         {/* CTA Section */}
-        <section className="py-24 px-4">
+        <section className="py-24 px-4 bg-white">
           <div className="container mx-auto">
-            <div className="max-w-4xl mx-auto text-center bg-gradient-to-br from-purple-900/20 to-cyan-900/20 rounded-2xl p-12 border border-purple-900/30">
-              <h2 className="text-4xl md:text-5xl font-bold mb-6 text-white">
+            <div className="max-w-4xl mx-auto text-center bg-gradient-to-br from-purple-100 to-cyan-100 rounded-2xl p-12 border border-purple-200">
+              <h2 className="text-4xl md:text-5xl font-bold mb-6 text-gray-800">
                 Developers: Publish your games on MoonFile
               </h2>
-              <p className="text-xl text-foreground/90 mb-8 leading-relaxed">
+              <p className="text-xl text-gray-700 mb-8 leading-relaxed">
                 Join our decentralized gaming ecosystem by publishing your games as Nostr events.
                 Reach a global audience and leverage the power of decentralized technology.
               </p>
@@ -163,7 +161,7 @@ const Index = () => {
       </main>
 
       {/* Footer */}
-      <footer className="border-t border-purple-900/20 py-12 px-4">
+      <footer className="border-t border-gray-200 py-12 px-4 bg-gray-50">
         <div className="container mx-auto">
           <div className="grid md:grid-cols-5 gap-8 mb-8">
             <div className="md:col-span-2">
@@ -175,7 +173,7 @@ const Index = () => {
                   MoonFile
                 </span>
               </div>
-              <p className="text-muted-foreground">
+              <p className="text-gray-600">
                 Decentralized arcade powered by Nostr. Play, compete, and publish games on the decentralized web.
               </p>
             </div>
@@ -205,7 +203,7 @@ const Index = () => {
             </div>
           </div>
 
-          <div className="border-t border-purple-900/20 pt-8 text-center text-muted-foreground">
+          <div className="border-t border-gray-200 pt-8 text-center text-gray-600">
             <p>&copy; 2025 MoonFile. Powered by Nostr and decentralized technology.</p>
           </div>
         </div>

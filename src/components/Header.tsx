@@ -4,7 +4,7 @@ import { LoginArea } from "@/components/auth/LoginArea";
 
 export function Header() {
   return (
-    <header className="sticky top-0 z-50 w-full border-b border-purple-800/30 bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 shadow-lg">
+    <header className="sticky top-0 z-50 w-full border-b border-gray-200 bg-white/95 backdrop-blur supports-[backdrop-filter]:bg-white/60 shadow-sm">
       <div className="container flex h-16 items-center justify-between px-4">
         {/* Logo */}
         <Link to="/" className="flex items-center space-x-2">
@@ -20,25 +20,25 @@ export function Header() {
         <nav className="hidden md:flex items-center space-x-8">
           <Link
             to="/"
-            className="text-sm font-medium text-foreground/80 hover:text-primary transition-colors hover:scale-105"
+            className="text-sm font-medium text-gray-700 hover:text-purple-600 transition-colors hover:scale-105"
           >
             Home
           </Link>
           <Link
             to="/games"
-            className="text-sm font-medium text-foreground/80 hover:text-primary transition-colors hover:scale-105"
+            className="text-sm font-medium text-gray-700 hover:text-purple-600 transition-colors hover:scale-105"
           >
             Games
           </Link>
           <Link
             to="/about"
-            className="text-sm font-medium text-foreground/80 hover:text-primary transition-colors hover:scale-105"
+            className="text-sm font-medium text-gray-700 hover:text-purple-600 transition-colors hover:scale-105"
           >
             About
           </Link>
           <Link
             to="/contact"
-            className="text-sm font-medium text-foreground/80 hover:text-primary transition-colors hover:scale-105"
+            className="text-sm font-medium text-gray-700 hover:text-purple-600 transition-colors hover:scale-105"
           >
             Contact
           </Link>

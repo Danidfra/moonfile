@@ -11,7 +11,7 @@ interface GameCardProps {
 
 export function GameCard({ title, genre, coverImage, onPlay }: GameCardProps) {
   return (
-    <Card className="group overflow-hidden border-purple-800/30 bg-card/80 backdrop-blur-sm hover:border-purple-500/60 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/30">
+    <Card className="group overflow-hidden border-gray-200 bg-white hover:border-purple-400 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-200">
       <div className="relative aspect-video overflow-hidden">
         <img
           src={coverImage}

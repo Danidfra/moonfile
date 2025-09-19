@@ -9,7 +9,7 @@ interface FeatureCardProps {
 
 export function FeatureCard({ title, description, icon }: FeatureCardProps) {
   return (
-    <Card className="h-full border-purple-800/30 bg-card/80 backdrop-blur-sm hover:border-purple-500/60 transition-all duration-300 hover:scale-105 group">
+    <Card className="h-full border-gray-200 bg-white hover:border-purple-400 transition-all duration-300 hover:scale-105 group">
       <CardContent className="p-6 h-full flex flex-col">
         <div className="mb-4 p-3 w-fit rounded-lg bg-gradient-to-br from-purple-600/20 to-cyan-600/20 group-hover:from-purple-600/30 group-hover:to-cyan-600/30 transition-all duration-300">
           {icon}
