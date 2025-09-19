@@ -67,10 +67,10 @@ const Index = () => {
             <h1 className="text-6xl md:text-8xl font-bold mb-6 bg-gradient-to-r from-purple-400 via-cyan-400 to-purple-400 bg-clip-text text-transparent animate-gradient-x">
               Welcome to MoonFile
             </h1>
-            <h2 className="text-2xl md:text-3xl text-muted-foreground mb-8 font-light">
+            <h2 className="text-2xl md:text-3xl text-white mb-8 font-light">
               A decentralized hub of games powered by Nostr
             </h2>
-            <p className="text-lg md:text-xl text-muted-foreground max-w-3xl mx-auto mb-12 leading-relaxed">
+            <p className="text-lg md:text-xl text-white max-w-3xl mx-auto mb-12 leading-relaxed">
               Discover, play, and compete in games published via Nostr events — from retro NES emulated games
               to multiplayer web games embedded via iframe. All games are stored and verified on the decentralized Nostr network.
             </p>
