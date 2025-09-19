@@ -11,10 +11,10 @@ interface GameCardProps {
 
 export function GameCard({ title, genre, coverImage, onPlay }: GameCardProps) {
   return (
-    <Card className="group overflow-hidden border-purple-900/20 bg-card/50 backdrop-blur-sm hover:border-purple-500/50 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/20">
+    <Card className="group overflow-hidden border-purple-800/30 bg-card/80 backdrop-blur-sm hover:border-purple-500/60 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/30">
       <div className="relative aspect-video overflow-hidden">
-        <img 
-          src={coverImage} 
+        <img
+          src={coverImage}
           alt={title}
           className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
         />
@@ -29,7 +29,7 @@ export function GameCard({ title, genre, coverImage, onPlay }: GameCardProps) {
         <h3 className="font-semibold text-lg text-foreground mb-2">{title}</h3>
       </CardContent>
       <CardFooter className="p-4 pt-0">
-        <Button 
+        <Button
           onClick={onPlay}
           className="w-full bg-gradient-to-r from-purple-600 to-cyan-600 hover:from-purple-700 hover:to-cyan-700 text-white transition-all duration-300"
         >

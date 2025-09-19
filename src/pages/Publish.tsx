@@ -11,20 +11,20 @@ const Publish = () => {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900/20 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950">
       <Header />
-      
+
       <main className="py-24 px-4">
         <div className="container mx-auto max-w-6xl">
           <div className="text-center mb-16">
             <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
               Publish Your Games
             </h1>
-            <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+            <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
               Share your games with the world using the power of Nostr and kind 30078 events
             </p>
           </div>
-          
+
           {/* Benefits Section */}
           <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6 mb-16">
             <Card className="border-purple-900/20 bg-card/50 backdrop-blur-sm">
@@ -96,12 +96,12 @@ const Publish = () => {
                   <div>
                     <h3 className="font-semibold text-foreground mb-2">Prepare Your Game</h3>
                     <p className="text-muted-foreground">
-                      Package your game as a web application with HTML, CSS, and JavaScript files. 
+                      Package your game as a web application with HTML, CSS, and JavaScript files.
                       For NES games, prepare ROM files and emulator configuration.
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
                     2
@@ -109,12 +109,12 @@ const Publish = () => {
                   <div>
                     <h3 className="font-semibold text-foreground mb-2">Create Game Manifest</h3>
                     <p className="text-muted-foreground">
-                      Create a JSON manifest describing your game including title, description, 
+                      Create a JSON manifest describing your game including title, description,
                       genre, and file URLs hosted on decentralized storage.
                     </p>
                   </div>
                 </div>
-                
+
                 <div className="flex items-start space-x-4">
                   <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
                     3
@@ -122,7 +122,7 @@ const Publish = () => {
                   <div>
                     <h3 className="font-semibold text-foreground mb-2">Publish as Nostr Event</h3>
                     <p className="text-muted-foreground">
-                      Create a kind 30078 event containing your game manifest and publish it to 
+                      Create a kind 30078 event containing your game manifest and publish it to
                       Nostr relays. MoonFile will automatically index and display your game.
                     </p>
                   </div>
@@ -150,7 +150,7 @@ const Publish = () => {
                 </pre>
               </div>
               <p className="text-sm text-muted-foreground mt-4">
-                The game manifest JSON should include file URLs, game type (iframe/nes), 
+                The game manifest JSON should include file URLs, game type (iframe/nes),
                 and any additional metadata needed to run the game.
               </p>
             </div>
@@ -160,26 +160,26 @@ const Publish = () => {
           <div className="bg-gradient-to-br from-purple-900/20 to-cyan-900/20 rounded-2xl p-12 border border-purple-900/30 text-center">
             <h2 className="text-3xl font-bold mb-6 text-white">Developer Tools</h2>
             <p className="text-muted-foreground mb-8 max-w-2xl mx-auto">
-              We provide tools and libraries to make publishing games on MoonFile easier. 
+              We provide tools and libraries to make publishing games on MoonFile easier.
               Check out our documentation and SDKs for different platforms.
             </p>
             <div className="flex flex-wrap justify-center gap-4">
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white"
               >
                 <Code className="w-4 h-4 mr-2" />
                 Documentation
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white"
               >
                 <Upload className="w-4 h-4 mr-2" />
                 Upload Tool
               </Button>
-              <Button 
-                variant="outline" 
+              <Button
+                variant="outline"
                 className="border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white"
               >
                 <Globe className="w-4 h-4 mr-2" />

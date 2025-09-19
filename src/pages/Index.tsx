@@ -54,17 +54,17 @@ const Index = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-purple-900/20 to-slate-900">
+    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950">
       <Header />
 
       <main>
         {/* Hero Section */}
         <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden">
-          <div className="absolute inset-0 bg-gradient-to-b from-purple-900/10 via-transparent to-purple-900/10" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,theme(colors.purple.500/10)_0%,transparent_70%)]" />
+          <div className="absolute inset-0 bg-gradient-to-b from-purple-900/20 via-transparent to-purple-900/20" />
+          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,theme(colors.purple.600/15)_0%,theme(colors.cyan.600/10)_50%,transparent_70%)]" />
 
           <div className="relative z-10 container mx-auto px-4 text-center">
-            <h1 className="text-6xl md:text-8xl font-bold mb-6 bg-gradient-to-r from-purple-400 via-cyan-400 to-purple-400 bg-clip-text text-transparent animate-gradient-x">
+            <h1 className="text-6xl md:text-8xl font-bold mb-6 bg-gradient-to-r from-purple-400 via-cyan-400 to-blue-400 bg-clip-text text-transparent animate-gradient-x">
               Welcome to MoonFile
             </h1>
             <h2 className="text-2xl md:text-3xl text-white mb-8 font-light">
@@ -93,7 +93,7 @@ const Index = () => {
               <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
                 Featured Categories
               </h2>
-              <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
                 Explore different types of games available on our decentralized platform
               </p>
             </div>
@@ -118,7 +118,7 @@ const Index = () => {
               <h2 className="text-4xl md:text-5xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
                 Featured Games
               </h2>
-              <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
+              <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
                 Check out some of the most popular games on our platform
               </p>
             </div>
@@ -143,7 +143,7 @@ const Index = () => {
               <h2 className="text-4xl md:text-5xl font-bold mb-6 text-white">
                 Developers: Publish your games on MoonFile
               </h2>
-              <p className="text-xl text-muted-foreground mb-8 leading-relaxed">
+              <p className="text-xl text-foreground/90 mb-8 leading-relaxed">
                 Join our decentralized gaming ecosystem by publishing your games as Nostr events.
                 Reach a global audience and leverage the power of decentralized technology.
               </p>
