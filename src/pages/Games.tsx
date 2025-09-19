@@ -52,7 +52,7 @@ const Games = () => {
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950">
+    <div className="min-h-screen bg-[#F9F9F9]">
       <Header />
 
       <main className="py-24 px-4">
@@ -61,7 +61,7 @@ const Games = () => {
             <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
               All Games
             </h1>
-            <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
               Discover and play games from our decentralized library
             </p>
           </div>

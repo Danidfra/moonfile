@@ -12,7 +12,7 @@ const Contact = () => {
   });
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-purple-950/30 to-slate-950">
+    <div className="min-h-screen bg-[#F9F9F9]">
       <Header />
 
       <main className="py-24 px-4">
@@ -21,15 +21,15 @@ const Contact = () => {
             <h1 className="text-5xl md:text-6xl font-bold mb-6 bg-gradient-to-r from-purple-400 to-cyan-400 bg-clip-text text-transparent">
               Get in Touch
             </h1>
-            <p className="text-xl text-foreground/90 max-w-2xl mx-auto">
+            <p className="text-xl text-gray-600 max-w-2xl mx-auto">
               Have questions about MoonFile? Want to contribute? We'd love to hear from you!
             </p>
           </div>
 
           <div className="grid md:grid-cols-2 gap-12">
             {/* Contact Form */}
-            <div className="bg-card/50 backdrop-blur-sm border border-purple-900/20 rounded-2xl p-8">
-              <h2 className="text-3xl font-bold mb-6 text-foreground">Send us a message</h2>
+            <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
+              <h2 className="text-3xl font-bold mb-6 text-gray-800">Send us a message</h2>
               <form className="space-y-6">
                 <div>
                   <label htmlFor="name" className="block text-sm font-medium text-foreground mb-2">
@@ -38,7 +38,7 @@ const Contact = () => {
                   <Input
                     id="name"
                     placeholder="Your name"
-                    className="bg-background border-purple-900/20 focus:border-purple-500"
+                    className="bg-white border-gray-300 focus:border-purple-500"
                   />
                 </div>
                 <div>
@@ -49,7 +49,7 @@ const Contact = () => {
                     id="email"
                     type="email"
                     placeholder="your@email.com"
-                    className="bg-background border-purple-900/20 focus:border-purple-500"
+                    className="bg-white border-gray-300 focus:border-purple-500"
                   />
                 </div>
                 <div>
@@ -59,7 +59,7 @@ const Contact = () => {
                   <Input
                     id="subject"
                     placeholder="What's this about?"
-                    className="bg-background border-purple-900/20 focus:border-purple-500"
+                    className="bg-white border-gray-300 focus:border-purple-500"
                   />
                 </div>
                 <div>
@@ -70,7 +70,7 @@ const Contact = () => {
                     id="message"
                     placeholder="Your message..."
                     rows={5}
-                    className="bg-background border-purple-900/20 focus:border-purple-500"
+                    className="bg-white border-gray-300 focus:border-purple-500"
                   />
                 </div>
                 <Button
@@ -84,16 +84,16 @@ const Contact = () => {
 
             {/* Contact Info */}
             <div className="space-y-8">
-              <div className="bg-card/50 backdrop-blur-sm border border-purple-900/20 rounded-2xl p-8">
-                <h2 className="text-3xl font-bold mb-6 text-foreground">Connect with us</h2>
+              <div className="bg-white border border-gray-200 rounded-2xl p-8 shadow-sm">
+                <h2 className="text-3xl font-bold mb-6 text-gray-800">Connect with us</h2>
                 <div className="space-y-6">
                   <div className="flex items-center space-x-4">
                     <div className="p-3 bg-purple-600/20 rounded-lg">
                       <Mail className="w-6 h-6 text-purple-400" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-foreground">Email</h3>
-                      <p className="text-muted-foreground">hello@moonfile.dev</p>
+                      <h3 className="font-semibold text-gray-800">Email</h3>
+                      <p className="text-gray-600">hello@moonfile.dev</p>
                     </div>
                   </div>
 
@@ -102,8 +102,8 @@ const Contact = () => {
                       <Github className="w-6 h-6 text-purple-400" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-foreground">GitHub</h3>
-                      <p className="text-muted-foreground">github.com/moonfile</p>
+                      <h3 className="font-semibold text-gray-800">GitHub</h3>
+                      <p className="text-gray-600">github.com/moonfile</p>
                     </div>
                   </div>
 
@@ -112,16 +112,16 @@ const Contact = () => {
                       <Twitter className="w-6 h-6 text-cyan-400" />
                     </div>
                     <div>
-                      <h3 className="font-semibold text-foreground">Nostr</h3>
-                      <p className="text-muted-foreground">@moonfile</p>
+                      <h3 className="font-semibold text-gray-800">Nostr</h3>
+                      <p className="text-gray-600">@moonfile</p>
                     </div>
                   </div>
                 </div>
               </div>
 
-              <div className="bg-gradient-to-br from-purple-900/20 to-cyan-900/20 rounded-2xl p-8 border border-purple-900/30">
-                <h3 className="text-xl font-bold mb-4 text-white">Join our community</h3>
-                <p className="text-muted-foreground mb-6">
+              <div className="bg-gradient-to-br from-purple-100 to-cyan-100 rounded-2xl p-8 border border-purple-200">
+                <h3 className="text-xl font-bold mb-4 text-gray-800">Join our community</h3>
+                <p className="text-gray-700 mb-6">
                   Be part of the decentralized gaming revolution. Join our Nostr community for updates,
                   discussions, and early access to new features.
                 </p>
