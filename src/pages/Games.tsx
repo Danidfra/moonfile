@@ -71,7 +71,7 @@ const Games = () => {
   return (
     <div className="min-h-screen bg-gradient-to-br from-black via-gray-900 to-black">
       <Header />
-      
+
       <main className="py-24 px-4">
         <div className="container mx-auto">
           <div className="text-center mb-16">
@@ -83,42 +83,57 @@ const Games = () => {
             </p>
           </div>
 
-          {/* Filter Section - Only show if we have games or not loading */}
-          {!loading && !error && allGames.length > 0 && (
-            <FilterSection onFiltersChange={setFilters} />
-          )}
-          
-          {/* Results Header */}
-          {!loading && !error && allGames.length > 0 && (
-            <div className="flex items-center justify-between mb-8">
-              <h2 className="text-2xl font-semibold text-white">
-                Games Found 
-                <span className="ml-2 text-lg text-gray-400">
-                  ({filteredGames.length} of {allGames.length})
-                </span>
-              </h2>
-            </div>
-          )}
-          
-          {/* Games Grid */}
-          {!loading && !error && filteredGames.length > 0 && (
-            <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
-              {filteredGames.map((game) => (
-                <GameCardNostr 
-                  key={game.id}
-                  game={game}
-                />
-              ))}
-            </div>
+          {/* Loading State */}
+          {loading && (
+            <GamesEmptyState loading={true} onRefresh={refetch} />
           )}
 
-          {/* Empty State */}
-          {!loading && !error && (allGames.length === 0 || filteredGames.length === 0) && (
-            <GamesEmptyState 
-              loading={loading}
-              error={error}
-              onRefresh={refetch}
-            />
+          {/* Error State */}
+          {error && (
+            <GamesEmptyState error={error} onRefresh={refetch} />
+          )}
+
+          {/* Content - Only show when not loading and no error */}
+          {!loading && !error && (
+            <>
+              {/* Filter Section - Only show if we have games */}
+              {allGames.length > 0 && (
+                <FilterSection onFiltersChange={setFilters} />
+              )}
+
+              {/* Results Header - Only show if we have games */}
+              {allGames.length > 0 && (
+                <div className="flex items-center justify-between mb-8">
+                  <h2 className="text-2xl font-semibold text-white">
+                    Games Found
+                    <span className="ml-2 text-lg text-gray-400">
+                      ({filteredGames.length} of {allGames.length})
+                    </span>
+                  </h2>
+                </div>
+              )}
+
+              {/* Games Grid - Only show if we have filtered games */}
+              {filteredGames.length > 0 && (
+                <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-6">
+                  {filteredGames.map((game) => (
+                    <GameCardNostr
+                      key={game.id}
+                      game={game}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Empty State - No games found or no games at all */}
+              {allGames.length === 0 || filteredGames.length === 0 ? (
+                <GamesEmptyState
+                  loading={false}
+                  error={null}
+                  onRefresh={refetch}
+                />
+              ) : null}
+            </>
           )}
         </div>
       </main>

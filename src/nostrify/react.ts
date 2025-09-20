@@ -42,10 +42,10 @@ export function NostrProvider({ children }: NostrProviderProps) {
 
       // Create pool with relays
       const pool = new NPool({ relays });
-      
+
       // Connect to relays
       await pool.connect();
-      
+
       setNostr(pool);
       setIsConnected(true);
     } catch (error) {
@@ -77,7 +77,7 @@ export function NostrProvider({ children }: NostrProviderProps) {
     };
   }, []);
 
-  const value: NostrContextType = {
+  const value = {
     nostr,
     isConnected,
     signer,
