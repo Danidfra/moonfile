@@ -47,7 +47,7 @@ export function GamesEmptyState({ loading = false, error = null, onRefresh }: Ga
         <div className="w-16 h-16 mx-auto mb-4 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
         <h3 className="text-2xl font-semibold text-white mb-3">Loading games...</h3>
         <p className="text-gray-400 max-w-md mx-auto">
-          Fetching kind:31985 events from relays
+          Fetching games from relays
         </p>
       </div>
     );
