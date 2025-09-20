@@ -68,7 +68,6 @@ const Index = () => {
         {/* Hero Section */}
         <section className="relative min-h-[80vh] flex items-center justify-center overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-purple-900/10 via-cyan-900/10 to-blue-900/10" />
-          <div className="absolute inset-0 bg-[radial-gradient(ellipse_at_center,theme(colors.purple.600/8)_0%,theme(colors.cyan.600/5)_50%,transparent_70%)]" />
 
           <div className="container mx-auto px-4 text-center relative z-10">
             <div className="mb-8">
