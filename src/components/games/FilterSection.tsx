@@ -3,23 +3,23 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue
 } from "@/components/ui/select";
-import { 
-  Collapsible, 
-  CollapsibleContent, 
-  CollapsibleTrigger 
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger
 } from "@/components/ui/collapsible";
-import { 
-  Filter, 
-  X, 
-  ChevronDown, 
-  Star, 
+import {
+  Filter,
+  X,
+  ChevronDown,
+  Star,
   Search,
   Gamepad2,
   Users,
@@ -46,29 +46,36 @@ export interface GameFilters {
 }
 
 const GENRES = [
-  "Puzzle", "Platformer", "Shooter", "Adventure", "Strategy", "RPG", 
-  "Racing", "Sports", "Fighting", "Simulation", "Casino", "Card"
+  "Puzzle", "Platformer", "Shooter", "Adventure", "Strategy", "RPG",
+  "Racing", "Sports", "Fighting", "Simulation", "Casino", "Card",
+  "Action", "Rhythm", "Board Game", "Card Game", "Casual"
 ];
 
 const MODES = [
-  "Solo", "Bot", "PvP", "Co-op", "Multiplayer", "Local Multiplayer", 
-  "Online Multiplayer", "Turn-based", "Real-time"
+  "Solo", "Bot", "PvP", "Co-op", "Multiplayer", "Local Multiplayer",
+  "Online Multiplayer", "Turn-based", "Real-time", "Battle Royale",
+  "Deathmatch", "Capture the Flag", "King of the Hill"
 ];
 
 const STATUSES = [
-  "Released", "Beta", "Alpha", "Prototype", "Early Access", "Cancelled"
+  "Released", "Beta", "Alpha", "Prototype", "Early Access", "Cancelled", "Deprecated"
 ];
 
 const PLATFORMS = [
-  "NES ROM", "HTML5", "SNES", "Game Boy", "Game Boy Advance", 
-  "Genesis", "PlayStation", "PC", "Mobile", "WebGL", "Flash"
+  "NES ROM", "HTML5", "SNES", "Game Boy", "Game Boy Advance",
+  "Genesis", "PlayStation", "PC", "Mobile", "WebGL", "Flash",
+  "Sega Master System", "Nintendo 64", "PlayStation 2", "Xbox", "Dreamcast",
+  "Atari 2600", "Commodore 64", "Amiga", "MS-DOS"
 ];
 
 const TAGS = [
-  "retro", "8-bit", "sokoban", "homebrew", "2D", "3D", "pixel-art",
+  "retro", "8-bit", "16-bit", "sokoban", "homebrew", "2D", "3D", "pixel-art",
   "roguelike", "metroidvania", "bullet-hell", "puzzle-platformer",
   "open-world", "text-based", "graphical", "multiplayer", "singleplayer",
-  "competitive", "cooperative", "educational", "artistic", "experimental"
+  "competitive", "cooperative", "educational", "artistic", "experimental",
+  "indie", "commercial", "freeware", "shareware", "open-source",
+  "procedural", "hand-drawn", "vector", "raster", "isometric",
+  "cyberpunk", "fantasy", "sci-fi", "horror", "comedy", "drama"
 ];
 
 export function FilterSection({ onFiltersChange }: FilterSectionProps) {
@@ -134,14 +141,14 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
   };
 
   return (
-    <Card className="border-gray-200 bg-white shadow-sm mb-8">
+    <Card className="border-gray-800 bg-gray-900 shadow-sm mb-8">
       <CardHeader className="pb-4">
         <div className="flex items-center justify-between">
-          <CardTitle className="flex items-center gap-2 text-gray-800">
+          <CardTitle className="flex items-center gap-2 text-white">
             <Filter className="w-5 h-5" />
             Filter Games
             {hasActiveFilters && (
-              <Badge variant="secondary" className="ml-2">
+              <Badge variant="secondary" className="ml-2 bg-gray-800 text-gray-300 border-gray-700">
                 {getActiveFilterCount()} active
               </Badge>
             )}
@@ -152,7 +159,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                 variant="outline"
                 size="sm"
                 onClick={clearAllFilters}
-                className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                className="text-gray-400 border-gray-700 hover:bg-gray-800"
               >
                 <X className="w-4 h-4 mr-1" />
                 Clear All
@@ -163,7 +170,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                 <Button
                   variant="outline"
                   size="sm"
-                  className="text-gray-600 border-gray-300 hover:bg-gray-50"
+                  className="text-gray-400 border-gray-700 hover:bg-gray-800"
                 >
                   <ChevronDown className={`w-4 h-4 transition-transform ${isExpanded ? 'rotate-180' : ''}`} />
                 </Button>
@@ -171,7 +178,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
             </Collapsible>
           </div>
         </div>
-        
+
         {/* Search Bar */}
         <div className="relative mt-4">
           <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-gray-400" />
@@ -179,7 +186,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
             placeholder="Search games..."
             value={filters.search}
             onChange={(e) => updateFilter('search', e.target.value)}
-            className="pl-10 bg-white border-gray-300 focus:border-purple-500"
+            className="pl-10 bg-gray-800 border-gray-700 focus:border-purple-500 text-white placeholder:text-gray-500"
           />
         </div>
       </CardHeader>
@@ -188,12 +195,12 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
         <CollapsibleContent>
           <CardContent className="pt-0">
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              
+
               {/* Genre Filter */}
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Gamepad2 className="w-4 h-4 text-purple-600" />
-                  <h3 className="font-semibold text-gray-800">Genre</h3>
+                  <h3 className="font-semibold text-white">Genre</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {GENRES.map((genre) => (
@@ -203,7 +210,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                       className={`cursor-pointer transition-colors ${
                         filters.genres.includes(genre)
                           ? "bg-purple-600 text-white hover:bg-purple-700"
-                          : "border-gray-300 text-gray-600 hover:bg-gray-50"
+                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
                       }`}
                       onClick={() => toggleArrayFilter('genres', genre)}
                     >
@@ -217,7 +224,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Users className="w-4 h-4 text-cyan-600" />
-                  <h3 className="font-semibold text-gray-800">Mode</h3>
+                  <h3 className="font-semibold text-white">Mode</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {MODES.map((mode) => (
@@ -241,7 +248,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Calendar className="w-4 h-4 text-blue-600" />
-                  <h3 className="font-semibold text-gray-800">Status</h3>
+                  <h3 className="font-semibold text-white">Status</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {STATUSES.map((status) => (
@@ -265,7 +272,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
               <div>
                 <div className="flex items-center gap-2 mb-3">
                   <Monitor className="w-4 h-4 text-green-600" />
-                  <h3 className="font-semibold text-gray-800">Platform</h3>
+                  <h3 className="font-semibold text-white">Platform</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {PLATFORMS.map((platform) => (
@@ -289,7 +296,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
               <div className="md:col-span-2">
                 <div className="flex items-center gap-2 mb-3">
                   <Tag className="w-4 h-4 text-orange-600" />
-                  <h3 className="font-semibold text-gray-800">Tags</h3>
+                  <h3 className="font-semibold text-white">Tags</h3>
                 </div>
                 <div className="flex flex-wrap gap-2">
                   {TAGS.map((tag) => (
@@ -314,26 +321,26 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <User className="w-4 h-4 text-indigo-600" />
-                    <h3 className="font-semibold text-gray-800">Author</h3>
+                    <h3 className="font-semibold text-white">Author</h3>
                   </div>
                   <Input
                     placeholder="Developer name or npub..."
                     value={filters.author}
                     onChange={(e) => updateFilter('author', e.target.value)}
-                    className="bg-white border-gray-300 focus:border-purple-500"
+                    className="bg-gray-800 border-gray-700 focus:border-purple-500 text-white placeholder:text-gray-500"
                   />
                 </div>
 
                 <div>
                   <div className="flex items-center gap-2 mb-3">
                     <Award className="w-4 h-4 text-yellow-600" />
-                    <h3 className="font-semibold text-gray-800">Minimum Rating</h3>
+                    <h3 className="font-semibold text-white">Minimum Rating</h3>
                   </div>
-                  <Select 
-                    value={filters.rating.toString()} 
+                  <Select
+                    value={filters.rating.toString()}
                     onValueChange={(value) => updateFilter('rating', parseInt(value))}
                   >
-                    <SelectTrigger className="bg-white border-gray-300 focus:border-purple-500">
+                    <SelectTrigger className="bg-gray-800 border-gray-700 focus:border-purple-500 text-white">
                       <SelectValue placeholder="Select rating" />
                     </SelectTrigger>
                     <SelectContent>
