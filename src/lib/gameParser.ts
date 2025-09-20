@@ -18,7 +18,7 @@ export function multiTagValues(tags: string[][], key: string): string[] {
 export function parseGame(e: NostrEvent): Game31985 | null {
   const d = firstTagValue(e.tags, "d");
   const name = firstTagValue(e.tags, "name");
-  
+
   if (!d || !name) return null;
 
   const size = firstTagValue(e.tags, "size");
@@ -66,18 +66,18 @@ export function parseGame(e: NostrEvent): Game31985 | null {
 
 export function mergeByD(events: NostrEvent[]): Game31985[] {
   const map = new Map<string, { e: NostrEvent, g: Game31985 }>();
-  
+
   for (const e of events) {
     if (e.kind !== 31985) continue;
-    
+
     const g = parseGame(e);
     if (!g) continue;
-    
+
     const prev = map.get(g.id);
     if (!prev || e.created_at > prev.e.created_at) {
       map.set(g.id, { e, g });
     }
   }
-  
+
   return Array.from(map.values()).map(x => x.g);
 }

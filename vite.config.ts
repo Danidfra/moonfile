@@ -26,6 +26,7 @@ export default defineConfig(() => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      "@std/encoding": "@jsr/std__encoding",
     },
   },
 }));
