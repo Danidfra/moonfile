@@ -15,6 +15,11 @@ export interface FCEUXConfig {
   onAudioSample?: (left: number, right: number) => void;
 }
 
+// NES constants
+const NES_W = 256;
+const NES_H = 240;
+const N_PIX = NES_W * NES_H;
+
 export class FCEUXEmulator {
   private core: any = null;
   private ready = false;
@@ -29,6 +34,7 @@ export class FCEUXEmulator {
   private running = false;
   private frameCount = 0;
   private memory: WebAssembly.Memory | null = null;
+  private warnedNoPalette = false;
 
   constructor() {
     console.log('[FCEUXEmulator] constructing FCEUX emulator');
@@ -43,32 +49,8 @@ export class FCEUXEmulator {
     }
 
     this.canvas = canvas;
-    this.ctx = canvas.getContext('2d', { alpha: false });
     this.config = opts;
-
-    if (this.ctx) {
-      // Set canvas attributes directly (not just CSS)
-      const dpr = Math.min(window.devicePixelRatio || 1, 2);
-      const scale = 2; // 2x scale for better visibility
-      canvas.width = 256 * dpr * scale;
-      canvas.height = 240 * dpr * scale;
-
-      // CSS sizing for layout
-      canvas.style.width = `${256 * scale}px`;
-      canvas.style.height = `${240 * scale}px`;
-
-      // Set up transform and create ImageData
-      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      this.ctx.imageSmoothingEnabled = false;
-
-      // Create single ImageData for frame buffer
-      this.imageData = this.ctx.createImageData(256, 240);
-
-      // Log diagnostics
-      console.log('[FCEUX] canvas attr size', canvas.width, canvas.height, 'dpr', dpr, 'scale', scale);
-      console.log('[FCEUX] CSS size', canvas.style.width, canvas.style.height);
-      console.log('[FCEUX] imageData', this.imageData.width, this.imageData.height);
-    }
+    this.ensureCanvas();
 
     // Initialize core
     try {
@@ -143,6 +125,27 @@ export class FCEUXEmulator {
       console.error('[FCEUXEmulator] Core initialization failed:', error);
       throw error;
     }
+  }
+
+  private ensureCanvas() {
+    if (!this.canvas) return;
+
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+    this.canvas.width = NES_W * 2 * dpr;
+    this.canvas.height = NES_H * 2 * dpr;
+    this.canvas.style.width = `${NES_W * 2}px`;
+    this.canvas.style.height = `${NES_H * 2}px`;
+
+    this.ctx = this.canvas.getContext('2d', { alpha: false })!;
+    this.ctx.imageSmoothingEnabled = false;
+    this.imageData = this.ctx.createImageData(NES_W, NES_H); // RGBA target
+
+    console.log('[FCEUX] Canvas setup:', {
+      canvasSize: `${this.canvas.width}x${this.canvas.height}`,
+      cssSize: `${this.canvas.style.width}x${this.canvas.style.height}`,
+      dpr: dpr,
+      imageData: `${this.imageData.width}x${this.imageData.height}`
+    });
   }
 
   private initAudio(): void {
@@ -221,48 +224,43 @@ export class FCEUXEmulator {
   }
 
   play(): void {
-    console.log('[FCEUXEmulator] play() called, running:', this.running, 'ready:', this.ready);
+    if (this.running) return;
+
+    console.log('[FCEUXEmulator] play() called, ready:', this.ready);
 
     if (!this.ready || !this.core) {
       console.error('[FCEUXEmulator] Emulator not ready');
       return;
     }
 
-    if (!this.running) {
-      this.running = true;
-      this.core.setRunning(true);
+    this.running = true;
+    this.core.setRunning?.(true);
 
-      console.log('[FCEUXEmulator] Starting game loop...');
+    console.log('[FCEUXEmulator] Starting game loop...');
 
-      const loop = () => {
-        if (!this.running) {
-          console.log('[FCEUXEmulator] Game loop stopped');
-          return;
-        }
+    const loop = () => {
+      if (!this.running) return;
 
-        this.core.frame();
-        this.blitFrame(); // writes framebuffer to canvas
-        this.rafId = requestAnimationFrame(loop);
-      };
+      this.core.frame();
+      this.blitFrame();
+      this.rafId = requestAnimationFrame(loop);
+    };
 
-      if (!this.rafId) {
-        this.rafId = requestAnimationFrame(loop);
-      }
+    this.rafId = requestAnimationFrame(loop);
 
-      // Resume audio context if suspended (autoplay restriction)
-      if (this.audioContext && this.audioContext.state === 'suspended') {
-        this.audioContext.resume();
-      }
-
-      console.log('[FCEUXEmulator] Emulator started');
+    // Resume audio context if suspended (autoplay restriction)
+    if (this.audioContext && this.audioContext.state === 'suspended') {
+      this.audioContext.resume();
     }
+
+    console.log('[FCEUXEmulator] Emulator started');
   }
 
   pause(): void {
     console.log('[FCEUXEmulator] pause() called, running:', this.running);
 
     this.running = false;
-    this.core.setRunning(false);
+    this.core.setRunning?.(false);
 
     if (this.rafId) {
       cancelAnimationFrame(this.rafId);
@@ -273,6 +271,7 @@ export class FCEUXEmulator {
   }
 
   reset(): void {
+    this.warnedNoPalette = false; // Reset palette warning on reset
     if (this.core && typeof this.core.reset === 'function') {
       this.core.reset();
     } else {
@@ -282,7 +281,8 @@ export class FCEUXEmulator {
 
   stop(): void {
     this.running = false;
-    this.core.setRunning(false);
+    this.warnedNoPalette = false; // Reset palette warning on stop
+    this.core.setRunning?.(false);
 
     if (this.rafId) {
       cancelAnimationFrame(this.rafId);
@@ -298,31 +298,63 @@ export class FCEUXEmulator {
     }
 
     try {
-      // Get frame buffer from NES core (RGB format)
-      const src = this.core.getFrameBuffer(); // Uint8Array length 256*240*3
-      if (!src || src.length !== 256 * 240 * 3) {
-        console.warn('[FCEUXEmulator] Invalid frame buffer, length:', src?.length);
+      const src = this.core.getFrameBuffer();
+      const dst = this.imageData.data;
+
+      if (!src) {
+        console.warn('[FCEUXEmulator] No frame buffer available');
         return;
       }
 
-      const w = 256, h = 240;
-      const dst = this.imageData.data; // Uint8ClampedArray length 256*240*4
+      // Handle different framebuffer formats
+      if (src.length === N_PIX * 4) {
+        // RGBA32 - direct copy
+        dst.set(src);
+      } else if (src.length === N_PIX * 3) {
+        // RGB24 -> RGBA conversion
+        let si = 0, di = 0;
+        for (let i = 0; i < N_PIX; i++) {
+          dst[di++] = src[si++]; // R
+          dst[di++] = src[si++]; // G
+          dst[di++] = src[si++]; // B
+          dst[di++] = 255;       // A
+        }
+      } else if (src.length === N_PIX) {
+        // Indexed8 -> RGBA via palette
+        const pal = this.core.getPalette?.();
+        if (!pal) {
+          if (!this.warnedNoPalette) {
+            console.warn('[NES] Indexed frame but no palette');
+            this.warnedNoPalette = true;
+          }
+          return;
+        }
 
-      let si = 0, di = 0;
-      for (let i = 0; i < w * h; i++) {
-        dst[di++] = src[si++];   // R
-        dst[di++] = src[si++];   // G
-        dst[di++] = src[si++];   // B
-        dst[di++] = 255;         // A
+        const hasA = pal.length === 256 * 4;
+        let di = 0;
+        for (let i = 0; i < N_PIX; i++) {
+          const idx = src[i] & 0xff;
+          const pi = hasA ? idx * 4 : idx * 3;
+          dst[di++] = pal[pi + 0];     // R
+          dst[di++] = pal[pi + 1];     // G
+          dst[di++] = pal[pi + 2];     // B
+          dst[di++] = hasA ? pal[pi + 3] : 255; // A
+        }
+      } else {
+        console.warn('[NES] Unexpected framebuffer size:', src.length, '(expected', N_PIX, N_PIX * 3, 'or', N_PIX * 4 + ')');
+        return;
       }
 
-      // Always draw putImageData at (0,0). Don't scale the ImageData; scaling is via canvas pixel size.
+      // Always draw at native resolution (0,0)
       this.ctx.putImageData(this.imageData, 0, 0);
 
-      // Log every ~60 frames for debugging
+      // Log success every ~60 frames
       this.frameCount++;
       if (this.frameCount % 60 === 0) {
-        console.log('[FCEUXEmulator] blit frame #' + this.frameCount);
+        console.log('[FCEUX] blit ok #' + this.frameCount + ' (format: ' +
+          (src.length === N_PIX * 4 ? 'RGBA32' :
+           src.length === N_PIX * 3 ? 'RGB24' :
+           src.length === N_PIX ? 'Indexed8' : 'Unknown') + ')');
       }
     } catch (error) {
       console.error('[FCEUXEmulator] blitFrame error:', error);
@@ -424,6 +456,7 @@ export class FCEUXEmulator {
     this.memory = null;
     this.ready = false;
     this.running = false;
+    this.warnedNoPalette = false;
 
     console.log('[FCEUXEmulator] Emulator disposed');
   }
