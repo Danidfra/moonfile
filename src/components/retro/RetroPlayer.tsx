@@ -115,7 +115,7 @@ export function RetroPlayer({
     return isValid;
   };
 
-  // Initialize emulator
+  // Initialize emulator (runs once)
   useEffect(() => {
     if (!canvasRef.current) return;
 
@@ -127,7 +127,7 @@ export function RetroPlayer({
       });
 
       emulatorRef.current = emulator;
-      console.log("[Retro] Emulator initialized successfully");
+      console.log("[Retro] Emulator initialized, emulatorReady=true");
       setEmulatorReady(true); // Set emulator ready flag
 
       // Set up canvas click to enable audio
@@ -148,6 +148,13 @@ export function RetroPlayer({
       console.error("[Retro] Emulator error:", err);
       setState('error');
       setError('emulator-error');
+    }
+  }, []); // Run only once, not on audioEnabled changes
+
+  // Handle audio changes separately
+  useEffect(() => {
+    if (emulatorRef.current) {
+      emulatorRef.current.toggleAudio(audioEnabled);
     }
   }, [audioEnabled]);
 
@@ -858,166 +865,169 @@ export function RetroPlayer({
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-0">
                   <div className="relative aspect-video bg-black flex items-center justify-center">
+                    {/* Always-on canvas */}
+                    <canvas
+                      ref={canvasRef}
+                      className="w-full h-full max-w-4xl mx-auto"
+                      style={{ imageRendering: 'pixelated' }}
+                      width={256}
+                      height={240}
+                    />
+
+                    {/* Loading phases overlay */}
                     {(state === 'idle' || state === 'fetching' || state === 'decoding' || state === 'validating' || state === 'loading-emulator') && (
-                      <div className="text-center">
-                        <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
-                        <p className="text-gray-400">{getStateMessage()}</p>
-                        {state === 'fetching' && (
-                          <p className="text-gray-500 text-sm mt-2">
-                            {romSource.source === 'nostr' ? 'Fetching from Nostr event...' : 'Downloading ROM file...'}
-                          </p>
-                        )}
-                        {state === 'decoding' && (
-                          <p className="text-gray-500 text-sm mt-2">
-                            {romSource.source === 'nostr' ? 'Decoding from Nostr event...' : 'Processing ROM data...'}
-                          </p>
-                        )}
-                        {state === 'validating' && (
-                          <p className="text-gray-500 text-sm mt-2">
-                            Validating ROM integrity...
-                          </p>
-                        )}
-                        {state === 'loading-emulator' && (
-                          <p className="text-gray-500 text-sm mt-2">
-                            Loading ROM into emulator...
-                          </p>
-                        )}
-
-                        {/* Debug info during loading */}
-                        {process.env.NODE_ENV === 'development' && (
-                          <div className="mt-4 text-xs text-gray-600 bg-gray-800 rounded p-2 text-left">
-                            <div>Phase: {debugInfo.currentPhase}</div>
-                            {debugInfo.eventId && <div>Event: {debugInfo.eventId.substring(0, 16)}...</div>}
-                            {debugInfo.decodedSize && <div>Size: {Math.round(debugInfo.decodedSize / 1024)}KB</div>}
-                          </div>
-                        )}
-                      </div>
-                    )}
-
-                    {state === 'error' && (
-                      <div className="text-center p-8">
-                        <div className="text-red-400 text-6xl mb-4">⚠️</div>
-                        <h3 className="text-xl font-semibold text-white mb-2">Error</h3>
-                        <p className="text-gray-400 mb-4">{getErrorMessage()}</p>
-
-                        {/* Show validation details if available */}
-                        {validationResult && (
-                          <div className="bg-gray-800 rounded-lg p-4 mb-4 text-left">
-                            <h4 className="text-sm font-semibold text-white mb-2">Validation Details</h4>
-                            <div className="text-xs text-gray-400 space-y-1">
-                              <div>Encoding: {validationResult.encoding}</div>
-                              <div>Compression: {validationResult.compression}</div>
-                              {validationResult.actualSize && (
-                                <div>Size: {validationResult.actualSize} bytes</div>
-                              )}
-                              {validationResult.expectedSize && (
-                                <div>Expected: {validationResult.expectedSize} bytes</div>
-                              )}
-                              {validationResult.shortHash && (
-                                <div>Hash: {validationResult.shortHash}...</div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        {/* Debug Panel */}
-                        {(process.env.NODE_ENV === 'development' || window.location.search.includes('debug=1')) && (
-                          <div className="bg-gray-800 rounded-lg p-4 mb-4 text-left">
-                            <h4 className="text-sm font-semibold text-white mb-2">Debug Information</h4>
-                            <div className="text-xs text-gray-400 space-y-1">
-                              <div><strong>Current Phase:</strong> {debugInfo.currentPhase}</div>
-                              {debugInfo.lastError && (
-                                <div><strong>Last Error:</strong> {debugInfo.lastError}</div>
-                              )}
-                              {debugInfo.eventId && (
-                                <div><strong>Event ID:</strong> {debugInfo.eventId}</div>
-                              )}
-                              {debugInfo.dTag && (
-                                <div><strong>D-Tag:</strong> {debugInfo.dTag}</div>
-                              )}
-                              {debugInfo.parsedTags && (
-                                <div className="mt-2">
-                                  <div><strong>Parsed Tags:</strong></div>
-                                  <div className="ml-2">
-                                    {Object.entries(debugInfo.parsedTags).map(([key, value]) => (
-                                      <div key={key}>  {key}: {value}</div>
-                                    ))}
-                                  </div>
-                                </div>
-                              )}
-                              {debugInfo.decodedSize && (
-                                <div><strong>Decoded Size:</strong> {debugInfo.decodedSize} bytes</div>
-                              )}
-                              {debugInfo.phaseTimes && Object.keys(debugInfo.phaseTimes).length > 0 && (
-                                <div className="mt-2">
-                                  <div><strong>Phase Timings:</strong></div>
-                                  <div className="ml-2">
-                                    {Object.entries(debugInfo.phaseTimes).map(([phase, time]) => {
-                                      const elapsed = time - (debugInfo.startTime || time);
-                                      return <div key={phase}>  {phase}: t+{elapsed}ms</div>;
-                                    })}
-                                  </div>
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-
-                        <div className="space-y-2">
-                          <Button onClick={handleRetry} className="w-full">
-                            <RefreshCw className="w-4 h-4 mr-2" />
-                            Retry
-                          </Button>
-
-                          {/* Test ROM button - helps isolate emulator issues */}
-                          <Button onClick={handleLoadTestROM} variant="outline" className="w-full">
-                            <Play className="w-4 h-4 mr-2" />
-                            Run Test ROM
-                          </Button>
-
-                          {nostrEvent && (
-                            <Button onClick={handleCopyEventId} variant="outline" className="w-full">
-                              <Copy className="w-4 h-4 mr-2" />
-                              Copy Event ID
-                            </Button>
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/80">
+                        <div className="text-center">
+                          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
+                          <p className="text-gray-400">{getStateMessage()}</p>
+                          {state === 'fetching' && (
+                            <p className="text-gray-500 text-sm mt-2">
+                              {romSource.source === 'nostr' ? 'Fetching from Nostr event...' : 'Downloading ROM file...'}
+                            </p>
                           )}
-                          <Button onClick={onBack} variant="outline" className="w-full">
-                            Go Back
-                          </Button>
+                          {state === 'decoding' && (
+                            <p className="text-gray-500 text-sm mt-2">
+                              {romSource.source === 'nostr' ? 'Decoding from Nostr event...' : 'Processing ROM data...'}
+                            </p>
+                          )}
+                          {state === 'validating' && (
+                            <p className="text-gray-500 text-sm mt-2">
+                              Validating ROM integrity...
+                            </p>
+                          )}
+                          {state === 'loading-emulator' && (
+                            <p className="text-gray-500 text-sm mt-2">
+                              Loading ROM into emulator...
+                            </p>
+                          )}
+
+                          {/* Debug info during loading */}
+                          {process.env.NODE_ENV === 'development' && (
+                            <div className="mt-4 text-xs text-gray-600 bg-gray-800 rounded p-2 text-left">
+                              <div>Phase: {debugInfo.currentPhase}</div>
+                              {debugInfo.eventId && <div>Event: {debugInfo.eventId.substring(0, 16)}...</div>}
+                              {debugInfo.decodedSize && <div>Size: {Math.round(debugInfo.decodedSize / 1024)}KB</div>}
+                            </div>
+                          )}
                         </div>
                       </div>
                     )}
 
-                    {(state === 'ready' || state === 'running' || state === 'paused') && (
-                      <>
-                        <canvas
-                          ref={canvasRef}
-                          className="w-full h-full max-w-4xl mx-auto"
-                          style={{ imageRendering: 'pixelated' }}
-                          width={256}
-                          height={240}
-                        />
+                    {/* Error overlay */}
+                    {state === 'error' && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/90">
+                        <div className="text-center p-8 max-w-md">
+                          <div className="text-red-400 text-6xl mb-4">⚠️</div>
+                          <h3 className="text-xl font-semibold text-white mb-2">Error</h3>
+                          <p className="text-gray-400 mb-4">{getErrorMessage()}</p>
 
-                        {/* Audio prompt overlay */}
-                        {audioEnabled && state === 'ready' && (
-                          <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                            <Card className="border-purple-500 bg-purple-900/20">
-                              <CardContent className="p-6 text-center">
-                                <Volume2 className="w-12 h-12 text-purple-400 mx-auto mb-4" />
-                                <h3 className="text-lg font-semibold text-white mb-2">Tap to Enable Audio</h3>
-                                <p className="text-gray-400 text-sm">
-                                  Click the game area to enable sound (required by browsers)
-                                </p>
-                                {romSource.source === 'nostr' && (
-                                  <p className="text-gray-500 text-xs mt-2">
-                                    ROM loaded from Nostr event
-                                  </p>
+                          {/* Show validation details if available */}
+                          {validationResult && (
+                            <div className="bg-gray-800 rounded-lg p-4 mb-4 text-left">
+                              <h4 className="text-sm font-semibold text-white mb-2">Validation Details</h4>
+                              <div className="text-xs text-gray-400 space-y-1">
+                                <div>Encoding: {validationResult.encoding}</div>
+                                <div>Compression: {validationResult.compression}</div>
+                                {validationResult.actualSize && (
+                                  <div>Size: {validationResult.actualSize} bytes</div>
                                 )}
-                              </CardContent>
-                            </Card>
+                                {validationResult.expectedSize && (
+                                  <div>Expected: {validationResult.expectedSize} bytes</div>
+                                )}
+                                {validationResult.shortHash && (
+                                  <div>Hash: {validationResult.shortHash}...</div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          {/* Debug Panel */}
+                          {(process.env.NODE_ENV === 'development' || window.location.search.includes('debug=1')) && (
+                            <div className="bg-gray-800 rounded-lg p-4 mb-4 text-left">
+                              <h4 className="text-sm font-semibold text-white mb-2">Debug Information</h4>
+                              <div className="text-xs text-gray-400 space-y-1">
+                                <div><strong>Current Phase:</strong> {debugInfo.currentPhase}</div>
+                                {debugInfo.lastError && (
+                                  <div><strong>Last Error:</strong> {debugInfo.lastError}</div>
+                                )}
+                                {debugInfo.eventId && (
+                                  <div><strong>Event ID:</strong> {debugInfo.eventId}</div>
+                                )}
+                                {debugInfo.dTag && (
+                                  <div><strong>D-Tag:</strong> {debugInfo.dTag}</div>
+                                )}
+                                {debugInfo.parsedTags && (
+                                  <div className="mt-2">
+                                    <div><strong>Parsed Tags:</strong></div>
+                                    <div className="ml-2">
+                                      {Object.entries(debugInfo.parsedTags).map(([key, value]) => (
+                                        <div key={key}>  {key}: {value}</div>
+                                      ))}
+                                    </div>
+                                  </div>
+                                )}
+                                {debugInfo.decodedSize && (
+                                  <div><strong>Decoded Size:</strong> {debugInfo.decodedSize} bytes</div>
+                                )}
+                                {debugInfo.phaseTimes && Object.keys(debugInfo.phaseTimes).length > 0 && (
+                                  <div className="mt-2">
+                                    <div><strong>Phase Timings:</strong></div>
+                                    <div className="ml-2">
+                                      {Object.entries(debugInfo.phaseTimes).map(([phase, time]) => {
+                                        const elapsed = time - (debugInfo.startTime || time);
+                                        return <div key={phase}>  {phase}: t+{elapsed}ms</div>;
+                                      })}
+                                    </div>
+                                  </div>
+                                )}
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="space-y-2">
+                            <Button onClick={handleRetry} className="w-full">
+                              <RefreshCw className="w-4 h-4 mr-2" />
+                              Retry
+                            </Button>
+
+                            {/* Test ROM button - helps isolate emulator issues */}
+                            <Button onClick={handleLoadTestROM} variant="outline" className="w-full">
+                              <Play className="w-4 h-4 mr-2" />
+                              Run Test ROM
+                            </Button>
+
+                            {nostrEvent && (
+                              <Button onClick={handleCopyEventId} variant="outline" className="w-full">
+                                <Copy className="w-4 h-4 mr-2" />
+                                Copy Event ID
+                              </Button>
+                            )}
+                            <Button onClick={onBack} variant="outline" className="w-full">
+                              Go Back
+                            </Button>
                           </div>
-                        )}
-                      </>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Audio prompt overlay */}
+                    {audioEnabled && state === 'ready' && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-black/50">
+                        <Card className="border-purple-500 bg-purple-900/20">
+                          <CardContent className="p-6 text-center">
+                            <Volume2 className="w-12 h-12 text-purple-400 mx-auto mb-4" />
+                            <h3 className="text-lg font-semibold text-white mb-2">Tap to Enable Audio</h3>
+                            <p className="text-gray-400 text-sm">
+                              Click the game area to enable sound (required by browsers)
+                            </p>
+                            {romSource.source === 'nostr' && (
+                              <p className="text-gray-500 text-xs mt-2">
+                                ROM loaded from Nostr event
+                              </p>
+                            )}
+                          </CardContent>
+                        </Card>
+                      </div>
                     )}
                   </div>
                 </CardContent>
