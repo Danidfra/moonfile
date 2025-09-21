@@ -34,6 +34,7 @@ export function RetroPlayer({
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [showMobileControls, setShowMobileControls] = useState(false);
+  const [emulatorReady, setEmulatorReady] = useState(false);
   const [controls, setControls] = useState<NESControls>({
     right: false,
     left: false,
@@ -127,6 +128,7 @@ export function RetroPlayer({
 
       emulatorRef.current = emulator;
       console.log("[Retro] Emulator initialized successfully");
+      setEmulatorReady(true); // Set emulator ready flag
 
       // Set up canvas click to enable audio
       const handleCanvasClick = () => {
@@ -140,6 +142,7 @@ export function RetroPlayer({
       return () => {
         canvasRef.current?.removeEventListener('click', handleCanvasClick);
         emulator.dispose();
+        setEmulatorReady(false); // Reset emulator ready flag
       };
     } catch (err) {
       console.error("[Retro] Emulator error:", err);
@@ -176,7 +179,18 @@ export function RetroPlayer({
   // Load ROM
   useEffect(() => {
     const loadROM = async () => {
-      if (!emulatorRef.current) return;
+      // Extra diagnostics at very top
+      console.log("[Retro] loadROM effect fired", {
+        emulatorReady,
+        hasEmu: !!emulatorRef.current,
+        source: romSource.source
+      });
+
+      if (!emulatorReady) {
+        console.log("[Retro] Skipping load — emulator not ready yet");
+        console.log("[Retro] emulatorReady:", emulatorReady, "has emulator?", !!emulatorRef.current);
+        return;
+      }
 
       try {
         // Reset debug info
@@ -193,7 +207,9 @@ export function RetroPlayer({
 
         let romData: Uint8Array;
 
+        // Kick state out of idle as soon as loading starts
         if (romSource.source === 'nostr') {
+          setState('decoding');
           // Log tags before decoding
           console.log("[Retro] Event tags:", romSource.event.tags);
 
@@ -261,6 +277,9 @@ export function RetroPlayer({
             // Additional validation logging
             console.log("[Retro] Header as hex:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
             console.log("[Retro] Expected NES header: 0x4E 0x45 0x53 0x1A");
+
+            // Extra diagnostics
+            console.log("[Retro] READY to call emulator.loadROM with", romData.length, "bytes");
 
             // Validate NES header
             if (!validateNESHeader(romData)) {
@@ -374,6 +393,9 @@ export function RetroPlayer({
             console.log("[Retro] Header as hex:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
             console.log("[Retro] Expected NES header: 0x4E 0x45 0x53 0x1A");
 
+            // Extra diagnostics for URL path
+            console.log("[Retro] READY to call emulator.loadROM with", romData.length, "bytes");
+
             setDebugInfo(prev => ({
               ...prev,
               decodedSize: romData.length
@@ -443,15 +465,19 @@ export function RetroPlayer({
           );
 
           console.log("[Retro] Passing ROM to emulator:", romData.length, "bytes");
+          console.log("[Retro] Calling loadROM now…");
           const success = emulatorRef.current!.loadROM(romData);
 
           if (!success) {
+            console.error("❌ loadROM call failed");
             console.error("[Retro] Emulator error:", new Error('Failed to load ROM into emulator'));
             logError('loading-emulator', new Error('Failed to load ROM into emulator'));
             setError('emulator-error');
             setErrorMessage('Failed to load ROM into emulator');
             setState('error');
             return;
+          } else {
+            console.log("✅ loadROM call succeeded");
           }
 
           logPhase('Emulator started');
@@ -497,7 +523,7 @@ export function RetroPlayer({
     };
 
     loadROM();
-  }, [romSource, nostrEvent]);
+  }, [romSource, nostrEvent, emulatorReady]);
 
   // Cleanup on unmount
   useEffect(() => {
