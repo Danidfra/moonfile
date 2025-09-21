@@ -3,7 +3,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Play, Pause, RotateCcw, Maximize, Volume2, VolumeX, ArrowLeft, RefreshCw, Copy } from 'lucide-react';
-import { NESEmulator, type NESControls } from '@/lib/emulator/nesEmulator';
+import { FCEUXEmulator, type FCEUXControls } from '@/lib/emulator/fceuxEmulator';
 import { ROMLoader, type ROMSource } from '@/lib/rom/romLoader';
 import type { Game31996, NostrEvent } from '@/types/game';
 
@@ -28,14 +28,14 @@ export function RetroPlayer({
   className = ''
 }: RetroPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const emulatorRef = useRef<NESEmulator | null>(null);
+  const emulatorRef = useRef<FCEUXEmulator | null>(null);
   const [state, setState] = useState<EmulatorState>('idle');
   const [error, setError] = useState<ErrorType | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [showMobileControls, setShowMobileControls] = useState(false);
   const [emulatorReady, setEmulatorReady] = useState(false);
-  const [controls, setControls] = useState<NESControls>({
+  const [controls, setControls] = useState<FCEUXControls>({
     right: false,
     left: false,
     down: false,
@@ -119,36 +119,56 @@ export function RetroPlayer({
   useEffect(() => {
     if (!canvasRef.current) return;
 
-    try {
-      console.log("[Retro] Initializing emulator…");
-      const emulator = new NESEmulator();
-      emulator.init(canvasRef.current, {
-        audio: audioEnabled,
-      });
+    let isMounted = true;
+    let emulator: FCEUXEmulator | null = null;
 
-      emulatorRef.current = emulator;
-      console.log("[Retro] Emulator initialized, emulatorReady=true");
-      setEmulatorReady(true); // Set emulator ready flag
+    const initializeEmulator = async () => {
+      try {
+        console.log("[Retro] Initializing FCEUX emulator…");
+        emulator = new FCEUXEmulator();
+        await emulator.init(canvasRef.current!, {
+          audio: audioEnabled,
+        });
 
-      // Set up canvas click to enable audio
-      const handleCanvasClick = () => {
-        if (emulatorRef.current && audioEnabled) {
-          emulatorRef.current.toggleAudio(true);
+        if (!isMounted) {
+          emulator.dispose();
+          return;
         }
-      };
 
-      canvasRef.current.addEventListener('click', handleCanvasClick);
+        emulatorRef.current = emulator;
+        console.log("[Retro] FCEUX emulator initialized, emulatorReady=true");
+        setEmulatorReady(true); // Set emulator ready flag
 
-      return () => {
-        canvasRef.current?.removeEventListener('click', handleCanvasClick);
+        // Set up canvas click to enable audio
+        const handleCanvasClick = () => {
+          if (emulatorRef.current && audioEnabled) {
+            emulatorRef.current.toggleAudio(true);
+          }
+        };
+
+        canvasRef.current!.addEventListener('click', handleCanvasClick);
+
+        return () => {
+          canvasRef.current?.removeEventListener('click', handleCanvasClick);
+        };
+      } catch (err) {
+        console.error("[Retro] FCEUX emulator error:", err);
+        if (isMounted) {
+          setState('error');
+          setError('emulator-error');
+        }
+      }
+    };
+
+    initializeEmulator();
+
+    return () => {
+      isMounted = false;
+      if (emulator) {
         emulator.dispose();
-        setEmulatorReady(false); // Reset emulator ready flag
-      };
-    } catch (err) {
-      console.error("[Retro] Emulator error:", err);
-      setState('error');
-      setError('emulator-error');
-    }
+      }
+      setEmulatorReady(false); // Reset emulator ready flag
+    };
   }, []); // Run only once, not on audioEnabled changes
 
   // Handle audio changes separately
@@ -527,7 +547,7 @@ export function RetroPlayer({
         logError('loading', err);
 
         let errorType: ErrorType = 'emulator-error';
-        let errorMsg = err instanceof Error ? err.message : 'Unknown error';
+        const errorMsg = err instanceof Error ? err.message : 'Unknown error';
 
         if (err instanceof Error) {
           if (err.message.includes('too large')) {
@@ -571,7 +591,7 @@ export function RetroPlayer({
   // Keyboard controls
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      const keyMap: Record<string, keyof NESControls> = {
+      const keyMap: Record<string, keyof FCEUXControls> = {
         'ArrowRight': 'right',
         'ArrowLeft': 'left',
         'ArrowDown': 'down',
@@ -590,7 +610,7 @@ export function RetroPlayer({
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const keyMap: Record<string, keyof NESControls> = {
+      const keyMap: Record<string, keyof FCEUXControls> = {
         'ArrowRight': 'right',
         'ArrowLeft': 'left',
         'ArrowDown': 'down',
