@@ -1,4 +1,4 @@
-import JSNES from 'jsnes';
+import { NES } from 'jsnes';
 
 export interface NESControls {
   right: boolean;
@@ -18,31 +18,47 @@ export interface NESConfig {
 }
 
 export class NESEmulator {
-  private nes: JSNES;
+  private nes: NES;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
+  private imageData: ImageData | null = null;
   private animationFrameId: number | null = null;
   private audioContext: AudioContext | null = null;
-  private audioBuffer: AudioBuffer | null = null;
-  private audioSource: AudioBufferSourceNode | null = null;
   private config: NESConfig = {};
   private isRunning = false;
   private isPaused = false;
 
   constructor() {
-    this.nes = new JSNES({
-      onFrame: this.handleFrame.bind(this),
-      onAudioSample: this.handleAudioSample.bind(this),
+    console.log('[NESEmulator] constructing NES');
+    this.nes = new NES({
+      onFrame: (frame: Uint8Array) => this.onFrame?.(frame),
+      onStatusUpdate: (s: string) => console.log('[NES]', s),
+      sampleRate: this.audioContext?.sampleRate,
     });
+    console.log('[NESEmulator] NES ready');
+  }
+
+  // Convert Uint8Array to binary string for jsnes
+  private u8ToBinaryString(u8: Uint8Array): string {
+    // chunk to avoid call stack / max arg issues
+    const CHUNK = 0x8000;
+    let res = '';
+    for (let i = 0; i < u8.length; i += CHUNK) {
+      const slice = u8.subarray(i, i + CHUNK);
+      res += String.fromCharCode.apply(null, Array.from(slice) as any);
+    }
+    return res;
   }
 
   init(canvas: HTMLCanvasElement, config: NESConfig = {}): void {
+    console.log('[NESEmulator] init canvas? ', !!canvas);
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
     this.config = config;
 
     if (this.ctx) {
       this.ctx.imageSmoothingEnabled = false;
+      this.imageData = this.ctx.createImageData(256, 240);
     }
 
     // Initialize audio if enabled
@@ -52,18 +68,17 @@ export class NESEmulator {
   }
 
   private initAudio(): void {
-    try {
-      this.audioContext = new (window.AudioContext || (window as any).webkitAudioContext)();
-      this.audioBuffer = this.audioContext.createBuffer(1, 16384, 44100);
-    } catch (error) {
-      console.warn('Audio initialization failed:', error);
-      this.config.audio = false;
-    }
+    // Audio disabled for now - will implement later
+    console.log('[NESEmulator] Audio initialization skipped (disabled for now)');
+    this.config.audio = false;
   }
 
   loadROM(bytes: Uint8Array): boolean {
     try {
-      this.nes.loadROM(bytes);
+      console.log('[NESEmulator] loadROM bytes:', bytes.length);
+      const bin = this.u8ToBinaryString(bytes);
+      this.nes.loadROM(bin);
+      this.nes.frame();
       return true;
     } catch (error) {
       console.error('Failed to load ROM:', error);
@@ -76,7 +91,7 @@ export class NESEmulator {
       this.isRunning = true;
       this.isPaused = false;
       this.startFrameLoop();
-      
+
       // Resume audio context if suspended (autoplay restriction)
       if (this.audioContext && this.audioContext.state === 'suspended') {
         this.audioContext.resume();
@@ -116,43 +131,30 @@ export class NESEmulator {
     frameLoop();
   }
 
-  private handleFrame(buffer: Uint8Array): void {
+  private onFrame = (frame: Uint8Array): void => {
+    // frame is 256*240*3 (RGB)
     if (this.config.onFrame) {
-      this.config.onFrame(buffer);
+      this.config.onFrame(frame);
       return;
     }
 
     // Default frame rendering
-    if (this.ctx && this.canvas) {
-      const imageData = this.ctx.createImageData(256, 240);
-      imageData.data.set(buffer);
-      
-      // Scale to canvas size
-      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
-      this.ctx.imageSmoothingEnabled = false;
-      
-      const scaleX = this.canvas.width / 256;
-      const scaleY = this.canvas.height / 240;
-      
-      this.ctx.save();
-      this.ctx.scale(scaleX, scaleY);
-      this.ctx.putImageData(imageData, 0, 0);
-      this.ctx.restore();
+    if (this.ctx && this.imageData) {
+      const data = this.imageData.data;
+      for (let i = 0, j = 0; i < frame.length; i += 3, j += 4) {
+        data[j] = frame[i];     // R
+        data[j + 1] = frame[i + 1]; // G
+        data[j + 2] = frame[i + 2]; // B
+        data[j + 3] = 0xFF;       // A
+      }
+      this.ctx.putImageData(this.imageData, 0, 0);
     }
-  }
+  };
 
-  private handleAudioSample(left: number, right: number): void {
-    if (this.config.onAudioSample) {
-      this.config.onAudioSample(left, right);
-      return;
-    }
-
-    // Default audio handling
-    if (this.audioContext && this.audioBuffer) {
-      // Simple audio buffering - in a real implementation, you'd want more sophisticated buffering
-      // This is a basic implementation that might have some audio glitches
-    }
-  }
+  // Audio handling disabled for now
+  // private handleAudioSample(left: number, right: number): void {
+  //   // Audio disabled for now
+  // }
 
   setControls(controls: Partial<NESControls>): void {
     const buttonMap = {
@@ -179,10 +181,9 @@ export class NESEmulator {
   }
 
   toggleAudio(enabled: boolean): void {
+    // Audio disabled for now - no-op
+    console.log('[NESEmulator] toggleAudio called (disabled for now):', enabled);
     this.config.audio = enabled;
-    if (enabled && !this.audioContext) {
-      this.initAudio();
-    }
   }
 
   isAudioEnabled(): boolean {
@@ -199,14 +200,15 @@ export class NESEmulator {
 
   dispose(): void {
     this.stop();
-    
+
     if (this.audioContext) {
       this.audioContext.close();
       this.audioContext = null;
     }
-    
+
     this.canvas = null;
     this.ctx = null;
+    this.imageData = null;
     this.animationFrameId = null;
   }
 }
