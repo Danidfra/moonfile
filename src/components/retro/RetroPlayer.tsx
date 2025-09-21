@@ -193,9 +193,9 @@ export function RetroPlayer({
           logPhase('Decoded bytes:', romData.length);
 
           // Log decoded byte details
-          console.log("[Retro] Decoded length:", romData.length);
-          console.log("[Retro] Decoded preview (start):", romData.slice(0, 16));
-          console.log("[Retro] Decoded preview (end):", romData.slice(-16));
+          console.log("[Retro] decoded len:", romData.length);
+          console.log("[Retro] bytes start:", Array.from(romData.slice(0, 16)));
+          console.log("[Retro] bytes end:", Array.from(romData.slice(-16)));
 
           setDebugInfo(prev => ({
             ...prev,
@@ -282,6 +282,7 @@ export function RetroPlayer({
 
         // Load ROM into emulator
         console.log("[Retro] Initializing emulator…");
+        console.log("[Retro] loadROM…");
         logPhase('Loading ROM into emulator...');
         setState('loading-emulator');
 

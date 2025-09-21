@@ -15,14 +15,22 @@ export default function RetroPlayPage() {
   const [error, setError] = useState<string | null>(null);
   const [nostrEvent, setNostrEvent] = useState<NostrEvent | null>(null);
 
+  // Mount/unmount logging
+  useEffect(() => {
+    console.log("[Retro] MOUNT: component mounted");
+    return () => console.log("[Retro] UNMOUNT: component unmounted");
+  }, []);
+
   useEffect(() => {
     const loadGameAndROM = async () => {
       if (!nostr || !d) return;
 
       try {
+        console.log("[Retro] start loading flow");
         setLoading(true);
         setError(null);
 
+        console.log("[Retro] fetching kind=31996 …");
         // Fetch the kind:31996 event by d-tag
         const events = await nostr.query([{
           kinds: [31996],
@@ -33,13 +41,21 @@ export default function RetroPlayPage() {
         });
 
         if (events.length === 0) {
+          console.log("[Retro] no events found for d:", d);
           setError('Game event not found');
           navigate('/games');
           return;
         }
 
         const event = events[0] as NostrEvent;
+        console.log("[Retro] event ok:", event.id);
         setNostrEvent(event);
+
+        console.log("[Retro] tags:", event.tags);
+
+        // Content preview
+        console.log("[Retro] content.start:", event.content?.slice(0, 100));
+        console.log("[Retro] content.end:", event.content?.slice(-100));
 
         // Parse game metadata from event
         const parsedGame = parseGameFromEvent(event);
@@ -53,6 +69,7 @@ export default function RetroPlayPage() {
             tags: event.tags
           }
         });
+        console.log("[Retro] romSource set, loading should start in RetroPlayer");
       } catch (err) {
         console.error('Failed to load game:', err);
         setError(err instanceof Error ? err.message : 'Failed to load game');
@@ -98,12 +115,28 @@ export default function RetroPlayPage() {
     }
   };
 
+  const handleRunTestROM = () => {
+    console.log("[Retro] Running Test ROM from error state");
+    // Navigate to test ROM or set up test ROM loading
+    setRomSource({
+      source: 'url',
+      url: '/roms/test-rom.nes'
+    });
+    setError(null); // Clear error so RetroPlayer can try to load
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-black flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-16 w-16 border-b-2 border-purple-500 mx-auto mb-4"></div>
-          <p className="text-gray-400">Loading game from Nostr...</p>
+          <p className="text-gray-400 mb-4">Loading game from Nostr...</p>
+          <button
+            onClick={handleRunTestROM}
+            className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg transition-colors text-sm"
+          >
+            Run Test ROM Instead
+          </button>
         </div>
       </div>
     );
@@ -122,6 +155,12 @@ export default function RetroPlayPage() {
               className="w-full bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors"
             >
               Retry
+            </button>
+            <button
+              onClick={handleRunTestROM}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors"
+            >
+              Run Test ROM
             </button>
             {nostrEvent && (
               <button
@@ -152,12 +191,20 @@ export default function RetroPlayPage() {
           <p className="text-gray-400 mb-6">
             The game you're looking for doesn't exist or couldn't be loaded.
           </p>
-          <button
-            onClick={handleBack}
-            className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors"
-          >
-            Back to Games
-          </button>
+          <div className="space-y-3">
+            <button
+              onClick={handleRunTestROM}
+              className="w-full bg-blue-600 hover:bg-blue-700 text-white px-6 py-2 rounded-lg transition-colors"
+            >
+              Run Test ROM
+            </button>
+            <button
+              onClick={handleBack}
+              className="bg-purple-600 hover:bg-purple-700 text-white px-6 py-2 rounded-lg transition-colors"
+            >
+              Back to Games
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -176,6 +223,7 @@ export default function RetroPlayPage() {
 
 // Helper function to parse game metadata from Nostr event
 function parseGameFromEvent(event: NostrEvent): Game31996 {
+  console.log("[Retro] parsing game from event");
   const getTagValue = (tagName: string): string | undefined => {
     const tag = event.tags.find(t => t[0] === tagName);
     return tag?.[1];
