@@ -298,6 +298,19 @@ export function RetroPlayer({
               return;
             } else {
               console.log("✅ NES header validation passed");
+
+              // ROM integrity diagnostics
+              console.log("[Retro] ROM integrity check:");
+              console.log("  - Header bytes:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+              console.log("  - Total size:", romData.length, "bytes (including 16-byte header)");
+              console.log("  - Mapper:", ((romData[6] >> 4) | (romData[7] & 0xF0)));
+              console.log("  - PRG banks:", romData[4]);
+              console.log("  - CHR banks:", romData[5]);
+
+              // Compute SHA-256 for verification
+              ROMLoader.computeSHA256(romData).then(hash => {
+                console.log("  - SHA-256:", hash.substring(0, 8) + "...");
+              });
             }
 
             logPhase('Decoded bytes', { size: romData.length });
@@ -399,6 +412,19 @@ export function RetroPlayer({
             // Additional validation logging
             console.log("[Retro] Header as hex:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
             console.log("[Retro] Expected NES header: 0x4E 0x45 0x53 0x1A");
+
+            // ROM integrity diagnostics for URL path
+            console.log("[Retro] ROM integrity check:");
+            console.log("  - Header bytes:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            console.log("  - Total size:", romData.length, "bytes (including 16-byte header)");
+            console.log("  - Mapper:", ((romData[6] >> 4) | (romData[7] & 0xF0)));
+            console.log("  - PRG banks:", romData[4]);
+            console.log("  - CHR banks:", romData[5]);
+
+            // Compute SHA-256 for verification
+            ROMLoader.computeSHA256(romData).then(hash => {
+              console.log("  - SHA-256:", hash.substring(0, 8) + "...");
+            });
 
             // Extra diagnostics for URL path
             console.log("[Retro] READY to call emulator.loadROM with", romData.length, "bytes");
@@ -868,7 +894,7 @@ export function RetroPlayer({
                     {/* Always-on canvas */}
                     <canvas
                       ref={canvasRef}
-                      className="w-full h-full max-w-4xl mx-auto"
+                      className="max-w-4xl mx-auto"
                       style={{ imageRendering: 'pixelated' }}
                       width={256}
                       height={240}

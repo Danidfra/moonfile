@@ -22,11 +22,14 @@ export class NESEmulator {
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private imageData: ImageData | null = null;
+  private backingBuffer: Uint8ClampedArray | null = null;
+  private backingBuffer32: Uint32Array | null = null;
   private animationFrameId: number | null = null;
   private audioContext: AudioContext | null = null;
   private config: NESConfig = {};
   private isRunning = false;
   private isPaused = false;
+  private frameCount = 0;
 
   constructor() {
     console.log('[NESEmulator] constructing NES');
@@ -58,19 +61,27 @@ export class NESEmulator {
 
     if (this.ctx) {
       // Set canvas attributes directly (not just CSS)
-      canvas.width = 256;
-      canvas.height = 240;
-
-      // Handle HiDPI scaling
       const dpr = window.devicePixelRatio || 1;
-      if (dpr > 1) {
-        canvas.width = 256 * dpr;
-        canvas.height = 240 * dpr;
-        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-      }
+      canvas.width = 256 * dpr;
+      canvas.height = 240 * dpr;
 
+      // CSS sizing for layout
+      canvas.style.width = '100%';
+      canvas.style.height = 'auto';
+
+      // Set up transform and create backbuffer
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
       this.ctx.imageSmoothingEnabled = false;
+
+      // Create single ImageData and backing buffer
       this.imageData = this.ctx.createImageData(256, 240);
+      this.backingBuffer = new Uint8ClampedArray(this.imageData.data.buffer);
+      this.backingBuffer32 = new Uint32Array(this.imageData.data.buffer);
+
+      // Log diagnostics
+      console.log('[Retro] canvas attr size', canvas.width, canvas.height, 'dpr', dpr);
+      console.log('[Retro] CSS size', canvas.getBoundingClientRect());
+      console.log('[Retro] imageData', this.imageData.width, this.imageData.height);
     }
 
     // Initialize audio if enabled
@@ -151,36 +162,46 @@ export class NESEmulator {
     }
 
     // Default frame rendering
-    if (this.ctx && this.imageData) {
-      const data = this.imageData.data;
+    if (this.ctx && this.imageData && this.backingBuffer && this.backingBuffer32) {
+      const dpr = window.devicePixelRatio || 1;
+
+      // Reset transform each frame to prevent accumulation
+      this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+      // Clear canvas area
+      this.ctx.clearRect(0, 0, 256, 240);
 
       // Check if frame is Uint32Array (0x00RRGGBB format)
       if (frame instanceof Uint32Array) {
-        console.log('[NESEmulator] Drawing Uint32Array frame, length:', frame.length);
         const frame32 = frame as Uint32Array;
-        const buf8 = new Uint8Array(data.buffer);
 
-        // Convert 0x00RRGGBB to 0xFFRRGGBB
+        // Convert 0x00RRGGBB to 0xFFRRGGBB in place
         for (let i = 0; i < frame32.length; i++) {
-          buf8[i * 4] = (frame32[i] >> 16) & 0xFF;     // R
-          buf8[i * 4 + 1] = (frame32[i] >> 8) & 0xFF;    // G
-          buf8[i * 4 + 2] = frame32[i] & 0xFF;           // B
-          buf8[i * 4 + 3] = 0xFF;                        // A
+          this.backingBuffer32[i] = 0xFF000000 | frame32[i];
         }
       } else {
-        // Handle Uint8Array (RGB format)
-        console.log('[NESEmulator] Drawing Uint8Array RGB frame, length:', frame.length);
+        // Handle Uint8Array (RGB format) - copy RGB and add alpha
         for (let i = 0, j = 0; i < frame.length; i += 3, j += 4) {
-          data[j] = frame[i];         // R
-          data[j + 1] = frame[i + 1]; // G
-          data[j + 2] = frame[i + 2]; // B
-          data[j + 3] = 0xFF;         // A
+          this.backingBuffer[j] = frame[i];         // R
+          this.backingBuffer[j + 1] = frame[i + 1]; // G
+          this.backingBuffer[j + 2] = frame[i + 2]; // B
+          this.backingBuffer[j + 3] = 0xFF;         // A
         }
       }
 
-      // Use putImageData directly to avoid tiling
+      // Draw single frame with putImageData
       this.ctx.putImageData(this.imageData, 0, 0);
-      console.log('[NESEmulator] Frame drawn to canvas');
+
+      // Log every 60th frame
+      this.frameCount++;
+      if (this.frameCount % 60 === 0) {
+        console.log('[Retro] draw frame #', this.frameCount, 'putImageData 256x240');
+      }
+
+      // Log first frame
+      if (this.frameCount === 1) {
+        console.log('[Retro] First frame drawn successfully');
+      }
     }
   };
 
