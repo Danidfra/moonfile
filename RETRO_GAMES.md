@@ -1,12 +1,26 @@
-# Retro Game Player - Phase 1 Implementation
+# Retro Game Player - Phase 2 Implementation
 
 ## Overview
 
-This document describes the Phase 1 implementation of the NES Retro Game Player for the MoonFile platform. This implementation allows users to play NES games directly in their browser with a polished, responsive interface.
+This document describes the Phase 2 implementation of the NES Retro Game Player for the MoonFile platform. This implementation allows users to play NES games directly in their browser with a polished, responsive interface, with ROMs loaded from Nostr kind:31996 events.
 
 ## Features Implemented
 
-### 🎮 Core Functionality
+### 🎮 Core Functionality (Phase 1)
+- **NES Emulation**: Uses jsnes library for accurate NES emulation
+- **ROM Loading**: Supports loading ROMs from static URLs with validation
+- **Game Controls**: Full keyboard support with customizable controls
+- **Audio Support**: Web Audio API integration with browser autoplay compliance
+- **Fullscreen Mode**: Native browser fullscreen support
+- **Responsive Design**: Desktop-first design with mobile optimization
+
+### 🎮 Core Functionality (Phase 2)
+- **Nostr Integration**: Load ROMs from kind:31996 events
+- **Multiple Encodings**: Support for Base64, Base64URL, and Hex decoding
+- **ROM Validation**: Size and SHA256 hash validation with detailed reporting
+- **Error Handling**: Comprehensive error states for decoding and validation failures
+- **Security**: Treat content as binary data with proper input validation
+- **Fallback Support**: Graceful fallback to URL loading if Nostr fails
 - **NES Emulation**: Uses jsnes library for accurate NES emulation
 - **ROM Loading**: Supports loading ROMs from static URLs with validation
 - **Game Controls**: Full keyboard support with customizable controls
@@ -29,6 +43,12 @@ This document describes the Phase 1 implementation of the NES Retro Game Player 
 /retro/:d/play
 ```
 - `:d` - The game's d-tag identifier (e.g., `game:mummy-egyptian-puzzle:v1.1`)
+
+#### Nostr Event Loading
+- **Event Fetch**: Query kind:31996 events by d-tag
+- **Content Decoding**: Support Base64, Base64URL, and Hex encodings
+- **Validation**: Size and SHA256 hash validation with detailed error reporting
+- **Fallback**: Graceful fallback to URL loading if Nostr fails
 
 #### Core Components
 
@@ -67,10 +87,11 @@ This document describes the Phase 1 implementation of the NES Retro Game Player 
 2. **Click Play**: Click the "Play" button on any game card
 3. **Game Loads**: The system will:
    - Navigate to `/retro/:d/play`
-   - Load game metadata from Nostr
-   - Fetch ROM from configured URL
-   - Initialize the emulator
-   - Display the game interface
+   - Fetch kind:31996 event from Nostr by d-tag
+   - Decode ROM from event content using specified encoding
+   - Validate ROM size and SHA256 hash
+   - Initialize emulator with decoded ROM
+   - Display the game interface with validation details
 
 ### Keyboard Controls
 
@@ -103,9 +124,34 @@ This document describes the Phase 1 implementation of the NES Retro Game Player 
 
 ## Configuration
 
-### ROM Sources (Phase 1)
+### ROM Sources (Phase 2 - Primary)
 
-ROMs are loaded from static URLs based on the game's d-tag:
+ROMs are loaded from Nostr kind:31996 events with full validation:
+
+```typescript
+// Nostr event structure
+{
+  id: string,
+  pubkey: string,
+  created_at: number,
+  kind: 31996,
+  tags: [
+    ['d', 'game-identifier'],
+    ['name', 'Game Title'],
+    ['encoding', 'base64'],        // base64, base64url, hex
+    ['compression', 'none'],     // only 'none' supported
+    ['size', '24592'],          // bytes
+    ['sha256', '7c6b6e7c...'], // lowercase hex
+    ['mime', 'application/x-nes-rom'],
+    // ... other metadata tags
+  ],
+  content: 'Base64-encoded ROM data...'
+}
+```
+
+### ROM Sources (Phase 1 - Fallback)
+
+If Nostr loading fails, ROMs are loaded from static URLs based on the game's d-tag:
 
 ```typescript
 const testRomUrl = `/roms/${d}.nes`;
@@ -139,14 +185,23 @@ interface Game31996 {
 
 The system handles various error states:
 
-1. **Loading State** - Shows spinner while ROM is downloading
-2. **ROM Not Found** - 404 errors when ROM URL is invalid
-3. **Invalid ROM** - Non-NES files or corrupted headers
-4. **Emulator Error** - jsnes initialization failures
-5. **Network Error** - Failed to download ROM
-6. **ROM Too Large** - Files larger than 4MB
+### Phase 2 - Nostr Loading Errors
+1. **Decoding State** - Shows spinner while decoding ROM from Nostr event
+2. **Validation State** - Shows spinner while validating ROM integrity
+3. **Decoding Error** - Failed to decode Base64/Base64URL/Hex data
+4. **Validation Error** - Size or SHA256 hash mismatch
+5. **Unsupported Encoding** - Encoding format not supported
+6. **Unsupported Compression** - Compression format not supported (only 'none')
 
-Each error state provides clear messaging and a path back to the games list.
+### Phase 1 - Fallback Errors
+7. **Loading State** - Shows spinner while ROM is downloading
+8. **ROM Not Found** - 404 errors when ROM URL is invalid
+9. **Invalid ROM** - Non-NES files or corrupted headers
+10. **Emulator Error** - jsnes initialization failures
+11. **Network Error** - Failed to download ROM
+12. **ROM Too Large** - Files larger than 4MB
+
+Each error state provides clear messaging, validation details, retry options, and a path back to the games list.
 
 ## Browser Compatibility
 
@@ -200,6 +255,28 @@ node scripts/create-test-rom.js
 
 This creates a minimal valid NES ROM at `public/roms/test-rom.nes`.
 
+### Phase 2 Testing
+
+Test Nostr events can be created using the provided script:
+
+```bash
+node scripts/create-test-nostr-event.js
+```
+
+This creates a test Nostr kind:31996 event at `public/test-event.json` with a properly encoded ROM.
+
+## Phase 2 Acceptance Criteria ✅
+
+✅ **Fetch kind:31996 event by d-tag when navigating to Retro page**
+✅ **Decode ROM from event.content according to encoding tag (Base64, Base64URL, Hex)**
+✅ **Validate ROM size and SHA256 hash against event tags**
+✅ **Show user-friendly errors for invalid encoding, size mismatch, hash mismatch**
+✅ **Pass decoded Uint8Array to emulator and run after user gesture**
+✅ **Comprehensive error handling with retry and copy event ID options**
+✅ **Proper cleanup on navigation (emulator/audio disposed)**
+✅ **Security: treat content as binary, validate inputs, fail closed on malformed data**
+✅ **Works on desktop and mobile with audio gesture compliance**
+
 ### Code Structure
 
 ```
@@ -222,22 +299,39 @@ src/
 
 ### Common Issues
 
-1. **Audio Not Working**
+#### Nostr Loading Issues
+1. **Event Not Found**
+   - Verify kind:31996 event exists with correct d-tag
+   - Check relay connectivity and event availability
+   - Try different relays if event is missing
+
+2. **Decoding Failed**
+   - Check encoding tag matches actual content format
+   - Ensure Base64 data is properly padded and formatted
+   - Verify no whitespace corruption in event content
+
+3. **Validation Failed**
+   - Check size tag matches actual ROM size
+   - Verify SHA256 tag matches computed hash
+   - Ensure ROM data wasn't corrupted during transmission
+
+#### Emulator Issues
+4. **Audio Not Working**
    - Click the game canvas to enable audio (browser requirement)
    - Check if audio is toggled on in the header
    - Ensure browser supports Web Audio API
 
-2. **ROM Won't Load**
-   - Verify ROM file exists at expected URL
+5. **ROM Won't Load**
+   - Verify fallback ROM file exists at expected URL
    - Check ROM size is under 4MB
    - Ensure ROM has valid NES header
 
-3. **Controls Not Responsive**
+6. **Controls Not Responsive**
    - Check if game window has focus
    - Verify correct key mappings
    - Try refreshing the page
 
-4. **Performance Issues**
+7. **Performance Issues**
    - Close other browser tabs
    - Disable browser extensions
    - Check device meets minimum requirements

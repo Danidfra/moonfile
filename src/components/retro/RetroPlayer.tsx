@@ -2,25 +2,27 @@ import { useState, useEffect, useRef } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Play, Pause, RotateCcw, Maximize, Volume2, VolumeX, ArrowLeft } from 'lucide-react';
+import { Play, Pause, RotateCcw, Maximize, Volume2, VolumeX, ArrowLeft, RefreshCw, Copy } from 'lucide-react';
 import { NESEmulator, type NESControls } from '@/lib/emulator/nesEmulator';
 import { ROMLoader, type ROMSource } from '@/lib/rom/romLoader';
-import type { Game31996 } from '@/types/game';
+import type { Game31996, NostrEvent } from '@/types/game';
 
 interface RetroPlayerProps {
   meta: Game31996;
   romSource: ROMSource;
+  nostrEvent?: NostrEvent | null;
   onBack?: () => void;
   onFullscreen?: () => void;
   className?: string;
 }
 
-type EmulatorState = 'loading' | 'ready' | 'running' | 'paused' | 'error';
-type ErrorType = 'rom-not-found' | 'rom-invalid' | 'emulator-error' | 'network-error' | 'too-large';
+type EmulatorState = 'loading' | 'decoding' | 'validating' | 'ready' | 'running' | 'paused' | 'error';
+type ErrorType = 'rom-not-found' | 'rom-invalid' | 'emulator-error' | 'network-error' | 'too-large' | 'decode-error' | 'validation-error' | 'size-mismatch' | 'hash-mismatch' | 'unsupported-compression' | 'unsupported-encoding';
 
 export function RetroPlayer({
   meta,
   romSource,
+  nostrEvent,
   onBack,
   onFullscreen,
   className = ''
@@ -29,6 +31,7 @@ export function RetroPlayer({
   const emulatorRef = useRef<NESEmulator | null>(null);
   const [state, setState] = useState<EmulatorState>('loading');
   const [error, setError] = useState<ErrorType | null>(null);
+  const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [showMobileControls, setShowMobileControls] = useState(false);
   const [controls, setControls] = useState<NESControls>({
@@ -42,6 +45,7 @@ export function RetroPlayer({
     a: false,
   });
   const [romInfo, setRomInfo] = useState<any>(null);
+  const [validationResult, setValidationResult] = useState<any>(null);
 
   // Initialize emulator
   useEffect(() => {
@@ -83,22 +87,52 @@ export function RetroPlayer({
       try {
         setState('loading');
         setError(null);
+        setErrorMessage(null);
 
-        const romData = await ROMLoader.loadROM(romSource, {
-          maxSize: 4 * 1024 * 1024, // 4MB max
-        });
+        let romData: Uint8Array;
 
-        // Validate NES ROM
-        const isValid = await ROMLoader.validateNESROM(romData);
-        if (!isValid) {
-          setError('rom-invalid');
-          setState('error');
-          return;
+        if (romSource.source === 'nostr') {
+          // Phase 2: Decode and validate from Nostr event
+          setState('decoding');
+
+          const validation = await ROMLoader.validateROMFromNostrEvent(romSource.event);
+          setValidationResult(validation);
+
+          if (!validation.isValid) {
+            setError('validation-error' as ErrorType);
+            setErrorMessage(validation.error || 'ROM validation failed');
+            setState('error');
+            return;
+          }
+
+          romData = validation.decodedBytes!;
+
+          // Get ROM info
+          const info = ROMLoader.getROMInfo(romData);
+          setRomInfo(info);
+
+          // Add short hash to validation result for display
+          validation.shortHash = await ROMLoader.computeSHA256(romData).then(hash => hash.substring(0, 8));
+        } else {
+          // Phase 1: Load from URL
+          setState('loading');
+
+          romData = await ROMLoader.loadROM(romSource, {
+            maxSize: 4 * 1024 * 1024, // 4MB max
+          });
+
+          // Validate NES ROM
+          const isValid = await ROMLoader.validateNESROM(romData);
+          if (!isValid) {
+            setError('rom-invalid');
+            setState('error');
+            return;
+          }
+
+          // Get ROM info
+          const info = ROMLoader.getROMInfo(romData);
+          setRomInfo(info);
         }
-
-        // Get ROM info
-        const info = ROMLoader.getROMInfo(romData);
-        setRomInfo(info);
 
         // Load ROM into emulator
         const success = emulatorRef.current!.loadROM(romData);
@@ -112,16 +146,31 @@ export function RetroPlayer({
       } catch (err) {
         console.error('ROM loading failed:', err);
 
+        let errorType: ErrorType = 'emulator-error';
+        let errorMsg = err instanceof Error ? err.message : 'Unknown error';
+
         if (err instanceof Error) {
           if (err.message.includes('too large')) {
-            setError('too-large');
+            errorType = 'too-large';
           } else if (err.message.includes('HTTP 404')) {
-            setError('rom-not-found');
+            errorType = 'rom-not-found';
           } else if (err.message.includes('Failed to load ROM from URL')) {
-            setError('network-error');
+            errorType = 'network-error';
+          } else if (err.message.includes('Failed to decode')) {
+            errorType = 'decode-error';
+          } else if (err.message.includes('Size mismatch')) {
+            errorType = 'size-mismatch';
+          } else if (err.message.includes('SHA256 mismatch')) {
+            errorType = 'hash-mismatch';
+          } else if (err.message.includes('Unsupported compression')) {
+            errorType = 'unsupported-compression';
+          } else if (err.message.includes('Unsupported encoding')) {
+            errorType = 'unsupported-encoding';
           }
         }
 
+        setError(errorType);
+        setErrorMessage(errorMsg);
         setState('error');
       }
     };
@@ -234,7 +283,21 @@ export function RetroPlayer({
     }
   };
 
+  const handleRetry = () => {
+    // Reload the page to retry
+    window.location.reload();
+  };
+
+  const handleCopyEventId = () => {
+    if (nostrEvent) {
+      navigator.clipboard.writeText(nostrEvent.id);
+      // You could add a toast notification here
+    }
+  };
+
   const getErrorMessage = () => {
+    if (errorMessage) return errorMessage;
+
     switch (error) {
       case 'rom-not-found':
         return 'ROM file not found';
@@ -246,8 +309,41 @@ export function RetroPlayer({
         return 'Failed to download ROM';
       case 'too-large':
         return 'ROM file is too large';
+      case 'decode-error':
+        return 'Failed to decode ROM data';
+      case 'validation-error':
+        return 'ROM validation failed';
+      case 'size-mismatch':
+        return 'ROM size does not match expected size';
+      case 'hash-mismatch':
+        return 'ROM hash does not match expected hash';
+      case 'unsupported-compression':
+        return 'Unsupported compression format';
+      case 'unsupported-encoding':
+        return 'Unsupported encoding format';
       default:
         return 'An unknown error occurred';
+    }
+  };
+
+  const getStateMessage = () => {
+    switch (state) {
+      case 'loading':
+        return 'Loading ROM...';
+      case 'decoding':
+        return 'Decoding ROM...';
+      case 'validating':
+        return 'Validating ROM...';
+      case 'ready':
+        return 'Ready to play';
+      case 'running':
+        return 'Running';
+      case 'paused':
+        return 'Paused';
+      case 'error':
+        return 'Error';
+      default:
+        return 'Loading...';
     }
   };
 
@@ -324,10 +420,20 @@ export function RetroPlayer({
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-0">
                   <div className="relative aspect-video bg-black flex items-center justify-center">
-                    {state === 'loading' && (
+                    {(state === 'loading' || state === 'decoding' || state === 'validating') && (
                       <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
-                        <p className="text-gray-400">Loading ROM...</p>
+                        <p className="text-gray-400">{getStateMessage()}</p>
+                        {state === 'decoding' && (
+                          <p className="text-gray-500 text-sm mt-2">
+                            {romSource.source === 'nostr' ? 'Decoding from Nostr event...' : 'Loading ROM...'}
+                          </p>
+                        )}
+                        {state === 'validating' && (
+                          <p className="text-gray-500 text-sm mt-2">
+                            Validating ROM integrity...
+                          </p>
+                        )}
                       </div>
                     )}
 
@@ -336,9 +442,42 @@ export function RetroPlayer({
                         <div className="text-red-400 text-6xl mb-4">⚠️</div>
                         <h3 className="text-xl font-semibold text-white mb-2">Error</h3>
                         <p className="text-gray-400 mb-4">{getErrorMessage()}</p>
-                        <Button onClick={onBack} variant="outline">
-                          Go Back
-                        </Button>
+
+                        {/* Show validation details if available */}
+                        {validationResult && (
+                          <div className="bg-gray-800 rounded-lg p-4 mb-4 text-left">
+                            <h4 className="text-sm font-semibold text-white mb-2">Validation Details</h4>
+                            <div className="text-xs text-gray-400 space-y-1">
+                              <div>Encoding: {validationResult.encoding}</div>
+                              <div>Compression: {validationResult.compression}</div>
+                              {validationResult.actualSize && (
+                                <div>Size: {validationResult.actualSize} bytes</div>
+                              )}
+                              {validationResult.expectedSize && (
+                                <div>Expected: {validationResult.expectedSize} bytes</div>
+                              )}
+                              {validationResult.shortHash && (
+                                <div>Hash: {validationResult.shortHash}...</div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="space-y-2">
+                          <Button onClick={handleRetry} className="w-full">
+                            <RefreshCw className="w-4 h-4 mr-2" />
+                            Retry
+                          </Button>
+                          {nostrEvent && (
+                            <Button onClick={handleCopyEventId} variant="outline" className="w-full">
+                              <Copy className="w-4 h-4 mr-2" />
+                              Copy Event ID
+                            </Button>
+                          )}
+                          <Button onClick={onBack} variant="outline" className="w-full">
+                            Go Back
+                          </Button>
+                        </div>
                       </div>
                     )}
 
@@ -362,6 +501,11 @@ export function RetroPlayer({
                                 <p className="text-gray-400 text-sm">
                                   Click the game area to enable sound (required by browsers)
                                 </p>
+                                {romSource.source === 'nostr' && (
+                                  <p className="text-gray-500 text-xs mt-2">
+                                    ROM loaded from Nostr event
+                                  </p>
+                                )}
                               </CardContent>
                             </Card>
                           </div>
@@ -396,8 +540,14 @@ export function RetroPlayer({
                     </Button>
 
                     <div className="flex items-center gap-2 text-sm text-gray-400">
-                      <div className={`w-2 h-2 rounded-full ${state === 'running' ? 'bg-green-400' : state === 'paused' ? 'bg-yellow-400' : 'bg-gray-600'}`}></div>
-                      {state === 'running' ? 'Running' : state === 'paused' ? 'Paused' : state === 'ready' ? 'Ready' : 'Loading'}
+                      <div className={`w-2 h-2 rounded-full ${
+                        state === 'running' ? 'bg-green-400' :
+                        state === 'paused' ? 'bg-yellow-400' :
+                        state === 'ready' ? 'bg-blue-400' :
+                        state === 'error' ? 'bg-red-400' :
+                        'bg-gray-600'
+                      }`}></div>
+                      {getStateMessage()}
                     </div>
                   </div>
                 </CardContent>
@@ -524,6 +674,62 @@ export function RetroPlayer({
                         </div>
                       </div>
                     )}
+
+                    {/* Validation info for Nostr ROMs */}
+                    {validationResult && (
+                      <div className="pt-2 border-t border-gray-800">
+                        <span className="text-gray-500">Validation:</span>
+                        <div className="text-xs text-gray-400 mt-1 space-y-1">
+                          <div className="flex items-center justify-between">
+                            <span>Encoding:</span>
+                            <span className={validationResult.encoding === 'base64' ? 'text-green-400' : 'text-gray-300'}>
+                              {validationResult.encoding}
+                            </span>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span>Compression:</span>
+                            <span className={validationResult.compression === 'none' ? 'text-green-400' : 'text-gray-300'}>
+                              {validationResult.compression}
+                            </span>
+                          </div>
+                          {validationResult.actualSize && (
+                            <div className="flex items-center justify-between">
+                              <span>Size:</span>
+                              <span className="text-gray-300">
+                                {Math.round(validationResult.actualSize / 1024)}KB
+                              </span>
+                            </div>
+                          )}
+                          {validationResult.shortHash && (
+                            <div className="flex items-center justify-between">
+                              <span>Hash:</span>
+                              <span className="font-mono text-gray-300">
+                                {validationResult.shortHash}
+                              </span>
+                            </div>
+                          )}
+                          {validationResult.expectedSize && (
+                            <div className="flex items-center justify-between">
+                              <span>Expected:</span>
+                              <span className="text-gray-300">
+                                {Math.round(validationResult.expectedSize / 1024)}KB
+                              </span>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-4 border-t border-gray-800 mt-4">
+                      <a
+                        href="https://soapbox.pub/mkstack"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                      >
+                        Vibed with MKStack
+                      </a>
+                    </div>
                   </div>
                 </CardContent>
               </Card>
