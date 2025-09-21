@@ -29,7 +29,7 @@ export function RetroPlayer({
 }: RetroPlayerProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const emulatorRef = useRef<NESEmulator | null>(null);
-  const [state, setState] = useState<EmulatorState>('loading');
+  const [state, setState] = useState<EmulatorState>('idle');
   const [error, setError] = useState<ErrorType | null>(null);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   const [audioEnabled, setAudioEnabled] = useState(true);
@@ -45,7 +45,15 @@ export function RetroPlayer({
     a: false,
   });
   const [romInfo, setRomInfo] = useState<any>(null);
-  const [validationResult, setValidationResult] = useState<any>(null);
+  const [validationResult, setValidationResult] = useState<{
+    encoding: string;
+    compression: string;
+    expectedSize?: number;
+    expectedHash?: string;
+    actualSize: number;
+    actualHash?: string;
+    shortHash?: string;
+  } | null>(null);
   const [debugInfo, setDebugInfo] = useState<{
     currentPhase: string;
     lastError?: string;
@@ -60,6 +68,51 @@ export function RetroPlayer({
     startTime: Date.now(),
     phaseTimes: {}
   });
+
+  // Base64 decoding function - keep exactly one
+  const decodeBase64ToBytes = (b64: string): Uint8Array => {
+    console.log("[Retro] decodeBase64ToBytes input length:", b64.length);
+
+    // Clean Base64 string
+    const clean = b64.replace(/\s+/g, "");
+    console.log("[Retro] clean length:", clean.length);
+
+    // Add padding if needed
+    const pad = clean + "=".repeat((4 - (clean.length % 4)) % 4);
+    console.log("[Retro] padded length:", pad.length);
+
+    try {
+      const bin = atob(pad);
+      console.log("[Retro] atob success, binary length:", bin.length);
+
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) {
+        bytes[i] = bin.charCodeAt(i);
+      }
+
+      console.log("[Retro] bytes array length:", bytes.length);
+      return bytes;
+    } catch (error) {
+      console.error("[Retro] atob failed:", error);
+      throw new Error(`Base64 decoding failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
+    }
+  };
+
+  // Validate NES header - keep exactly one
+  const validateNESHeader = (bytes: Uint8Array): boolean => {
+    console.log("[Retro] Validating NES header:", Array.from(bytes.slice(0, 4)));
+
+    // Check for NES header "NES^Z" (0x4E 0x45 0x53 0x1A)
+    const isValid = bytes[0] === 0x4E && bytes[1] === 0x45 && bytes[2] === 0x53 && bytes[3] === 0x1A;
+
+    if (!isValid) {
+      console.error("[Retro] Not a valid NES ROM header");
+    } else {
+      console.log("[Retro] Valid NES ROM header confirmed");
+    }
+
+    return isValid;
+  };
 
   // Initialize emulator
   useEffect(() => {
@@ -156,12 +209,18 @@ export function RetroPlayer({
           };
 
           const dTag = getTagValue('d');
+          const encoding = getTagValue('encoding') || 'base64';
+          const compression = getTagValue('compression') || 'none';
+          const size = getTagValue('size');
+          const sha256 = getTagValue('sha256');
+          const mime = getTagValue('mime') || 'unknown';
+
           const parsedTags = {
-            encoding: getTagValue('encoding') || 'base64',
-            compression: getTagValue('compression') || 'none',
-            size: getTagValue('size') || 'unknown',
-            sha256: getTagValue('sha256') || 'unknown',
-            mime: getTagValue('mime') || 'unknown'
+            encoding,
+            compression,
+            size: size || 'unknown',
+            sha256: sha256 || 'unknown',
+            mime
           };
 
           setDebugInfo(prev => ({
@@ -175,109 +234,163 @@ export function RetroPlayer({
           // The event is already fetched by the parent component, so we just validate it
           logPhase('Event fetched:', nostrEvent?.id);
 
-          logPhase('Decoding with encoding=' + parsedTags.encoding);
+          // Validate encoding and compression support
+          if (encoding !== 'base64') {
+            throw new Error(`Unsupported encoding: ${encoding}. Only base64 is supported for now.`);
+          }
+
+          if (compression !== 'none') {
+            throw new Error(`Unsupported compression: ${compression}. Only 'none' is supported for now.`);
+          }
+
+          logPhase('Decoding with encoding=' + encoding);
           setState('decoding');
 
-          const validation = await ROMLoader.validateROMFromNostrEvent(romSource.event);
-          setValidationResult(validation);
+          try {
+            // Decode Base64 to bytes
+            console.log("[Retro] Starting Base64 decode...");
+            romData = decodeBase64ToBytes(content);
+            console.log("[Retro] Base64 decode completed");
 
-          if (!validation.isValid) {
-            logError('decoding', new Error(validation.error || 'ROM validation failed'));
-            setError('validation-error' as ErrorType);
-            setErrorMessage(validation.error || 'ROM validation failed');
+            // Validate NES header
+            if (!validateNESHeader(romData)) {
+              logError('decoding', new Error('Invalid NES ROM header - not a valid NES file'));
+              setError('rom-invalid' as ErrorType);
+              setErrorMessage('Invalid NES ROM file format');
+              setState('error');
+              return;
+            }
+
+            logPhase('Decoded bytes:', romData.length);
+
+            // Log decoded byte details
+            console.log("[Retro] decoded len:", romData.length);
+            console.log("[Retro] bytes start:", Array.from(romData.slice(0, 16)));
+            console.log("[Retro] bytes end:", Array.from(romData.slice(-16)));
+
+            setDebugInfo(prev => ({
+              ...prev,
+              decodedSize: romData.length
+            }));
+
+            logPhase('Validating size', { expected: size, actual: romData.length });
+            setState('validating');
+
+            // Get ROM info
+            const info = ROMLoader.getROMInfo(romData);
+            setRomInfo(info);
+
+            // Create validation result object
+            const expectedSizeNum = size ? parseInt(size, 10) : undefined;
+            const computedHash = await ROMLoader.computeSHA256(romData);
+
+            const validation: {
+              encoding: string;
+              compression: string;
+              expectedSize?: number;
+              expectedHash?: string;
+              actualSize: number;
+              actualHash?: string;
+              shortHash?: string;
+            } = {
+              encoding,
+              compression,
+              expectedSize: expectedSizeNum,
+              expectedHash: sha256,
+              actualSize: romData.length,
+              actualHash: computedHash,
+              shortHash: computedHash.substring(0, 8)
+            };
+
+            setValidationResult(validation);
+
+            // Validate hash if provided
+            if (validation.actualHash && validation.expectedHash) {
+              if (validation.actualHash === validation.expectedHash.toLowerCase()) {
+                logPhase('SHA256 OK', { hash: validation.shortHash });
+              } else {
+                logError('validating', new Error(`SHA256 mismatch: expected ${validation.expectedHash}, got ${validation.actualHash}`));
+                setError('hash-mismatch' as ErrorType);
+                setErrorMessage('SHA256 hash does not match expected value');
+                setState('error');
+                return;
+              }
+            } else {
+              logPhase('SHA256 validation skipped (no expected hash provided)');
+            }
+
+            // Validate size if provided
+            if (validation.expectedSize && validation.actualSize) {
+              if (validation.actualSize === validation.expectedSize) {
+                logPhase('Size validation OK', { size: validation.actualSize, unit: 'bytes' });
+              } else {
+                logError('validating', new Error(`Size mismatch: expected ${validation.expectedSize}, got ${validation.actualSize}`));
+                setError('size-mismatch' as ErrorType);
+                setErrorMessage('ROM size does not match expected size');
+                setState('error');
+                return;
+              }
+            } else {
+              logPhase('Size validation skipped (no expected size provided)');
+            }
+          } catch (decodeError) {
+            logError('decoding', decodeError);
+            setError('decode-error' as ErrorType);
+            setErrorMessage(decodeError instanceof Error ? decodeError.message : 'Failed to decode ROM data');
             setState('error');
             return;
-          }
-
-          romData = validation.decodedBytes!;
-          logPhase('Decoded bytes:', romData.length);
-
-          // Log decoded byte details
-          console.log("[Retro] decoded len:", romData.length);
-          console.log("[Retro] bytes start:", Array.from(romData.slice(0, 16)));
-          console.log("[Retro] bytes end:", Array.from(romData.slice(-16)));
-
-          setDebugInfo(prev => ({
-            ...prev,
-            decodedSize: romData.length
-          }));
-
-          logPhase('Validating size', { expected: parsedTags.size, actual: romData.length });
-          setState('validating');
-
-          // Get ROM info
-          const info = ROMLoader.getROMInfo(romData);
-          setRomInfo(info);
-
-          // Add short hash to validation result for display
-          if (validation.actualHash) {
-            validation.shortHash = validation.actualHash.substring(0, 8);
-          } else {
-            const computedHash = await ROMLoader.computeSHA256(romData);
-            validation.actualHash = computedHash;
-            validation.shortHash = computedHash.substring(0, 8);
-          }
-
-          if (validation.actualHash && validation.expectedHash) {
-            if (validation.actualHash === validation.expectedHash.toLowerCase()) {
-              logPhase('SHA256 OK', { hash: validation.shortHash });
-            } else {
-              logError('validating', new Error(`SHA256 mismatch: expected ${validation.expectedHash}, got ${validation.actualHash}`));
-              setError('hash-mismatch' as ErrorType);
-              setErrorMessage('SHA256 hash does not match expected value');
-              setState('error');
-              return;
-            }
-          } else {
-            logPhase('SHA256 validation skipped (no expected hash provided)');
-          }
-
-          if (validation.expectedSize && validation.actualSize) {
-            if (validation.actualSize === validation.expectedSize) {
-              logPhase('Size validation OK:', validation.actualSize, 'bytes');
-            } else {
-              logError('validating', new Error(`Size mismatch: expected ${validation.expectedSize}, got ${validation.actualSize}`));
-              setError('size-mismatch' as ErrorType);
-              setErrorMessage('ROM size does not match expected size');
-              setState('error');
-              return;
-            }
-          } else {
-            logPhase('Size validation skipped (no expected size provided)');
           }
         } else {
           // Phase 1: Load from URL
           logPhase('Fetching ROM from URL...');
           setState('fetching');
 
-          romData = await ROMLoader.loadROM(romSource, {
-            maxSize: 4 * 1024 * 1024, // 4MB max
-          });
-          logPhase('ROM fetched:', romData.length, 'bytes');
+          try {
+            romData = await ROMLoader.loadROM(romSource, {
+              maxSize: 4 * 1024 * 1024, // 4MB max
+            });
+            logPhase('ROM fetched', { size: romData.length, unit: 'bytes' });
 
-          setDebugInfo(prev => ({
-            ...prev,
-            decodedSize: romData.length
-          }));
+            setDebugInfo(prev => ({
+              ...prev,
+              decodedSize: romData.length
+            }));
 
-          // Validate NES ROM
-          logPhase('Validating NES ROM structure...');
-          setState('validating');
+            // Validate NES ROM
+            logPhase('Validating NES ROM structure...');
+            setState('validating');
 
-          const isValid = await ROMLoader.validateNESROM(romData);
-          if (!isValid) {
-            logError('validating', new Error('Invalid NES ROM format'));
-            setError('rom-invalid');
-            setErrorMessage('Invalid NES ROM file format');
+            const isValid = await ROMLoader.validateNESROM(romData);
+            if (!isValid) {
+              logError('validating', new Error('Invalid NES ROM format'));
+              setError('rom-invalid');
+              setErrorMessage('Invalid NES ROM file format');
+              setState('error');
+              return;
+            }
+            logPhase('NES ROM validation OK');
+
+            // Get ROM info
+            const info = ROMLoader.getROMInfo(romData);
+            setRomInfo(info);
+            logPhase('ROM info extracted', { mapper: info.mapper, prg: info.prgBanks, chr: info.chrBanks });
+
+            // Create minimal validation result for URL loading
+            const computedHash = await ROMLoader.computeSHA256(romData);
+            setValidationResult({
+              encoding: 'unknown',
+              compression: 'none',
+              actualSize: romData.length,
+              actualHash: computedHash,
+              shortHash: computedHash.substring(0, 8)
+            });
+          } catch (urlError) {
+            logError('fetching', urlError);
+            setError('network-error' as ErrorType);
+            setErrorMessage(urlError instanceof Error ? urlError.message : 'Failed to load ROM from URL');
             setState('error');
             return;
           }
-          logPhase('NES ROM validation OK');
-
-          // Get ROM info
-          const info = ROMLoader.getROMInfo(romData);
-          setRomInfo(info);
-          logPhase('ROM info extracted', { mapper: info.mapper, prg: info.prgBanks, chr: info.chrBanks });
         }
 
         // Load ROM into emulator
@@ -287,7 +400,15 @@ export function RetroPlayer({
         setState('loading-emulator');
 
         try {
+          // Ensure romData is Uint8Array
+          if (!(romData instanceof Uint8Array)) {
+            console.error("[Retro] Invalid ROM data type:", typeof romData);
+            throw new Error('ROM data is not Uint8Array');
+          }
+
+          console.log("[Retro] Passing ROM to emulator:", romData.length, "bytes");
           const success = emulatorRef.current!.loadROM(romData);
+
           if (!success) {
             console.error("[Retro] Emulator error:", new Error('Failed to load ROM into emulator'));
             logError('loading-emulator', new Error('Failed to load ROM into emulator'));
@@ -346,6 +467,7 @@ export function RetroPlayer({
   useEffect(() => {
     return () => {
       if (emulatorRef.current) {
+        console.log("[Retro] Disposing emulator");
         emulatorRef.current.dispose();
       }
     };
@@ -476,7 +598,7 @@ export function RetroPlayer({
       const romData = await ROMLoader.loadROM(testRomSource, {
         maxSize: 4 * 1024 * 1024,
       });
-      logPhase('Test ROM fetched:', romData.length, 'bytes');
+      logPhase('Test ROM fetched', { size: romData.length, unit: 'bytes' });
 
       // Log decoded bytes for test ROM too
       console.log("[Retro] Test ROM length:", romData.length);
