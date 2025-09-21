@@ -12,6 +12,11 @@ export default defineConfig(() => ({
   plugins: [
     react(),
   ],
+  build: {
+    rollupOptions: {
+      external: ['/lib/fceux/fceux-web.js'],
+    },
+  },
   test: {
     globals: true,
     environment: 'jsdom',

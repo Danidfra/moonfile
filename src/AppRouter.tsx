@@ -2,13 +2,13 @@ import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ScrollToTop } from "./components/ScrollToTop";
 
 import Index from "./pages/Index";
-import Games from "./pages/Games";
+import GamesPage from "./pages/GamesPage";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Publish from "./pages/Publish";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
-import RetroPlayPage from "./pages/retro/[d]/play";
+import GamePage from "./pages/GamePage";
 
 export function AppRouter() {
   return (
@@ -16,12 +16,12 @@ export function AppRouter() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<Index />} />
-        <Route path="/games" element={<Games />} />
+        <Route path="/games" element={<GamesPage />} />
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/publish" element={<Publish />} />
-        {/* Retro game player route */}
-        <Route path="/retro/:d/play" element={<RetroPlayPage />} />
+        {/* Game player route */}
+        <Route path="/game/:id" element={<GamePage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
