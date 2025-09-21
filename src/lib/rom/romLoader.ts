@@ -86,6 +86,11 @@ export class ROMLoader {
   }
 
   private static async decodeFromNostrEvent(event: { content: string; tags: string[][] }): Promise<Uint8Array> {
+    // Log content before any processing
+    const content = event.content;
+    console.log('[Retro] Content (start):', content.slice(0, 100));
+    console.log('[Retro] Content (end):', content.slice(-100));
+
     // Extract tags
     const getTagValue = (tagName: string): string | undefined => {
       const tag = event.tags.find(t => t[0] === tagName);
@@ -130,6 +135,9 @@ export class ROMLoader {
           throw new Error(`Unsupported encoding: ${encoding}`);
       }
       console.log('[Retro] Decode successful, bytes:', decodedBytes.length);
+      console.log('[Retro] Decoded length:', decodedBytes.length);
+      console.log('[Retro] Decoded preview (start):', decodedBytes.slice(0, 16));
+      console.log('[Retro] Decoded preview (end):', decodedBytes.slice(-16));
     } catch (error) {
       console.error('[Retro] Decode failed:', error);
       throw new Error(`Failed to decode ${encoding}: ${error instanceof Error ? error.message : 'Unknown error'}`);

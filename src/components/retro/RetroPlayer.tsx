@@ -66,12 +66,14 @@ export function RetroPlayer({
     if (!canvasRef.current) return;
 
     try {
+      console.log("[Retro] Initializing emulator…");
       const emulator = new NESEmulator();
       emulator.init(canvasRef.current, {
         audio: audioEnabled,
       });
 
       emulatorRef.current = emulator;
+      console.log("[Retro] Emulator initialized successfully");
 
       // Set up canvas click to enable audio
       const handleCanvasClick = () => {
@@ -87,7 +89,7 @@ export function RetroPlayer({
         emulator.dispose();
       };
     } catch (err) {
-      console.error('Emulator initialization failed:', err);
+      console.error("[Retro] Emulator error:", err);
       setState('error');
       setError('emulator-error');
     }
@@ -139,6 +141,14 @@ export function RetroPlayer({
         let romData: Uint8Array;
 
         if (romSource.source === 'nostr') {
+          // Log tags before decoding
+          console.log("[Retro] Event tags:", romSource.event.tags);
+
+          // Log content before decoding (first and last 100 chars)
+          const content = romSource.event.content;
+          console.log("[Retro] Content (start):", content.slice(0, 100));
+          console.log("[Retro] Content (end):", content.slice(-100));
+
           // Extract debug info from Nostr event
           const getTagValue = (tagName: string): string | undefined => {
             const tag = romSource.event.tags.find(t => t[0] === tagName);
@@ -181,6 +191,11 @@ export function RetroPlayer({
 
           romData = validation.decodedBytes!;
           logPhase('Decoded bytes:', romData.length);
+
+          // Log decoded byte details
+          console.log("[Retro] Decoded length:", romData.length);
+          console.log("[Retro] Decoded preview (start):", romData.slice(0, 16));
+          console.log("[Retro] Decoded preview (end):", romData.slice(-16));
 
           setDebugInfo(prev => ({
             ...prev,
@@ -266,20 +281,31 @@ export function RetroPlayer({
         }
 
         // Load ROM into emulator
+        console.log("[Retro] Initializing emulator…");
         logPhase('Loading ROM into emulator...');
         setState('loading-emulator');
 
-        const success = emulatorRef.current!.loadROM(romData);
-        if (!success) {
-          logError('loading-emulator', new Error('Failed to load ROM into emulator'));
+        try {
+          const success = emulatorRef.current!.loadROM(romData);
+          if (!success) {
+            console.error("[Retro] Emulator error:", new Error('Failed to load ROM into emulator'));
+            logError('loading-emulator', new Error('Failed to load ROM into emulator'));
+            setError('emulator-error');
+            setErrorMessage('Failed to load ROM into emulator');
+            setState('error');
+            return;
+          }
+
+          logPhase('Emulator started');
+          setState('ready');
+        } catch (e) {
+          console.error("[Retro] Emulator error:", e);
+          logError('loading-emulator', e);
           setError('emulator-error');
-          setErrorMessage('Failed to load ROM into emulator');
+          setErrorMessage(e instanceof Error ? e.message : 'Emulator initialization failed');
           setState('error');
           return;
         }
-
-        logPhase('Emulator started');
-        setState('ready');
       } catch (err) {
         logError('loading', err);
 
@@ -433,6 +459,7 @@ export function RetroPlayer({
     if (!emulatorRef.current) return;
 
     try {
+      console.log("[Retro] Loading Test ROM...");
       logPhase('Loading Test ROM...');
       setState('fetching');
       setError(null);
@@ -444,10 +471,16 @@ export function RetroPlayer({
         url: '/roms/test-rom.nes'
       };
 
+      console.log("[Retro] Test ROM URL:", testRomSource.url);
       const romData = await ROMLoader.loadROM(testRomSource, {
         maxSize: 4 * 1024 * 1024,
       });
       logPhase('Test ROM fetched:', romData.length, 'bytes');
+
+      // Log decoded bytes for test ROM too
+      console.log("[Retro] Test ROM length:", romData.length);
+      console.log("[Retro] Test ROM preview (start):", romData.slice(0, 16));
+      console.log("[Retro] Test ROM preview (end):", romData.slice(-16));
 
       // Validate NES ROM
       logPhase('Validating Test ROM...');
@@ -469,20 +502,31 @@ export function RetroPlayer({
       logPhase('Test ROM info', { mapper: info.mapper, prg: info.prgBanks, chr: info.chrBanks });
 
       // Load ROM into emulator
+      console.log("[Retro] Loading Test ROM into emulator...");
       logPhase('Loading Test ROM into emulator...');
       setState('loading-emulator');
 
-      const success = emulatorRef.current!.loadROM(romData);
-      if (!success) {
-        logError('loading-emulator', new Error('Failed to load Test ROM into emulator'));
+      try {
+        const success = emulatorRef.current!.loadROM(romData);
+        if (!success) {
+          console.error("[Retro] Test ROM emulator error:", new Error('Failed to load Test ROM into emulator'));
+          logError('loading-emulator', new Error('Failed to load Test ROM into emulator'));
+          setError('test-rom-failed' as ErrorType);
+          setErrorMessage('Failed to load Test ROM into emulator');
+          setState('error');
+          return;
+        }
+
+        logPhase('Test ROM loaded successfully');
+        setState('ready');
+      } catch (e) {
+        console.error("[Retro] Test ROM emulator error:", e);
+        logError('loading-emulator', e);
         setError('test-rom-failed' as ErrorType);
-        setErrorMessage('Failed to load Test ROM into emulator');
+        setErrorMessage(e instanceof Error ? e.message : 'Test ROM emulator initialization failed');
         setState('error');
         return;
       }
-
-      logPhase('Test ROM loaded successfully');
-      setState('ready');
     } catch (err) {
       logError('loading-test-rom', err);
       setError('test-rom-failed' as ErrorType);
