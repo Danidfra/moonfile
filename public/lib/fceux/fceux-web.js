@@ -85,14 +85,14 @@
       return true;
     },
 
-    // Frame execution
+    // Frame execution - delegate to WebAssembly core
     frame() {
       if (!this.initialized || !this.romLoaded) {
         return;
       }
 
-      // The real WebAssembly core will handle frame rendering
-      // This is just a stub - the actual implementation should call the WASM core
+      // The WebAssembly core handles actual frame rendering
+      // This stub is no longer needed as we use the real WASM core
     },
 
     // Reset emulator
@@ -170,7 +170,7 @@
       this.running = !!running;
     },
 
-    
+
   };
 
   // CRITICAL: Expose globally with exact name expected by FCEUXEmulator
