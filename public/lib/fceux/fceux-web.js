@@ -91,8 +91,8 @@
         return;
       }
 
-      // Generate a simple test pattern for now
-      this.generateTestFrame();
+      // The real WebAssembly core will handle frame rendering
+      // This is just a stub - the actual implementation should call the WASM core
     },
 
     // Reset emulator
@@ -170,25 +170,7 @@
       this.running = !!running;
     },
 
-    // Internal test frame generation
-    generateTestFrame() {
-      if (!this.frameBuffer) return;
-
-      const time = Date.now() * 0.001;
-
-      for (let y = 0; y < 240; y++) {
-        for (let x = 0; x < 256; x++) {
-          const i = y * 256 + x;
-          const j = i * 4; // RGBA format
-
-          // Create a simple animated pattern
-          this.frameBuffer[j] = (x % 64) * 4;     // R
-          this.frameBuffer[j + 1] = (y % 64) * 4; // G
-          this.frameBuffer[j + 2] = 128 + Math.sin(time + x * 0.01) * 32; // B (animated)
-          this.frameBuffer[j + 3] = 255;           // A
-        }
-      }
-    }
+    
   };
 
   // CRITICAL: Expose globally with exact name expected by FCEUXEmulator

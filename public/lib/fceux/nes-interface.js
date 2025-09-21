@@ -26,12 +26,12 @@ class NESInterface {
       // Create instance
       const memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
       const wasmInstance = await WebAssembly.instantiate(wasmModule, { memory });
-      
+
       this.wasmModule = wasmModule;
       this.wasmInstance = wasmInstance;
       this.memory = memory;
       this.exports = wasmInstance.exports;
-      
+
       // Initialize NES core
       const initResult = this.exports.init();
       if (initResult) {
@@ -56,7 +56,7 @@ class NESInterface {
 
     try {
       console.log('[NES Interface] Loading ROM...', romData.length, 'bytes');
-      
+
       // Create a copy of ROM data in WASM memory
       const romPtr = this.romData ? this.romData.ptr : this.allocMemory(romData.length);
       const romView = new Uint8Array(this.memory.buffer, romPtr, romData.length);
@@ -64,12 +64,12 @@ class NESInterface {
 
       // Load ROM into NES core
       const result = this.exports.loadRom(romPtr, romData.length);
-      
+
       if (result) {
         this.romLoaded = true;
         this.romData = { ptr: romPtr, size: romData.length };
         console.log('[NES Interface] ROM loaded successfully');
-        
+
         // Log ROM info
         this.logROMInfo(romData);
         return true;
@@ -132,30 +132,77 @@ class NESInterface {
       if (framePtr) {
         // Check if we have a direct RGBA buffer or indexed buffer + palette
         const palettePtr = this.exports.getPalette();
-        
+
         if (palettePtr) {
           // Indexed color mode - convert to RGBA
           const palette = new Uint8Array(this.memory.buffer, palettePtr, 192);
           const indexedBuffer = new Uint8Array(this.memory.buffer, framePtr, 256 * 240);
-          
+
           // Convert indexed to RGBA
           const rgbaBuffer = new Uint8ClampedArray(256 * 240 * 4);
-          
+
           for (let i = 0; i < indexedBuffer.length; i++) {
-            const colorIndex = indexedBuffer[i] & 0x3F;
+            const colorIndex = indexedBuffer[i] & 0x3F; // Limit to 64 colors
             const paletteIndex = colorIndex * 3;
-            
-            rgbaBuffer[i * 4] = palette[paletteIndex];     // R
-            rgbaBuffer[i * 4 + 1] = palette[paletteIndex + 1]; // G
-            rgbaBuffer[i * 4 + 2] = palette[paletteIndex + 2]; // B
-            rgbaBuffer[i * 4 + 3] = 255;                  // A
+
+            // Ensure palette index is within bounds
+            if (paletteIndex + 2 < palette.length) {
+              rgbaBuffer[i * 4] = palette[paletteIndex];     // R
+              rgbaBuffer[i * 4 + 1] = palette[paletteIndex + 1]; // G
+              rgbaBuffer[i * 4 + 2] = palette[paletteIndex + 2]; // B
+              rgbaBuffer[i * 4 + 3] = 255;                  // A
+            } else {
+              // Fallback to black if palette index is out of bounds
+              rgbaBuffer[i * 4] = 0;     // R
+              rgbaBuffer[i * 4 + 1] = 0; // G
+              rgbaBuffer[i * 4 + 2] = 0; // B
+              rgbaBuffer[i * 4 + 3] = 255; // A
+            }
           }
-          
+
           return rgbaBuffer;
         } else {
           // Direct RGBA mode
           return new Uint8ClampedArray(this.memory.buffer, framePtr, 256 * 240 * 4);
         }
+      }
+    }
+    return new Uint8Array(256 * 240 * 4); // Return empty buffer if not available
+  }
+
+  getFrameSpec() {
+    if (this.exports && this.initialized) {
+      const palettePtr = this.exports.getPalette();
+
+      if (palettePtr) {
+        // Indexed color mode
+        return {
+          width: 256,
+          height: 240,
+          format: 'INDEXED8'
+        };
+      } else {
+        // Direct RGBA mode
+        return {
+          width: 256,
+          height: 240,
+          format: 'RGBA32'
+        };
+      }
+    }
+    return {
+      width: 256,
+      height: 240,
+      format: 'RGBA32' // fallback
+    };
+  }
+
+  getPalette() {
+    if (this.exports && this.initialized) {
+      const palettePtr = this.exports.getPalette();
+      if (palettePtr) {
+        // Return palette as Uint8Array (RGB format, 64 colors * 3 bytes)
+        return new Uint8Array(this.memory.buffer, palettePtr, 192);
       }
     }
     return null;
@@ -186,7 +233,7 @@ class NESInterface {
         return ptr;
       }
     }
-    
+
     // Fallback - allocate at end of memory
     return this.memory.buffer.byteLength - size;
   }

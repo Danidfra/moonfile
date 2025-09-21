@@ -1,0 +1,351 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NES Emulator Test - Fixed</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            font-family: monospace;
+            background: #111;
+            color: #fff;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .canvas-container {
+            margin: 20px 0;
+            border: 2px solid #333;
+            display: inline-block;
+        }
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+            background: black;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            padding: 10px 20px;
+            margin: 5px;
+            background: #333;
+            color: white;
+            border: none;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:hover {
+            background: #555;
+        }
+        button:disabled {
+            background: #222;
+            cursor: not-allowed;
+        }
+        .log {
+            background: #222;
+            padding: 10px;
+            border-radius: 4px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            border-radius: 4px;
+        }
+        .status.success {
+            background: #0a4a0a;
+            color: #4ade80;
+        }
+        .status.error {
+            background: #4a0a0a;
+            color: #f87171;
+        }
+        .status.info {
+            background: #0a1a4a;
+            color: #60a5fa;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>NES Emulator Test - Fixed</h1>
+        
+        <div id="status" class="status info">Initializing...</div>
+        
+        <div class="canvas-container">
+            <canvas id="nesCanvas" width="256" height="240"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button id="initBtn" onclick="initEmulator()">Initialize Core</button>
+            <button id="loadBtn" onclick="loadTestRom()" disabled>Load Test ROM</button>
+            <button id="startBtn" onclick="startEmulator()" disabled>Start</button>
+            <button id="pauseBtn" onclick="pauseEmulator()" disabled>Pause</button>
+            <button id="resetBtn" onclick="resetEmulator()" disabled>Reset</button>
+        </div>
+        
+        <div class="controls">
+            <h3>Keyboard Test</h3>
+            <p>Arrow keys: D-pad | Enter: Start | Shift: Select | Z/X: B/A</p>
+        </div>
+        
+        <div class="log" id="log"></div>
+    </div>
+
+    <script src="/public/lib/fceux/nes-interface.js"></script>
+    <script>
+        let core = null;
+        let player = null;
+        let animationId = null;
+        let isRunning = false;
+        
+        const canvas = document.getElementById('nesCanvas');
+        const ctx = canvas.getContext('2d');
+        const statusDiv = document.getElementById('status');
+        const logDiv = document.getElementById('log');
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const entry = document.createElement('div');
+            entry.textContent = `[${timestamp}] ${message}`;
+            entry.style.color = type === 'error' ? '#f87171' : type === 'success' ? '#4ade80' : '#fff';
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+        
+        function updateStatus(message, type = 'info') {
+            statusDiv.textContent = message;
+            statusDiv.className = `status ${type}`;
+            log(message, type);
+        }
+        
+        async function initEmulator() {
+            try {
+                updateStatus('Initializing NES core...', 'info');
+                document.getElementById('initBtn').disabled = true;
+                
+                if (typeof window.NESInterface === 'undefined') {
+                    throw new Error('NES Interface not loaded');
+                }
+                
+                core = new window.NESInterface();
+                const result = await core.init();
+                
+                if (!result) {
+                    throw new Error('Core initialization failed');
+                }
+                
+                updateStatus('Core initialized successfully', 'success');
+                document.getElementById('loadBtn').disabled = false;
+                
+                // Log frame spec
+                const spec = core.getFrameSpec();
+                log(`Frame spec: ${spec.width}x${spec.height}, format: ${spec.format}`);
+                
+                const buffer = core.getFrameBuffer();
+                log(`Initial buffer length: ${buffer.length}`);
+                
+            } catch (error) {
+                updateStatus(`Initialization failed: ${error.message}`, 'error');
+                document.getElementById('initBtn').disabled = false;
+            }
+        }
+        
+        async function loadTestRom() {
+            try {
+                updateStatus('Creating test ROM...', 'info');
+                document.getElementById('loadBtn').disabled = true;
+                
+                // Create a minimal test ROM (just the header)
+                const testRom = new Uint8Array([
+                    0x4E, 0x45, 0x53, 0x1A, // "NES" + EOF
+                    0x01,                   // 1 PRG bank
+                    0x01,                   // 1 CHR bank  
+                    0x00,                   // Control flags
+                    0x00,                   // Control flags
+                    0x00,                   // Mapper flags
+                    0x00,                   // Mapper flags
+                    0x00, 0x00, 0x00, 0x00  // Padding
+                ]);
+                
+                const result = core.loadROM(testRom);
+                
+                if (!result) {
+                    throw new Error('ROM loading failed');
+                }
+                
+                updateStatus('Test ROM loaded successfully', 'success');
+                document.getElementById('startBtn').disabled = false;
+                document.getElementById('resetBtn').disabled = false;
+                
+                // Log frame spec after ROM load
+                const spec = core.getFrameSpec();
+                log(`Frame spec after ROM load: ${spec.width}x${spec.height}, format: ${spec.format}`);
+                
+                const buffer = core.getFrameBuffer();
+                log(`Buffer length after ROM load: ${buffer.length}`);
+                
+                if (spec.format === 'INDEXED8') {
+                    const palette = core.getPalette();
+                    log(`Palette length: ${palette.length}, type: ${palette.constructor.name}`);
+                }
+                
+            } catch (error) {
+                updateStatus(`ROM loading failed: ${error.message}`, 'error');
+                document.getElementById('loadBtn').disabled = false;
+            }
+        }
+        
+        function startEmulator() {
+            if (!core) return;
+            
+            updateStatus('Starting emulator...', 'info');
+            core.setRunning(true);
+            isRunning = true;
+            
+            document.getElementById('startBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = false;
+            
+            gameLoop();
+            updateStatus('Emulator running', 'success');
+        }
+        
+        function pauseEmulator() {
+            if (!core) return;
+            
+            updateStatus('Pausing emulator...', 'info');
+            core.setRunning(false);
+            isRunning = false;
+            
+            if (animationId) {
+                cancelAnimationFrame(animationId);
+                animationId = null;
+            }
+            
+            document.getElementById('startBtn').disabled = false;
+            document.getElementById('pauseBtn').disabled = true;
+            
+            updateStatus('Emulator paused', 'info');
+        }
+        
+        function resetEmulator() {
+            if (!core) return;
+            
+            updateStatus('Resetting emulator...', 'info');
+            core.reset();
+            updateStatus('Emulator reset', 'success');
+        }
+        
+        function gameLoop() {
+            if (!isRunning || !core) return;
+            
+            core.frame();
+            blitFrame();
+            
+            animationId = requestAnimationFrame(gameLoop);
+        }
+        
+        function blitFrame() {
+            const spec = core.getFrameSpec();
+            const src = core.getFrameBuffer();
+            
+            // Guard against wrong lengths
+            const expected = 
+                spec.format === 'RGBA32' ? spec.width * spec.height * 4 :
+                spec.format === 'RGB24'  ? spec.width * spec.height * 3 :
+                spec.format === 'INDEXED8' ? spec.width * spec.height :
+                -1;
+            
+            if (src.length !== expected) {
+                log(`Unexpected frame length: got ${src.length}, expected ${expected}`, 'error');
+                return;
+            }
+            
+            const imageData = ctx.createImageData(spec.width, spec.height);
+            const dst = imageData.data;
+            
+            if (spec.format === 'RGBA32') {
+                dst.set(src);
+            } else if (spec.format === 'RGB24') {
+                let si = 0, di = 0;
+                while (si < src.length) {
+                    dst[di++] = src[si++]; // R
+                    dst[di++] = src[si++]; // G
+                    dst[di++] = src[si++]; // B
+                    dst[di++] = 255;       // A
+                }
+            } else if (spec.format === 'INDEXED8') {
+                const pal = core.getPalette();
+                if (!pal) {
+                    log('INDEXED8 format without palette', 'error');
+                    return;
+                }
+                
+                const useU32 = pal instanceof Uint32Array;
+                let di = 0;
+                for (let i = 0; i < src.length; i++) {
+                    const idx = src[i] & 0xff;
+                    if (useU32) {
+                        const rgba = pal[idx];
+                        dst[di++] =  rgba        & 0xff;       // R
+                        dst[di++] = (rgba >>> 8) & 0xff;       // G
+                        dst[di++] = (rgba >>>16) & 0xff;       // B
+                        dst[di++] = (rgba >>>24) & 0xff;       // A
+                    } else {
+                        const base = idx * 4;
+                        dst[di++] = pal[base + 0];  // R
+                        dst[di++] = pal[base + 1];  // G
+                        dst[di++] = pal[base + 2];  // B
+                        dst[di++] = pal[base + 3] ?? 255; // A
+                    }
+                }
+            } else {
+                log(`Unsupported frame format: ${spec.format}`, 'error');
+                return;
+            }
+            
+            ctx.putImageData(imageData, 0, 0);
+        }
+        
+        // Keyboard controls
+        const keyMap = {
+            'ArrowRight': 0,
+            'ArrowLeft': 1,
+            'ArrowDown': 2,
+            'ArrowUp': 3,
+            'Enter': 4,
+            'Shift': 5,
+            'z': 6,
+            'x': 7,
+        };
+        
+        document.addEventListener('keydown', (e) => {
+            const button = keyMap[e.key];
+            if (button !== undefined && core) {
+                core.setButton(button, true);
+                log(`Key down: ${e.key} (button ${button})`);
+                e.preventDefault();
+            }
+        });
+        
+        document.addEventListener('keyup', (e) => {
+            const button = keyMap[e.key];
+            if (button !== undefined && core) {
+                core.setButton(button, false);
+                log(`Key up: ${e.key} (button ${button})`);
+                e.preventDefault();
+            }
+        });
+        
+        // Initialize
+        log('Test page loaded. Click "Initialize Core" to begin.');
+    </script>
+</body>
+</html>

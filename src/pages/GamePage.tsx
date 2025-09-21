@@ -143,7 +143,21 @@ export default function GamePage() {
       const nesPlayer = new NesPlayer(fceuxCore, canvasRef.current);
       setPlayer(nesPlayer);
 
-      // Start playing
+      // Log frame spec for diagnostics
+      const spec = fceuxCore.getFrameSpec();
+      const buffer = fceuxCore.getFrameBuffer();
+
+      logDebug('Frame spec:', {
+        width: spec.width,
+        height: spec.height,
+        format: spec.format,
+        bufferLength: buffer.length
+      });
+
+      // Set running state on the core
+      fceuxCore.setRunning(true);
+
+      // Start the player (which will start the RAF loop)
       nesPlayer.play();
       setStatus('running');
       logDebug('Emulator started');
@@ -313,8 +327,11 @@ export default function GamePage() {
                         ref={canvasRef}
                         width={256}
                         height={240}
-                        className="absolute inset-0 w-full h-full"
-                        style={{ imageRendering: 'pixelated' }}
+                        className="absolute inset-0 w-full h-full block"
+                        style={{
+                          imageRendering: 'pixelated',
+                          background: 'black'
+                        }}
                       />
 
                       {/* Loading overlay */}

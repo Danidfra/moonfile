@@ -1,117 +1,73 @@
 import { NesCore, FrameSpec, PixelFormat } from '../NesCore';
 
-// Helper function to wait for FCEUX script to load
-function waitForFCEUXScript(timeout: number = 5000): Promise<void> {
-  return new Promise((resolve, reject) => {
-    if (typeof (window as any).FCEUX !== 'undefined') {
-      resolve();
-      return;
-    }
-
-    const startTime = Date.now();
-
-    const checkInterval = setInterval(() => {
-      if (typeof (window as any).FCEUX !== 'undefined') {
-        clearInterval(checkInterval);
-        resolve();
-      } else if (Date.now() - startTime > timeout) {
-        clearInterval(checkInterval);
-        reject(new Error(`FCEUX script not loaded after ${timeout}ms timeout`));
-      }
-    }, 50);
-
-    // Also listen for script load events
-    const scriptTags = Array.from(document.getElementsByTagName('script'));
-    const fceuxScript = scriptTags.find(script => script.src.includes('fceux'));
-
-    if (fceuxScript && !(fceuxScript as HTMLScriptElement).readyState?.includes('complete')) {
-      fceuxScript.addEventListener('load', () => {
-        setTimeout(() => {
-          if (typeof (window as any).FCEUX !== 'undefined') {
-            resolve();
-          } else {
-            reject(new Error('FCEUX script loaded but window.FCEUX not available'));
-          }
-        }, 100);
-      });
-
-      fceuxScript.addEventListener('error', () => {
-        clearInterval(checkInterval);
-        reject(new Error('Failed to load FCEUX script'));
-      });
-    }
-  });
-}
-
 export class FCEUXWebAdapter implements NesCore {
   private core: any = null;
   private running = false;
   private frameSpec: FrameSpec = {
     width: 256,
     height: 240,
-    format: 'RGB24' // Will be determined after core init
+    format: 'RGBA32' // Default, will be determined after core init
   };
 
   async init(): Promise<boolean> {
     try {
-      // Wait for FCEUX script to load
       if (localStorage.getItem('debug')?.includes('retro:*')) {
-        console.log('[FCEUXWebAdapter] Waiting for FCEUX script to load...');
+        console.log('[FCEUXWebAdapter] Initializing FCEUX WebAssembly core...');
       }
 
-      await waitForFCEUXScript();
+      // Wait for NES Interface script to load
+      if (typeof (window as any).NESInterface === 'undefined') {
+        throw new Error('NES Interface not loaded. Make sure nes-interface.js is loaded.');
+      }
 
-      const core = (window as any).FCEUX;
+      // Create NES Interface instance
+      const NESInterface = (window as any).NESInterface;
+      this.core = new NESInterface();
 
       if (localStorage.getItem('debug')?.includes('retro:*')) {
-        console.log('[FCEUXWebAdapter] FCEUX script loaded, window.FCEUX exists:', !!core);
-        console.log('[FCEUXWebAdapter] Core type:', typeof core);
-        console.log('[FCEUXWebAdapter] Core methods:', Object.keys(core));
+        console.log('[FCEUXWebAdapter] NES Interface instance created');
       }
-
-      if (!core) {
-        throw new Error('FCEUX core not available after script loading timeout');
-      }
-
-      // Verify core has required methods
-      const requiredInitMethods = ['init', 'loadRom', 'frame', 'reset', 'setButton', 'getFrameBuffer', 'setRunning'];
-      const missingMethods = requiredInitMethods.filter(method => typeof core[method] !== 'function');
-
-      if (missingMethods.length > 0) {
-        throw new Error(`FCEUX core missing required methods: ${missingMethods.join(', ')}`);
-      }
-
-      this.core = core;
 
       // Initialize the core
-      if (typeof this.core.init !== 'function') {
-        throw new Error('FCEUX core missing init() function');
+      const initResult = await this.core.init();
+      if (!initResult) {
+        throw new Error('NES Interface initialization failed');
       }
 
-      await this.core.init();
+      if (localStorage.getItem('debug')?.includes('retro:*')) {
+        console.log('[FCEUXWebAdapter] Core initialized successfully');
+      }
 
       // Verify required methods exist
-      const requiredMethods = ['loadRom', 'frame', 'reset', 'setButton', 'getFrameBuffer', 'setRunning'];
+      const requiredMethods = ['loadROM', 'frame', 'reset', 'setButton', 'getFrameBuffer', 'getFrameSpec'];
       for (const method of requiredMethods) {
         if (typeof this.core[method] !== 'function') {
           throw new Error(`FCEUX core missing ${method}() function`);
         }
       }
 
-      // Determine pixel format by checking frame buffer after a test frame
-      this.core.frame(); // Run one frame to get buffer
-      const buffer = this.core.getFrameBuffer();
-
-      if (buffer.length === 256 * 240 * 4) {
-        this.frameSpec.format = 'RGBA32';
-      } else if (buffer.length === 256 * 240 * 3) {
-        this.frameSpec.format = 'RGB24';
-      } else {
-        throw new Error(`Unexpected frame buffer size: ${buffer.length}`);
+      // Get frame spec from core
+      const spec = this.core.getFrameSpec();
+      if (spec) {
+        this.frameSpec = {
+          width: spec.width || 256,
+          height: spec.height || 240,
+          format: spec.format || 'RGBA32'
+        };
       }
 
+      // Log diagnostics
       if (localStorage.getItem('debug')?.includes('retro:*')) {
-        console.log('[FCEUXWebAdapter] Core initialized with format:', this.frameSpec.format);
+        console.log('[FCEUXWebAdapter] Frame spec after init:', {
+          width: this.frameSpec.width,
+          height: this.frameSpec.height,
+          format: this.frameSpec.format
+        });
+
+        const testBuffer = this.core.getFrameBuffer();
+        if (testBuffer) {
+          console.log('[FCEUXWebAdapter] Initial frame buffer length:', testBuffer.length);
+        }
       }
 
       return true;
@@ -127,15 +83,48 @@ export class FCEUXWebAdapter implements NesCore {
     }
 
     try {
-      // Validate NES header
-      if (!this.validateNESHeader(rom)) {
-        throw new Error('Invalid NES ROM header');
+      if (localStorage.getItem('debug')?.includes('retro:*')) {
+        console.log('[FCEUXWebAdapter] Loading ROM, size:', rom.length);
       }
 
-      const success = this.core.loadRom(rom, rom.length);
+      // Validate NES header
+      if (rom.length < 16) {
+        throw new Error('ROM too small');
+      }
+
+      if (rom[0] !== 0x4E || rom[1] !== 0x45 || rom[2] !== 0x53 || rom[3] !== 0x1A) {
+        throw new Error('Invalid NES header');
+      }
+
+      // Load ROM into core
+      const success = this.core.loadROM(rom);
 
       if (localStorage.getItem('debug')?.includes('retro:*')) {
-        console.log('[FCEUXWebAdapter] ROM loaded:', success);
+        console.log('[FCEUXWebAdapter] ROM loaded result:', success);
+
+        // Log frame spec after ROM load
+        const spec = this.core.getFrameSpec();
+        console.log('[FCEUXWebAdapter] Frame spec after ROM load:', {
+          width: spec.width,
+          height: spec.height,
+          format: spec.format
+        });
+
+        const buffer = this.core.getFrameBuffer();
+        if (buffer) {
+          console.log('[FCEUXWebAdapter] Frame buffer length after ROM load:', buffer.length);
+        }
+
+        // If INDEXED8 format, log palette info
+        if (spec.format === 'INDEXED8') {
+          const palette = this.core.getPalette?.();
+          if (palette) {
+            console.log('[FCEUXWebAdapter] Palette info:', {
+              length: palette.length,
+              type: palette.constructor.name
+            });
+          }
+        }
       }
 
       return success;
@@ -168,8 +157,8 @@ export class FCEUXWebAdapter implements NesCore {
 
   setRunning(running: boolean): void {
     this.running = running;
-    if (this.core && typeof this.core.setRunning === 'function') {
-      this.core.setRunning(running);
+    if (localStorage.getItem('debug')?.includes('retro:*')) {
+      console.log('[FCEUXWebAdapter] Set running:', running);
     }
   }
 
@@ -184,24 +173,17 @@ export class FCEUXWebAdapter implements NesCore {
     return this.frameSpec;
   }
 
+  getPalette?(): Uint8Array | Uint32Array | null {
+    if (this.core && typeof this.core.getPalette === 'function') {
+      return this.core.getPalette();
+    }
+    return null;
+  }
+
   getAudioBuffer?(): Int16Array {
     if (this.core && typeof this.core.getAudioBuffer === 'function') {
       return this.core.getAudioBuffer();
     }
     return new Int16Array(0);
-  }
-
-  private validateNESHeader(bytes: Uint8Array): boolean {
-    if (bytes.length < 4) return false;
-
-    // Check for NES header "NES^Z" (0x4E 0x45 0x53 0x1A)
-    const isValid = bytes[0] === 0x4E && bytes[1] === 0x45 && bytes[2] === 0x53 && bytes[3] === 0x1A;
-
-    if (localStorage.getItem('debug')?.includes('retro:*')) {
-      console.log('[FCEUXWebAdapter] Header validation:', isValid,
-        Array.from(bytes.slice(0, 4)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
-    }
-
-    return isValid;
   }
 }

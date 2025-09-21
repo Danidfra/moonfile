@@ -1,4 +1,4 @@
-export type PixelFormat = 'RGB24' | 'RGBA32';
+export type PixelFormat = 'RGB24' | 'RGBA32' | 'INDEXED8';
 
 export interface FrameSpec {
   width: number;   // expect 256
@@ -15,5 +15,6 @@ export interface NesCore {
   setRunning(running: boolean): void;
   getFrameBuffer(): Uint8Array;        // raw pixel buffer
   getFrameSpec(): FrameSpec;           // MUST return format + dims
+  getPalette?(): Uint8Array | Uint32Array | null;  // optional, for INDEXED8 format
   getAudioBuffer?(): Int16Array;       // optional
 }
