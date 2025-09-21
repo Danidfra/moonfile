@@ -13,7 +13,7 @@ export function GamesEmptyState({ loading = false, error = null, onRefresh }: Ga
       <div className="text-center py-16">
         <div className="w-16 h-16 mx-auto mb-4 border-4 border-purple-600 border-t-transparent rounded-full animate-spin" />
         <h3 className="text-xl font-semibold text-white mb-2">Loading games...</h3>
-        <p className="text-gray-400">Fetching kind:31985 events from relays</p>
+        <p className="text-gray-400">Fetching kind:31996 events from relays</p>
       </div>
     );
   }
@@ -84,7 +84,7 @@ export function GamesEmptyState({ loading = false, error = null, onRefresh }: Ga
       </div>
       <h3 className="text-2xl font-semibold text-white mb-3">No games found</h3>
       <p className="text-gray-400 mb-6 max-w-md mx-auto">
-        No kind:31985 entries were found on the connected relay(s).
+        No kind:31996 entries were found on the connected relay(s).
       </p>
       {onRefresh && (
         <Button

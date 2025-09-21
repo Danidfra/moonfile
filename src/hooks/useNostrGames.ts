@@ -1,11 +1,11 @@
 import { useState, useEffect } from "react";
 import { useNostr } from "@nostrify/react";
-import type { Game31985, NostrEvent } from "@/types/game";
+import type { Game31996, NostrEvent } from "@/types/game";
 import { mergeByD } from "@/lib/gameParser";
 
 export function useNostrGames() {
   const { nostr } = useNostr();
-  const [games, setGames] = useState<Game31985[]>([]);
+  const [games, setGames] = useState<Game31996[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -18,7 +18,7 @@ export function useNostrGames() {
 
       const events = await nostr.query([
         {
-          kinds: [31985],
+          kinds: [31996],
           limit: 1000 // Optional: add limit to prevent overwhelming responses
         }
       ], {

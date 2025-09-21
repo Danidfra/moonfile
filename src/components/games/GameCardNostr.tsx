@@ -2,10 +2,10 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Play, Star, Download } from "lucide-react";
-import type { Game31985 } from "@/types/game";
+import type { Game31996 } from "@/types/game";
 
 interface GameCardNostrProps {
-  game: Game31985;
+  game: Game31996;
   onPlay?: () => void;
 }
 

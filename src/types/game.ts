@@ -5,7 +5,7 @@ export type GameAsset = {
   screenshots: string[];
 };
 
-export type Game31985 = {
+export type Game31996 = {
   id: string;             // from tag d
   title: string;          // name
   summary?: string;

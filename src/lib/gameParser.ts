@@ -1,4 +1,4 @@
-import type { Game31985, NostrEvent } from "@/types/game";
+import type { Game31996, NostrEvent } from "@/types/game";
 
 export function firstTagValue(tags: string[][], key: string): string | undefined {
   const t = tags.find(t => t[0] === key);
@@ -15,7 +15,7 @@ export function multiTagValues(tags: string[][], key: string): string[] {
   return values;
 }
 
-export function parseGame(e: NostrEvent): Game31985 | null {
+export function parseGame(e: NostrEvent): Game31996 | null {
   const d = firstTagValue(e.tags, "d");
   const name = firstTagValue(e.tags, "name");
 
@@ -64,11 +64,11 @@ export function parseGame(e: NostrEvent): Game31985 | null {
   };
 }
 
-export function mergeByD(events: NostrEvent[]): Game31985[] {
-  const map = new Map<string, { e: NostrEvent, g: Game31985 }>();
+export function mergeByD(events: NostrEvent[]): Game31996[] {
+  const map = new Map<string, { e: NostrEvent, g: Game31996 }>();
 
   for (const e of events) {
-    if (e.kind !== 31985) continue;
+    if (e.kind !== 31996) continue;
 
     const g = parseGame(e);
     if (!g) continue;
