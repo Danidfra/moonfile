@@ -102,67 +102,67 @@ const Publish = () => {
             </div>
 
             {/* Getting Started */}
-            <div className="grid md:grid-cols-2 gap-12 mb-16">
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 backdrop-blur-sm">
-                <h2 className="text-3xl font-bold mb-6 text-white">Getting Started (Retro Games)</h2>
-                <div className="space-y-6">
-                  <div className="flex items-start space-x-4">
-                    <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      1
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-white mb-2">Prepare Your ROM</h3>
-                      <p className="text-gray-300">
-                        Convert your retro game file (e.g. .nes, .gb) into Base64 format. Verify its integrity by calculating size (bytes) and sha256 hash of the decoded ROM.
-                      </p>
-                    </div>
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 backdrop-blur-sm mb-12">
+              <h2 className="text-3xl font-bold mb-6 text-white">Getting Started (Retro Games)</h2>
+              <div className="space-y-6">
+                <div className="flex items-start space-x-4">
+                  <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                    1
                   </div>
-
-                  <div className="flex items-start space-x-4">
-                    <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      2
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-white mb-2">Add Game Metadata</h3>
-                      <p className="text-gray-300 mb-3">
-                        Prepare metadata tags for your game, including:
-                      </p>
-                      <ul className="text-gray-300 space-y-1 text-sm">
-                        <li>• <span className="text-purple-400">name, summary, genre, mode, status, ver</span></li>
-                        <li>• <span className="text-purple-400">credits</span> (author/npub)</li>
-                        <li>• <span className="text-purple-400">platforms</span> (nes-rom, gb-rom, etc.)</li>
-                        <li>• <span className="text-purple-400">Visual assets</span>: image, icon, banner, screenshot</li>
-                        <li>• <span className="text-purple-400">Technical</span>: mime, encoding, compression, size, sha256</li>
-                      </ul>
-                    </div>
+                  <div>
+                    <h3 className="font-semibold text-white mb-2">Prepare Your ROM</h3>
+                    <p className="text-gray-300">
+                      Convert your retro game file (e.g. .nes, .gb) into Base64 format. Verify its integrity by calculating size (bytes) and sha256 hash of the decoded ROM.
+                    </p>
                   </div>
+                </div>
 
-                  <div className="flex items-start space-x-4">
-                    <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
-                      3
-                    </div>
-                    <div>
-                      <h3 className="font-semibold text-white mb-2">Publish as Nostr Event</h3>
-                      <p className="text-gray-300 mb-3">
-                        Create a kind: 31996 event with:
-                      </p>
-                      <ul className="text-gray-300 space-y-1 text-sm">
-                        <li>• <span className="text-purple-400">tags</span> containing metadata and asset references</li>
-                        <li>• <span className="text-purple-400">content</span> containing the Base64-encoded ROM</li>
-                        <li>• <span className="text-purple-400">d-tag</span> as a stable unique ID (game:mytitle:v1.0)</li>
-                      </ul>
-                      <p className="text-gray-300 mt-3">
-                        Publish this event to Nostr relays. MoonFile will automatically index and display your retro game in the Games tab, making it playable via the integrated emulator.
-                      </p>
-                    </div>
+                <div className="flex items-start space-x-4">
+                  <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                    2
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white mb-2">Add Game Metadata</h3>
+                    <p className="text-gray-300 mb-3">
+                      Prepare metadata tags for your game, including:
+                    </p>
+                    <ul className="text-gray-300 space-y-1 text-sm">
+                      <li>• <span className="text-purple-400">name, summary, genre, mode, status, ver</span></li>
+                      <li>• <span className="text-purple-400">credits</span> (author/npub)</li>
+                      <li>• <span className="text-purple-400">platforms</span> (nes-rom, gb-rom, etc.)</li>
+                      <li>• <span className="text-purple-400">Visual assets</span>: image, icon, banner, screenshot</li>
+                      <li>• <span className="text-purple-400">Technical</span>: mime, encoding, compression, size, sha256</li>
+                    </ul>
+                  </div>
+                </div>
+
+                <div className="flex items-start space-x-4">
+                  <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
+                    3
+                  </div>
+                  <div>
+                    <h3 className="font-semibold text-white mb-2">Publish as Nostr Event</h3>
+                    <p className="text-gray-300 mb-3">
+                      Create a kind: 31996 event with:
+                    </p>
+                    <ul className="text-gray-300 space-y-1 text-sm">
+                      <li>• <span className="text-purple-400">tags</span> containing metadata and asset references</li>
+                      <li>• <span className="text-purple-400">content</span> containing the Base64-encoded ROM</li>
+                      <li>• <span className="text-purple-400">d-tag</span> as a stable unique ID (game:mytitle:v1.0)</li>
+                    </ul>
+                    <p className="text-gray-300 mt-3">
+                      Publish this event to Nostr relays. MoonFile will automatically index and display your retro game in the Games tab, making it playable via the integrated emulator.
+                    </p>
                   </div>
                 </div>
               </div>
+            </div>
 
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 backdrop-blur-sm">
-                <h2 className="text-3xl font-bold mb-6 text-white">Kind 31996 Event Format</h2>
-                <div className="bg-gray-800 rounded-lg p-4 overflow-x-auto">
-                  <pre className="text-sm text-cyan-400">
+            {/* Kind 31996 Event Format */}
+            <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 backdrop-blur-sm mb-16">
+              <h2 className="text-3xl font-bold mb-6 text-white">Kind 31996 Event Format</h2>
+              <div className="bg-gray-800 rounded-lg p-4 overflow-x-auto">
+                <pre className="text-sm text-cyan-400">
 {`{
   "id": "7f6c9ab8e1a6d3d57a68b2c98c88f0e1b476a5d987fd10b0f24923a2c1a09f99",
   "pubkey": "npub1exampleauthor...",
@@ -192,22 +192,21 @@ const Publish = () => {
   "content": "<BASE64_ROM_DATA>",
   "sig": "b1c23d4afcb29a99aa9df2b49821e90dfb3c21cf4ad63b68e7e6f0a9a17ecbd3..."
 }`}
-                  </pre>
-                </div>
-                <div className="mt-6 space-y-4">
-                  <h3 className="font-semibold text-white mb-2">Required Tags:</h3>
-                  <ul className="text-sm text-gray-300 space-y-2">
-                    <li><span className="text-purple-400">d</span>: Unique game identifier</li>
-                    <li><span className="text-purple-400">name</span>: Game title</li>
-                    <li><span className="text-purple-400">summary</span>: Game description</li>
-                    <li><span className="text-purple-400">genre</span>: Game genre(s)</li>
-                    <li><span className="text-purple-400">platforms</span>: Supported platforms</li>
-                    <li><span className="text-purple-400">mime</span>: MIME type of game data</li>
-                    <li><span className="text-purple-400">encoding</span>: Data encoding format</li>
-                    <li><span className="text-purple-400">size</span>: Size in bytes</li>
-                    <li><span className="text-purple-400">sha256</span>: SHA256 hash of game data</li>
-                  </ul>
-                </div>
+                </pre>
+              </div>
+              <div className="mt-6 space-y-4">
+                <h3 className="font-semibold text-white mb-2">Required Tags:</h3>
+                <ul className="text-sm text-gray-300 space-y-2">
+                  <li><span className="text-purple-400">d</span>: Unique game identifier</li>
+                  <li><span className="text-purple-400">name</span>: Game title</li>
+                  <li><span className="text-purple-400">summary</span>: Game description</li>
+                  <li><span className="text-purple-400">genre</span>: Game genre(s)</li>
+                  <li><span className="text-purple-400">platforms</span>: Supported platforms</li>
+                  <li><span className="text-purple-400">mime</span>: MIME type of game data</li>
+                  <li><span className="text-purple-400">encoding</span>: Data encoding format</li>
+                  <li><span className="text-purple-400">size</span>: Size in bytes</li>
+                  <li><span className="text-purple-400">sha256</span>: SHA256 hash of game data</li>
+                </ul>
               </div>
             </div>
 
