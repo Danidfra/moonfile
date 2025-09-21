@@ -104,17 +104,16 @@ const Publish = () => {
             {/* Getting Started */}
             <div className="grid md:grid-cols-2 gap-12 mb-16">
               <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 backdrop-blur-sm">
-                <h2 className="text-3xl font-bold mb-6 text-white">Getting Started</h2>
+                <h2 className="text-3xl font-bold mb-6 text-white">Getting Started (Retro Games)</h2>
                 <div className="space-y-6">
                   <div className="flex items-start space-x-4">
                     <div className="flex-shrink-0 w-8 h-8 bg-purple-600 rounded-full flex items-center justify-center text-white font-bold text-sm">
                       1
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white mb-2">Prepare Your Game</h3>
+                      <h3 className="font-semibold text-white mb-2">Prepare Your ROM</h3>
                       <p className="text-gray-300">
-                        Package your game files. For NES games, prepare ROM files and emulator configuration.
-                        For web games, prepare HTML, CSS, and JavaScript files.
+                        Convert your retro game file (e.g. .nes, .gb) into Base64 format. Verify its integrity by calculating size (bytes) and sha256 hash of the decoded ROM.
                       </p>
                     </div>
                   </div>
@@ -124,11 +123,17 @@ const Publish = () => {
                       2
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white mb-2">Create Game Event</h3>
-                      <p className="text-gray-300">
-                        Create a kind 31996 event with your game metadata and binary data encoded in base64.
-                        Include all required tags for game information and file details.
+                      <h3 className="font-semibold text-white mb-2">Add Game Metadata</h3>
+                      <p className="text-gray-300 mb-3">
+                        Prepare metadata tags for your game, including:
                       </p>
+                      <ul className="text-gray-300 space-y-1 text-sm">
+                        <li>• <span className="text-purple-400">name, summary, genre, mode, status, ver</span></li>
+                        <li>• <span className="text-purple-400">credits</span> (author/npub)</li>
+                        <li>• <span className="text-purple-400">platforms</span> (nes-rom, gb-rom, etc.)</li>
+                        <li>• <span className="text-purple-400">Visual assets</span>: image, icon, banner, screenshot</li>
+                        <li>• <span className="text-purple-400">Technical</span>: mime, encoding, compression, size, sha256</li>
+                      </ul>
                     </div>
                   </div>
 
@@ -137,10 +142,17 @@ const Publish = () => {
                       3
                     </div>
                     <div>
-                      <h3 className="font-semibold text-white mb-2">Publish to Nostr</h3>
-                      <p className="text-gray-300">
-                        Sign and publish your event to Nostr relays. MoonFile will automatically
-                        index and display your game on the platform.
+                      <h3 className="font-semibold text-white mb-2">Publish as Nostr Event</h3>
+                      <p className="text-gray-300 mb-3">
+                        Create a kind: 31996 event with:
+                      </p>
+                      <ul className="text-gray-300 space-y-1 text-sm">
+                        <li>• <span className="text-purple-400">tags</span> containing metadata and asset references</li>
+                        <li>• <span className="text-purple-400">content</span> containing the Base64-encoded ROM</li>
+                        <li>• <span className="text-purple-400">d-tag</span> as a stable unique ID (game:mytitle:v1.0)</li>
+                      </ul>
+                      <p className="text-gray-300 mt-3">
+                        Publish this event to Nostr relays. MoonFile will automatically index and display your retro game in the Games tab, making it playable via the integrated emulator.
                       </p>
                     </div>
                   </div>
