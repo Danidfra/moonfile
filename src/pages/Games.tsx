@@ -45,7 +45,7 @@ const Games = () => {
       }
 
       // Status filter
-      if (filters.statuses.length > 0 && !filters.statuses.includes(game.status)) {
+      if (filters.statuses.length > 0 && game.status && !filters.statuses.includes(game.status)) {
         return false;
       }
 

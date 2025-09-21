@@ -148,7 +148,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
             <Filter className="w-5 h-5" />
             Filter Games
             {hasActiveFilters && (
-              <Badge variant="secondary" className="ml-2 bg-gray-800 text-gray-300 border-gray-700">
+              <Badge className="ml-2 bg-gray-800 text-gray-300 border-gray-700">
                 {getActiveFilterCount()} active
               </Badge>
             )}
@@ -206,12 +206,11 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                   {GENRES.map((genre) => (
                     <Badge
                       key={genre}
-                      variant={filters.genres.includes(genre) ? "default" : "outline"}
-                      className={`cursor-pointer transition-colors ${
+                      className={`${
                         filters.genres.includes(genre)
-                          ? "bg-purple-600 text-white hover:bg-purple-700"
+                          ? "bg-purple-600 text-white hover:bg-purple-700 border-transparent"
                           : "border-gray-700 text-gray-300 hover:bg-gray-800"
-                      }`}
+                      } cursor-pointer transition-colors`}
                       onClick={() => toggleArrayFilter('genres', genre)}
                     >
                       {genre}
@@ -230,12 +229,11 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                   {MODES.map((mode) => (
                     <Badge
                       key={mode}
-                      variant={filters.modes.includes(mode) ? "default" : "outline"}
-                      className={`cursor-pointer transition-colors ${
+                      className={`${
                         filters.modes.includes(mode)
-                          ? "bg-cyan-600 text-white hover:bg-cyan-700"
-                          : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                      }`}
+                          ? "bg-cyan-600 text-white hover:bg-cyan-700 border-transparent"
+                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
+                      } cursor-pointer transition-colors`}
                       onClick={() => toggleArrayFilter('modes', mode)}
                     >
                       {mode}
@@ -254,12 +252,11 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                   {STATUSES.map((status) => (
                     <Badge
                       key={status}
-                      variant={filters.statuses.includes(status) ? "default" : "outline"}
-                      className={`cursor-pointer transition-colors ${
+                      className={`${
                         filters.statuses.includes(status)
-                          ? "bg-blue-600 text-white hover:bg-blue-700"
-                          : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                      }`}
+                          ? "bg-blue-600 text-white hover:bg-blue-700 border-transparent"
+                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
+                      } cursor-pointer transition-colors`}
                       onClick={() => toggleArrayFilter('statuses', status)}
                     >
                       {status}
@@ -278,12 +275,11 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                   {PLATFORMS.map((platform) => (
                     <Badge
                       key={platform}
-                      variant={filters.platforms.includes(platform) ? "default" : "outline"}
-                      className={`cursor-pointer transition-colors ${
+                      className={`${
                         filters.platforms.includes(platform)
-                          ? "bg-green-600 text-white hover:bg-green-700"
-                          : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                      }`}
+                          ? "bg-green-600 text-white hover:bg-green-700 border-transparent"
+                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
+                      } cursor-pointer transition-colors`}
                       onClick={() => toggleArrayFilter('platforms', platform)}
                     >
                       {platform}
@@ -302,12 +298,11 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
                   {TAGS.map((tag) => (
                     <Badge
                       key={tag}
-                      variant={filters.tags.includes(tag) ? "default" : "outline"}
-                      className={`cursor-pointer transition-colors ${
+                      className={`${
                         filters.tags.includes(tag)
-                          ? "bg-orange-600 text-white hover:bg-orange-700"
-                          : "border-gray-300 text-gray-600 hover:bg-gray-50"
-                      }`}
+                          ? "bg-orange-600 text-white hover:bg-orange-700 border-transparent"
+                          : "border-gray-700 text-gray-300 hover:bg-gray-800"
+                      } cursor-pointer transition-colors`}
                       onClick={() => toggleArrayFilter('tags', tag)}
                     >
                       {tag}

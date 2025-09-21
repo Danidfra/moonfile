@@ -1,4 +1,4 @@
-import type { Game31996, NostrEvent } from "@/types/game";
+import type { Game31996, NostrEvent, GameAsset } from "@/types/game";
 
 export function firstTagValue(tags: string[][], key: string): string | undefined {
   const t = tags.find(t => t[0] === key);

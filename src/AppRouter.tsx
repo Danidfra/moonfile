@@ -8,6 +8,7 @@ import Contact from "./pages/Contact";
 import Publish from "./pages/Publish";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
+import RetroPlayPage from "./pages/retro/[d]/play";
 
 export function AppRouter() {
   return (
@@ -19,6 +20,8 @@ export function AppRouter() {
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/publish" element={<Publish />} />
+        {/* Retro game player route */}
+        <Route path="/retro/:d/play" element={<RetroPlayPage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}

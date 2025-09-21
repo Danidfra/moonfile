@@ -104,7 +104,7 @@ const WalletContent = forwardRef<HTMLDivElement, {
           </div>
           <div className="flex items-center gap-2">
             {hasWebLN && <CheckCircle className="h-4 w-4 text-green-600" />}
-            <Badge variant={hasWebLN ? "default" : "secondary"} className="text-xs">
+            <Badge className={`text-xs ${hasWebLN ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}>
               {isDetecting ? "..." : hasWebLN ? "Ready" : "Not Found"}
             </Badge>
           </div>
@@ -125,7 +125,7 @@ const WalletContent = forwardRef<HTMLDivElement, {
           </div>
           <div className="flex items-center gap-2">
             {hasNWC && <CheckCircle className="h-4 w-4 text-green-600" />}
-            <Badge variant={hasNWC ? "default" : "secondary"} className="text-xs">
+            <Badge className={`text-xs ${hasNWC ? "bg-green-600 text-white" : "bg-gray-600 text-gray-300"}`}>
               {hasNWC ? "Ready" : "None"}
             </Badge>
           </div>

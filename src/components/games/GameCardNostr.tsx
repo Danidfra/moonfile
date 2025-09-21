@@ -2,6 +2,7 @@ import { Card, CardContent, CardFooter } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Play, Star, Download } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import type { Game31996 } from "@/types/game";
 
 interface GameCardNostrProps {
@@ -10,6 +11,7 @@ interface GameCardNostrProps {
 }
 
 export function GameCardNostr({ game, onPlay }: GameCardNostrProps) {
+  const navigate = useNavigate();
   const coverImage = game.assets.cover || game.assets.icon || game.assets.banner;
 
   const getStatusColor = (status?: string) => {
@@ -38,8 +40,8 @@ export function GameCardNostr({ game, onPlay }: GameCardNostrProps) {
     <Card className="group overflow-hidden border-gray-800 bg-gray-900 hover:border-purple-500 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/30">
       <div className="relative aspect-video overflow-hidden">
         {coverImage ? (
-          <img 
-            src={coverImage} 
+          <img
+            src={coverImage}
             alt={game.title}
             className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-110"
           />
@@ -58,7 +60,7 @@ export function GameCardNostr({ game, onPlay }: GameCardNostrProps) {
             </Badge>
           )}
           {game.version && (
-            <Badge variant="outline" className="bg-black/50 border-gray-600 text-white text-xs">
+            <Badge className="bg-black/50 border-gray-600 text-white text-xs">
               v{game.version}
             </Badge>
           )}
@@ -71,31 +73,30 @@ export function GameCardNostr({ game, onPlay }: GameCardNostrProps) {
           )}
         </div>
       </div>
-      
+
       <CardContent className="p-4">
         <h3 className="font-semibold text-lg text-white mb-2 line-clamp-1">{game.title}</h3>
         {game.summary && (
           <p className="text-gray-400 text-sm mb-3 line-clamp-2">{game.summary}</p>
         )}
-        
+
         <div className="flex flex-wrap gap-1 mb-3">
           {game.platforms.slice(0, 2).map((platform) => (
-            <Badge 
-              key={platform} 
-              variant="outline" 
+            <Badge
+              key={platform}
               className="text-xs border-gray-700 text-gray-300"
             >
               {platform}
             </Badge>
           ))}
           {game.platforms.length > 2 && (
-            <Badge variant="outline" className="text-xs border-gray-700 text-gray-300">
+            <Badge className="text-xs border-gray-700 text-gray-300">
               +{game.platforms.length - 2}
             </Badge>
           )}
         </div>
       </CardContent>
-      
+
       <CardFooter className="p-4 pt-0 flex items-center justify-between">
         <div className="flex items-center gap-2 text-xs text-gray-500">
           {game.sizeBytes && (
@@ -105,9 +106,9 @@ export function GameCardNostr({ game, onPlay }: GameCardNostrProps) {
             <span className="font-mono">{game.sha256.slice(0, 8)}</span>
           )}
         </div>
-        
-        <Button 
-          onClick={onPlay}
+
+        <Button
+          onClick={() => navigate(`/retro/${game.id}/play`)}
           size="sm"
           className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/50"
         >
