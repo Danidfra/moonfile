@@ -16,8 +16,8 @@ export interface FCEUXConfig {
 }
 
 export class FCEUXEmulator {
-  private wasmModule: any = null;
-  private wasmInstance: any = null;
+  private core: any = null;
+  private ready = false;
   private canvas: HTMLCanvasElement | null = null;
   private ctx: CanvasRenderingContext2D | null = null;
   private imageData: ImageData | null = null;
@@ -31,24 +31,23 @@ export class FCEUXEmulator {
   private isRunning = false;
   private isPaused = false;
   private frameCount = 0;
-  private isInitialized = false;
   private memory: WebAssembly.Memory | null = null;
 
   constructor() {
     console.log('[FCEUXEmulator] constructing FCEUX emulator');
   }
 
-  async init(canvas: HTMLCanvasElement, config: FCEUXConfig = {}): Promise<void> {
-    console.log('[FCEUXEmulator] init canvas? ', !!canvas);
+  async init(canvas: HTMLCanvasElement, opts: { audio: boolean }): Promise<void> {
+    console.log('[FCEUXEmulator] init start');
 
-    if (this.isInitialized) {
+    if (this.ready) {
       console.log('[FCEUXEmulator] Already initialized');
       return;
     }
 
     this.canvas = canvas;
     this.ctx = canvas.getContext('2d');
-    this.config = config;
+    this.config = opts;
 
     if (this.ctx) {
       // Set canvas attributes directly (not just CSS)
@@ -75,83 +74,79 @@ export class FCEUXEmulator {
       console.log('[FCEUX] imageData', this.imageData.width, this.imageData.height);
     }
 
-    // Initialize WebAssembly module
+    // Initialize core
     try {
-      await this.initWebAssembly();
-      this.isInitialized = true;
-      console.log('[FCEUXEmulator] FCEUX initialized successfully');
-    } catch (error) {
-      console.error('[FCEUXEmulator] Failed to initialize WebAssembly:', error);
-      throw error;
-    }
+      const core = (window as any).FCEUX;
 
-    // Initialize audio if enabled
-    if (config.audio) {
-      this.initAudio();
-    }
-  }
+      if (!core) {
+        throw new Error('FCEUX core not found on window object');
+      }
 
-  private async initWebAssembly(): Promise<void> {
-    console.log('[FCEUXEmulator] Initializing WebAssembly module...');
+      console.log('[FCEUXEmulator] Found core, type:', typeof core);
+      console.log('[FCEUXEmulator] Core has init:', typeof core.init);
+      console.log('[FCEUXEmulator] Core has loadRom:', typeof core.loadRom);
+      console.log('[FCEUXEmulator] Core has frame:', typeof core.frame);
+      console.log('[FCEUXEmulator] Core has reset:', typeof core.reset);
 
-    try {
-      // Load FCEUX WebAssembly script
-      await this.loadFCEUXScript();
+      // Hard assertions for required methods
+      if (typeof core.init !== 'function') {
+        throw new Error('FCEUX core missing init() function');
+      }
 
-      // Wait for FCEUX to be available
-      await this.waitForFCEUX();
+      console.log('[FCEUXEmulator] Calling core.init()...');
+      const initResult = await core.init();
+      console.log('[FCEUXEmulator] core.init() returned:', initResult);
 
-      // Initialize FCEUX
-      if (typeof (window as any).FCEUX !== 'undefined') {
-        this.wasmModule = (window as any).FCEUX;
-        this.wasmInstance = await this.wasmModule.init();
-        this.memory = this.wasmInstance.memory;
+      // After init, verify core has all required methods
+      this.core = core;
+      const methods = Object.keys(this.core);
+      console.log('[FCEUXEmulator] core api:', methods);
 
-        console.log('[FCEUXEmulator] FCEUX WebAssembly module loaded successfully');
-      } else {
-        throw new Error('FCEUX WebAssembly module not found');
+      // Assert presence of critical methods
+      if (typeof this.core.loadRom !== 'function') {
+        console.error('[FCEUXEmulator] core missing loadRom()', methods);
+        throw new Error('Core missing loadRom()');
+      }
+
+      if (typeof this.core.frame !== 'function') {
+        console.error('[FCEUXEmulator] core missing frame()', methods);
+        throw new Error('Core missing frame()');
+      }
+
+      if (typeof this.core.reset !== 'function') {
+        console.error('[FCEUXEmulator] core missing reset()', methods);
+        throw new Error('Core missing reset()');
+      }
+
+      if (typeof this.core.setButton !== 'function') {
+        console.error('[FCEUXEmulator] core missing setButton()', methods);
+        throw new Error('Core missing setButton()');
+      }
+
+      if (typeof this.core.getFrameBuffer !== 'function') {
+        console.error('[FCEUXEmulator] core missing getFrameBuffer()', methods);
+        throw new Error('Core missing getFrameBuffer()');
+      }
+
+      if (typeof this.core.setRunning !== 'function') {
+        console.error('[FCEUXEmulator] core missing setRunning()', methods);
+        throw new Error('Core missing setRunning()');
+      }
+
+      this.memory = null; // Core manages its own memory
+      this.ready = true;
+
+      console.log('[FCEUXEmulator] init done, api:', Object.keys(core));
+      console.log('[FCEUXEmulator] Core ready:', this.ready);
+
+      // Initialize audio if enabled
+      if (opts.audio) {
+        this.initAudio();
       }
     } catch (error) {
-      console.error('[FCEUXEmulator] WebAssembly initialization failed:', error);
-      throw new Error('Failed to initialize FCEUX WebAssembly module');
+      console.error('[FCEUXEmulator] Core initialization failed:', error);
+      throw error;
     }
-  }
-
-  private loadFCEUXScript(): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const script = document.createElement('script');
-      script.src = '/lib/fceux/fceux-web.js';
-      script.async = true;
-
-      script.onload = () => {
-        console.log('[FCEUXEmulator] FCEUX script loaded');
-        resolve();
-      };
-
-      script.onerror = () => {
-        reject(new Error('Failed to load FCEUX WebAssembly script'));
-      };
-
-      document.head.appendChild(script);
-    });
-  }
-
-  private waitForFCEUX(timeout = 5000): Promise<void> {
-    return new Promise((resolve, reject) => {
-      const startTime = Date.now();
-
-      const checkFCEUX = () => {
-        if (typeof (window as any).FCEUX !== 'undefined') {
-          resolve();
-        } else if (Date.now() - startTime > timeout) {
-          reject(new Error('FCEUX WebAssembly module not available within timeout'));
-        } else {
-          setTimeout(checkFCEUX, 100);
-        }
-      };
-
-      checkFCEUX();
-    });
   }
 
   private initAudio(): void {
@@ -165,6 +160,28 @@ export class FCEUXEmulator {
   }
 
   loadROM(bytes: Uint8Array): boolean {
+    console.log('[FCEUXEmulator] loadROM called, ready:', this.ready, 'has core:', !!this.core);
+
+    // Hard assertions and logging
+    if (!this.core) {
+      console.error('[FCEUXEmulator] loadROM called but core is null');
+      throw new Error('FCEUX core not set');
+    }
+
+    if (!this.ready) {
+      console.error('[FCEUXEmulator] loadROM called before ready');
+      throw new Error('NES core not available - not ready');
+    }
+
+    const methods = Object.keys(this.core);
+    console.log('[FCEUXEmulator] core api:', methods);
+
+    if (typeof this.core.loadRom !== 'function') {
+      console.error('[FCEUXEmulator] Core missing loadRom() function');
+      console.error('[FCEUXEmulator] Available core methods:', methods);
+      throw new Error('Core missing loadRom()');
+    }
+
     try {
       console.log('[FCEUXEmulator] loadROM bytes:', bytes.length);
 
@@ -174,18 +191,18 @@ export class FCEUXEmulator {
         return false;
       }
 
-      // Load ROM into FCEUX WebAssembly module
-      if (this.wasmInstance && this.wasmInstance.loadRom) {
-        // Convert Uint8Array to a format FCEUX can understand
-        const romData = new Uint8Array(bytes);
-        this.wasmInstance.loadRom(romData);
-        console.log('[FCEUXEmulator] ROM loaded successfully into FCEUX');
-      } else {
-        // Fallback to stub implementation
-        console.log('[FCEUXEmulator] ROM loaded successfully (stub implementation)');
-      }
+      // Load ROM into NES core
+      console.log('[FCEUXEmulator] Calling core.loadRom()...');
+      const success = this.core.loadRom(bytes, bytes.length);
+      console.log('[FCEUXEmulator] core.loadRom() returned:', success);
 
-      return true;
+      if (success) {
+        console.log('✅ loadROM call succeeded');
+        return true;
+      } else {
+        console.error('[FCEUXEmulator] Failed to load ROM into NES core');
+        return false;
+      }
     } catch (error) {
       console.error('[FCEUXEmulator] Failed to load ROM:', error);
       return false;
@@ -208,8 +225,8 @@ export class FCEUXEmulator {
   }
 
   play(): void {
-    if (!this.isInitialized) {
-      console.error('[FCEUXEmulator] Emulator not initialized');
+    if (!this.ready || !this.core) {
+      console.error('[FCEUXEmulator] Emulator not ready');
       return;
     }
 
@@ -218,8 +235,8 @@ export class FCEUXEmulator {
       this.isPaused = false;
 
       // Signal FCEUX to start running
-      if (this.wasmInstance && this.wasmInstance.setRunning) {
-        this.wasmInstance.setRunning(true);
+      if (this.core && typeof this.core.setRunning === 'function') {
+        this.core.setRunning(true);
       }
 
       this.startFrameLoop();
@@ -243,8 +260,8 @@ export class FCEUXEmulator {
   }
 
   reset(): void {
-    if (this.wasmInstance && this.wasmInstance.reset) {
-      this.wasmInstance.reset();
+    if (this.core && typeof this.core.reset === 'function') {
+      this.core.reset();
     } else {
       console.log('[FCEUXEmulator] Reset emulator (stub implementation)');
     }
@@ -255,8 +272,8 @@ export class FCEUXEmulator {
     this.isPaused = false;
 
     // Signal FCEUX to stop running
-    if (this.wasmInstance && this.wasmInstance.setRunning) {
-      this.wasmInstance.setRunning(false);
+    if (this.core && typeof this.core.setRunning === 'function') {
+      this.core.setRunning(false);
     }
 
     if (this.animationFrameId) {
@@ -278,21 +295,34 @@ export class FCEUXEmulator {
   }
 
   private frame(): void {
-    // Execute FCEUX frame
-    if (this.wasmInstance && this.wasmInstance.frame) {
-      this.wasmInstance.frame();
+    // Execute NES core frame
+    if (this.core && typeof this.core.frame === 'function') {
+      this.core.frame();
     }
 
     // Handle frame rendering
     if (this.config.onFrame) {
-      // Get frame buffer from FCEUX if available
+      // Get frame buffer from NES core
       let frameBuffer: Uint8Array;
-      if (this.wasmInstance && this.wasmInstance.getFrameBuffer) {
-        frameBuffer = this.wasmInstance.getFrameBuffer();
+      if (this.core && typeof this.core.getFrameBuffer === 'function') {
+        const framePtr = this.core.getFrameBuffer();
+        const palettePtr = typeof this.core.getPalette === 'function' ? this.core.getPalette() : null;
+
+        if (framePtr && palettePtr) {
+          // Indexed color mode with palette - not implemented yet
+          frameBuffer = new Uint8Array(256 * 240 * 4);
+        } else if (framePtr) {
+          // Direct RGBA mode - core returns Uint8Array directly
+          frameBuffer = this.core.getFrameBuffer();
+        } else {
+          // NES core not available - this is an error state
+          console.warn('[FCEUXEmulator] NES core frame buffer not available');
+          frameBuffer = new Uint8Array(256 * 240 * 4);
+        }
       } else {
-        // Generate a test frame pattern for stub implementation
-        frameBuffer = new Uint8Array(256 * 240 * 3);
-        this.generateTestFrame(frameBuffer);
+        // NES core not available - this is an error state
+        console.warn('[FCEUXEmulator] NES core not available for frame rendering');
+        frameBuffer = new Uint8Array(256 * 240 * 4);
       }
       this.config.onFrame(frameBuffer);
     } else {
@@ -306,10 +336,23 @@ export class FCEUXEmulator {
         // Clear canvas area
         this.ctx.clearRect(0, 0, 256, 240);
 
-        // Get frame from FCEUX or generate test pattern
-        if (this.wasmInstance && this.wasmInstance.getFrameBuffer) {
-          const frameBuffer = this.wasmInstance.getFrameBuffer();
-          this.copyFrameBufferToImageData(frameBuffer);
+        // Get frame from NES core
+        if (this.core && typeof this.core.getFrameBuffer === 'function') {
+          const framePtr = this.core.getFrameBuffer();
+          const palettePtr = typeof this.core.getPalette === 'function' ? this.core.getPalette() : null;
+
+          if (palettePtr) {
+            // Indexed color mode - convert to RGBA
+            this.copyIndexedBufferToImageData(framePtr, palettePtr);
+          } else {
+            // Direct RGBA mode - core returns Uint8Array directly
+            const frameData = this.core.getFrameBuffer();
+            if (frameData && frameData.length === 256 * 240 * 4) {
+              this.imageData.data.set(frameData);
+            } else {
+              this.generateTestFrameRGB(this.backingBuffer32);
+            }
+          }
         } else {
           this.generateTestFrameRGB(this.backingBuffer32);
         }
@@ -317,23 +360,62 @@ export class FCEUXEmulator {
         // Draw single frame with putImageData
         this.ctx.putImageData(this.imageData, 0, 0);
 
-        // Log every 60th frame
-        this.frameCount++;
-        if (this.frameCount % 60 === 0) {
-          console.log('[FCEUX] draw frame #', this.frameCount, 'putImageData 256x240');
-        }
-
-        // Log first frame
-        if (this.frameCount === 1) {
-          console.log('[FCEUX] First frame drawn successfully');
+        // Log first frame only
+        if (this.frameCount === 0) {
+          console.log('[FCEUX] First frame drawn successfully - NES core active');
+          this.frameCount++;
         }
       }
     }
 
     // Handle audio if enabled
-    if (this.config.audio && this.audioContext && this.wasmInstance && this.wasmInstance.getAudioBuffer) {
+    if (this.config.audio && this.audioContext && this.core && typeof this.core.getAudioBuffer === 'function') {
       this.handleAudio();
     }
+  }
+
+  private copyIndexedBufferToImageData(framePtr: number, palettePtr: number): void {
+    if (!this.backingBuffer32 || !this.memory) return;
+
+    // Get indexed buffer and palette from WASM memory
+    const indexedBuffer = new Uint8Array(this.memory.buffer, framePtr, 256 * 240);
+    const palette = new Uint8Array(this.memory.buffer, palettePtr, 192);
+
+    // Convert indexed colors to RGBA
+    for (let i = 0, j = 0; i < indexedBuffer.length; i++, j += 1) {
+      const colorIndex = indexedBuffer[i] & 0x3F;
+      const paletteIndex = colorIndex * 3;
+
+      this.backingBuffer32[j] = 0xFF000000 |
+        (palette[paletteIndex] << 16) |
+        (palette[paletteIndex + 1] << 8) |
+        (palette[paletteIndex + 2]);
+    }
+  }
+
+  private convertIndexedToRGBA(framePtr: number, palettePtr: number): Uint8Array {
+    if (!this.memory) {
+      return new Uint8Array(256 * 240 * 4);
+    }
+
+    // Get indexed buffer and palette from WASM memory
+    const indexedBuffer = new Uint8Array(this.memory.buffer, framePtr, 256 * 240);
+    const palette = new Uint8Array(this.memory.buffer, palettePtr, 192);
+
+    // Convert indexed colors to RGBA
+    const rgbaBuffer = new Uint8Array(256 * 240 * 4);
+
+    for (let i = 0, j = 0; i < indexedBuffer.length; i++, j += 4) {
+      const colorIndex = indexedBuffer[i] & 0x3F;
+      const paletteIndex = colorIndex * 3;
+
+      rgbaBuffer[j] = palette[paletteIndex];     // R
+      rgbaBuffer[j + 1] = palette[paletteIndex + 1]; // G
+      rgbaBuffer[j + 2] = palette[paletteIndex + 2]; // B
+      rgbaBuffer[j + 3] = 255;                  // A
+    }
+
+    return rgbaBuffer;
   }
 
   private copyFrameBufferToImageData(frameBuffer: Uint8Array): void {
@@ -349,17 +431,12 @@ export class FCEUXEmulator {
   }
 
   private generateTestFrame(buffer: Uint8Array): void {
-    // Generate a simple test pattern
-    for (let y = 0; y < 240; y++) {
-      for (let x = 0; x < 256; x++) {
-        const i = (y * 256 + x) * 3;
+    // This method should not be called with a real NES core
+    // Only provide a fallback if NES core is not available
+    console.warn('[FCEUXEmulator] generateTestFrame called - NES core should provide frames');
 
-        // Create a simple gradient pattern
-        buffer[i] = (x % 64) * 4;     // R
-        buffer[i + 1] = (y % 64) * 4; // G
-        buffer[i + 2] = 128;           // B
-      }
-    }
+    // Generate a minimal test pattern (black screen)
+    buffer.fill(0);
   }
 
   private generateTestFrameRGB(buffer32: Uint32Array): void {
@@ -379,15 +456,14 @@ export class FCEUXEmulator {
   }
 
   private handleAudio(): void {
-    if (!this.wasmInstance || !this.wasmInstance.getAudioBuffer) return;
+    if (!this.wasmModule || !this.wasmModule.getAudioBuffer) return;
 
     try {
-      const audioBuffer = this.wasmInstance.getAudioBuffer();
+      const audioBuffer = this.wasmModule.getAudioBuffer();
       if (audioBuffer && audioBuffer.length > 0) {
         // Process audio buffer through Web Audio API
-        // This is a simplified implementation
         if (this.config.onAudioSample) {
-          // For each audio sample pair
+          // For each audio sample pair (stereo)
           for (let i = 0; i < audioBuffer.length; i += 2) {
             this.config.onAudioSample(audioBuffer[i], audioBuffer[i + 1] || 0);
           }
@@ -399,8 +475,8 @@ export class FCEUXEmulator {
   }
 
   setControls(controls: Partial<FCEUXControls>): void {
-    if (this.wasmInstance && this.wasmInstance.setButton) {
-      // Map controls to FCEUX button indices
+    if (this.core && typeof this.core.setButton === 'function') {
+      // Map controls to NES button indices
       const buttonMap = {
         right: 0,
         left: 1,
@@ -415,7 +491,7 @@ export class FCEUXEmulator {
       Object.entries(controls).forEach(([button, pressed]) => {
         const buttonIndex = buttonMap[button as keyof FCEUXControls];
         if (buttonIndex !== undefined) {
-          this.wasmInstance.setButton(buttonIndex, pressed ? 1 : 0);
+          this.core.setButton(buttonIndex, pressed);
         }
       });
     } else {
@@ -462,11 +538,26 @@ export class FCEUXEmulator {
     this.imageData = null;
     this.backingBuffer = null;
     this.backingBuffer32 = null;
-    this.wasmModule = null;
-    this.wasmInstance = null;
+    this.core = null;
     this.memory = null;
-    this.isInitialized = false;
+    this.ready = false;
 
     console.log('[FCEUXEmulator] Emulator disposed');
+  }
+
+  isAudioEnabled(): boolean {
+    return this.config.audio || false;
+  }
+
+  getIsRunning(): boolean {
+    return this.isRunning && !this.isPaused;
+  }
+
+  getIsPaused(): boolean {
+    return this.isPaused;
+  }
+
+  getIsReady(): boolean {
+    return this.ready;
   }
 }

@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FCEUX Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: monospace;
+        }
+        #canvas {
+            border: 1px solid #333;
+            image-rendering: pixelated;
+        }
+        #log {
+            margin-top: 20px;
+            height: 200px;
+            overflow-y: auto;
+            background: #111;
+            padding: 10px;
+            border: 1px solid #333;
+        }
+        .log-entry {
+            margin: 2px 0;
+            font-size: 12px;
+        }
+        .log-error {
+            color: #f44;
+        }
+        .log-info {
+            color: #4f4;
+        }
+        .log-debug {
+            color: #88f;
+        }
+    </style>
+</head>
+<body>
+    <h1>FCEUX Emulator Test</h1>
+    <canvas id="canvas" width="256" height="240"></canvas>
+    <div>
+        <button id="playBtn">Play</button>
+        <button id="pauseBtn">Pause</button>
+        <button id="resetBtn">Reset</button>
+        <button id="loadRomBtn">Load Test ROM</button>
+    </div>
+    <div id="log"></div>
+
+    <script src="/lib/fceux/fceux-web.js"></script>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const playBtn = document.getElementById('playBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const loadRomBtn = document.getElementById('loadRomBtn');
+        const logDiv = document.getElementById('log');
+
+        function log(message, type = 'debug') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        // Mock FCEUXEmulator class
+        class FCEUXEmulator {
+            constructor() {
+                log('[FCEUXEmulator] constructing FCEUX emulator', 'info');
+                this.wasmModule = null;
+                this.wasmInstance = null;
+                this.canvas = null;
+                this.ctx = null;
+                this.isRunning = false;
+                this.isPaused = false;
+                this.isInitialized = false;
+            }
+
+            async init(canvas) {
+                log('[FCEUXEmulator] init canvas? ' + !!canvas, 'info');
+
+                if (this.isInitialized) {
+                    log('[FCEUXEmulator] Already initialized', 'debug');
+                    return;
+                }
+
+                this.canvas = canvas;
+                this.ctx = canvas.getContext('2d');
+
+                try {
+                    await this.initWebAssembly();
+                    this.isInitialized = true;
+                    log('[FCEUXEmulator] FCEUX initialized successfully', 'info');
+                } catch (error) {
+                    log('[FCEUXEmulator] Failed to initialize WebAssembly: ' + error.message, 'error');
+                    throw error;
+                }
+            }
+
+            async initWebAssembly() {
+                log('[FCEUXEmulator] Initializing FCEUX WebAssembly module...', 'debug');
+
+                try {
+                    // Wait for FCEUX to be available
+                    await this.waitForFCEUX();
+
+                    // Initialize FCEUX
+                    if (typeof window.FCEUX !== 'undefined') {
+                        const fceux = window.FCEUX;
+
+                        // Debug: Log available functions
+                        log('[FCEUXEmulator] Available FCEUX functions: ' + Object.keys(fceux).join(', '), 'debug');
+                        log('[FCEUXEmulator] FCEUX type: ' + typeof fceux, 'debug');
+                        log('[FCEUXEmulator] FCEUX has init: ' + typeof fceux.init, 'debug');
+
+                        if (typeof fceux.init === 'function') {
+                            const exports = await fceux.init();
+
+                            if (exports) {
+                                this.wasmModule = fceux;
+                                this.wasmInstance = exports;
+                                
+                                log('[FCEUXEmulator] FCEUX WebAssembly module loaded successfully', 'info');
+                                log('[FCEUXEmulator] Available exports: ' + Object.keys(exports).join(', '), 'debug');
+                            } else {
+                                throw new Error('FCEUX init() returned undefined');
+                            }
+                        } else {
+                            throw new Error('FCEUX init is not a function');
+                        }
+                    } else {
+                        throw new Error('FCEUX WebAssembly module not found');
+                    }
+                } catch (error) {
+                    log('[FCEUXEmulator] WebAssembly initialization failed: ' + error.message, 'error');
+                    throw new Error('Failed to initialize FCEUX WebAssembly module');
+                }
+            }
+
+            waitForFCEUX(timeout = 5000) {
+                return new Promise((resolve, reject) => {
+                    const startTime = Date.now();
+
+                    const checkFCEUX = () => {
+                        if (typeof window.FCEUX !== 'undefined') {
+                            resolve();
+                        } else if (Date.now() - startTime > timeout) {
+                            reject(new Error('FCEUX WebAssembly module not available within timeout'));
+                        } else {
+                            setTimeout(checkFCEUX, 100);
+                        }
+                    };
+
+                    checkFCEUX();
+                });
+            }
+
+            loadROM(bytes) {
+                try {
+                    log('[FCEUXEmulator] loadROM bytes: ' + bytes.length, 'debug');
+
+                    // Validate NES header
+                    if (!this.validateNESHeader(bytes)) {
+                        log('[FCEUXEmulator] Invalid NES ROM header', 'error');
+                        return false;
+                    }
+
+                    // Load ROM into NES core
+                    if (this.wasmModule && this.wasmModule.loadROM) {
+                        const success = this.wasmModule.loadROM(bytes, bytes.length);
+
+                        if (success) {
+                            log('[FCEUXEmulator] ROM loaded successfully into NES core', 'info');
+                            return true;
+                        } else {
+                            log('[FCEUXEmulator] Failed to load ROM into NES core', 'error');
+                            return false;
+                        }
+                    } else {
+                        log('[FCEUXEmulator] NES core not available', 'error');
+                        return false;
+                    }
+                } catch (error) {
+                    log('[FCEUXEmulator] Failed to load ROM: ' + error.message, 'error');
+                    return false;
+                }
+            }
+
+            validateNESHeader(bytes) {
+                log('[FCEUXEmulator] Validating NES header: ' + Array.from(bytes.slice(0, 4)), 'debug');
+
+                // Check for NES header "NES^Z" (0x4E 0x45 0x53 0x1A)
+                const isValid = bytes[0] === 0x4E && bytes[1] === 0x45 && bytes[2] === 0x53 && bytes[3] === 0x1A;
+
+                if (!isValid) {
+                    log('[FCEUXEmulator] Not a valid NES ROM header', 'error');
+                } else {
+                    log('[FCEUXEmulator] Valid NES ROM header confirmed', 'info');
+                }
+
+                return isValid;
+            }
+
+            play() {
+                if (!this.isInitialized) {
+                    log('[FCEUXEmulator] Emulator not initialized', 'error');
+                    return;
+                }
+
+                if (!this.isRunning) {
+                    this.isRunning = true;
+                    this.isPaused = false;
+
+                    // Signal FCEUX to start running
+                    if (this.wasmModule && this.wasmModule.setRunning) {
+                        this.wasmModule.setRunning(true);
+                    }
+
+                    this.startFrameLoop();
+                    log('[FCEUXEmulator] Emulator started', 'info');
+                }
+            }
+
+            pause() {
+                this.isPaused = true;
+                log('[FCEUXEmulator] Emulator paused', 'info');
+            }
+
+            reset() {
+                if (this.wasmModule && this.wasmModule.reset) {
+                    this.wasmModule.reset();
+                } else {
+                    log('[FCEUXEmulator] Reset emulator (stub implementation)', 'debug');
+                }
+            }
+
+            stop() {
+                this.isRunning = false;
+                this.isPaused = false;
+
+                // Signal FCEUX to stop running
+                if (this.wasmModule && this.wasmModule.setRunning) {
+                    this.wasmModule.setRunning(false);
+                }
+                log('[FCEUXEmulator] Emulator stopped', 'info');
+            }
+
+            startFrameLoop() {
+                const frameLoop = () => {
+                    if (!this.isRunning || this.isPaused) return;
+
+                    this.frame();
+                    requestAnimationFrame(frameLoop);
+                };
+
+                frameLoop();
+            }
+
+            frame() {
+                // Execute NES core frame
+                if (this.wasmModule && this.wasmModule.frame) {
+                    this.wasmModule.frame();
+                }
+
+                // Default frame rendering
+                if (this.ctx) {
+                    // Clear canvas
+                    this.ctx.clearRect(0, 0, 256, 240);
+
+                    // Get frame from NES core
+                    if (this.wasmModule && this.wasmModule.getFrameBuffer && this.wasmInstance) {
+                        const framePtr = this.wasmModule.getFrameBuffer();
+                        const palettePtr = this.wasmModule.getPalette();
+
+                        if (framePtr) {
+                            if (palettePtr) {
+                                // Indexed color mode - draw directly
+                                this.drawIndexedFrame(framePtr, palettePtr);
+                            } else {
+                                // Direct RGBA mode
+                                const rgbaBuffer = new Uint8Array(this.wasmInstance.memory.buffer, framePtr, 256 * 240 * 4);
+                                this.drawRGBAFrame(rgbaBuffer);
+                            }
+                        } else {
+                            this.drawTestFrame();
+                        }
+                    } else {
+                        this.drawTestFrame();
+                    }
+                }
+            }
+
+            drawIndexedFrame(framePtr, palettePtr) {
+                const indexedBuffer = new Uint8Array(this.wasmInstance.memory.buffer, framePtr, 256 * 240);
+                const palette = new Uint8Array(this.wasmInstance.memory.buffer, palettePtr, 192);
+                const imageData = this.ctx.createImageData(256, 240);
+
+                for (let i = 0, j = 0; i < indexedBuffer.length; i++, j += 4) {
+                    const colorIndex = indexedBuffer[i] & 0x3F;
+                    const paletteIndex = colorIndex * 3;
+
+                    imageData.data[j] = palette[paletteIndex];     // R
+                    imageData.data[j + 1] = palette[paletteIndex + 1]; // G
+                    imageData.data[j + 2] = palette[paletteIndex + 2]; // B
+                    imageData.data[j + 3] = 255;                  // A
+                }
+
+                this.ctx.putImageData(imageData, 0, 0);
+            }
+
+            drawRGBAFrame(rgbaBuffer) {
+                const imageData = this.ctx.createImageData(256, 240);
+                imageData.data.set(rgbaBuffer);
+                this.ctx.putImageData(imageData, 0, 0);
+            }
+
+            drawTestFrame() {
+                // Generate a simple test pattern
+                const imageData = this.ctx.createImageData(256, 240);
+                const data = imageData.data;
+
+                for (let y = 0; y < 240; y++) {
+                    for (let x = 0; x < 256; x++) {
+                        const i = (y * 256 + x) * 4;
+                        
+                        // Create a simple pattern
+                        data[i] = (x % 64) * 4;     // R
+                        data[i + 1] = (y % 64) * 4; // G
+                        data[i + 2] = 128;           // B
+                        data[i + 3] = 255;           // A
+                    }
+                }
+
+                this.ctx.putImageData(imageData, 0, 0);
+            }
+        }
+
+        // Initialize emulator
+        const emulator = new FCEUXEmulator();
+
+        // Initialize when page loads
+        window.addEventListener('load', async () => {
+            try {
+                log('Initializing FCEUX emulator...', 'info');
+                await emulator.init(canvas);
+                log('FCEUX emulator initialized successfully!', 'info');
+            } catch (error) {
+                log('Failed to initialize emulator: ' + error.message, 'error');
+            }
+        });
+
+        // Button event handlers
+        playBtn.addEventListener('click', () => {
+            emulator.play();
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            emulator.pause();
+        });
+
+        resetBtn.addEventListener('click', () => {
+            emulator.reset();
+        });
+
+        loadRomBtn.addEventListener('click', async () => {
+            try {
+                log('Loading test ROM...', 'info');
+                const response = await fetch('/roms/test-rom.nes');
+                const romData = await response.arrayBuffer();
+                const bytes = new Uint8Array(romData);
+                
+                const success = emulator.loadROM(bytes);
+                if (success) {
+                    log('Test ROM loaded successfully!', 'info');
+                } else {
+                    log('Failed to load test ROM', 'error');
+                }
+            } catch (error) {
+                log('Error loading test ROM: ' + error.message, 'error');
+            }
+        });
+    </script>
+</body>
+</html>

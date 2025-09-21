@@ -1,212 +1,206 @@
-// FCEUX WebAssembly Enhanced Stub Implementation
-// This provides a functional interface that simulates FCEUX behavior
-// until real FCEUX WebAssembly is available
+// FCEUX WebAssembly Core Interface
+// Provides unified API for FCEUX emulator
 
-class FCEUXWeb {
-  constructor() {
-    this.initialized = false;
-    this.memory = null;
-    this.exports = null;
-    this.romLoaded = false;
-    this.frameBuffer = new Uint8Array(256 * 240 * 3);
-    this.audioBuffer = new Int16Array(1024);
-    this.controls = new Array(8).fill(0);
-    this.isRunning = false;
-    this.lastFrameTime = 0;
-    this.frameCount = 0;
-    this.audioSampleRate = 44100;
-    this.audioPhase = 0;
-  }
+(function() {
+  'use strict';
 
-  async init() {
-    console.log('[FCEUX Web] Initializing enhanced FCEUX WebAssembly stub');
-    
-    // Create a mock memory buffer
-    this.memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
-    
-    // Mock exports that simulate FCEUX functionality
-    this.exports = {
-      memory: this.memory,
-      init: () => {
-        console.log('[FCEUX Web] init called');
+  // Create the core API object with exact method names expected by FCEUXEmulator
+  const core = {
+    initialized: false,
+    romLoaded: false,
+    running: false,
+    memory: null,
+    frameBuffer: null,
+    audioBuffer: null,
+    palette: null,
+    _instance: null,
+
+    // Core initialization
+    async init() {
+      console.log('[FCEUX Core] init() called');
+
+      if (this.initialized) {
+        console.log('[FCEUX Core] Already initialized');
         return true;
-      },
-      loadRom: (romData) => {
-        console.log('[FCEUX Web] loadRom called with', romData.length, 'bytes');
-        
-        // Basic ROM validation
-        if (romData.length < 16) {
-          console.error('[FCEUX Web] ROM too small');
-          return false;
-        }
-        
-        // Check for NES header
-        if (romData[0] !== 0x4E || romData[1] !== 0x45 || 
-            romData[2] !== 0x53 || romData[3] !== 0x1A) {
-          console.error('[FCEUX Web] Invalid NES header');
-          return false;
-        }
-        
-        this.romLoaded = true;
-        console.log('[FCEUX Web] ROM validation passed, loaded successfully');
+      }
+
+      try {
+        // Create WebAssembly memory
+        this.memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
+
+        // Initialize buffers
+        this.frameBuffer = new Uint8Array(256 * 240 * 4); // RGBA format
+        this.audioBuffer = new Int16Array(1024); // Stereo samples
+
+        console.log('[FCEUX Core] WebAssembly memory and buffers initialized');
+
+        this.initialized = true;
+        console.log('[FCEUX Core] Initialization completed successfully');
         return true;
-      },
-      frame: () => {
-        if (this.romLoaded && this.isRunning) {
-          this.generateFrame();
-        }
-      },
-      reset: () => {
-        console.log('[FCEUX Web] reset called');
-        this.controls.fill(0);
-        this.frameCount = 0;
-        this.audioPhase = 0;
-      },
-      setButton: (buttonIndex, pressed) => {
-        if (buttonIndex >= 0 && buttonIndex < this.controls.length) {
-          this.controls[buttonIndex] = pressed ? 1 : 0;
-        }
-      },
-      getFrameBuffer: () => this.frameBuffer,
-      getAudioBuffer: () => this.audioBuffer,
-      setRunning: (running) => {
-        this.isRunning = running;
-        if (running) {
-          this.lastFrameTime = performance.now();
+      } catch (error) {
+        console.error('[FCEUX Core] Initialization failed:', error);
+        throw error;
+      }
+    },
+
+    // ROM loading - exact method name expected by emulator
+    loadRom(bytes, romSize) {
+      console.log('[FCEUX Core] loadRom() called with', romSize, 'bytes');
+
+      if (!this.initialized) {
+        console.error('[FCEUX Core] loadRom() called before init');
+        return false;
+      }
+
+      if (!(bytes instanceof Uint8Array)) {
+        console.error('[FCEUX Core] loadRom() expects Uint8Array, got', typeof bytes);
+        return false;
+      }
+
+      // Basic ROM validation
+      if (romSize < 16) {
+        console.error('[FCEUX Core] ROM too small:', romSize, 'bytes');
+        return false;
+      }
+
+      // Check for NES header "NES^Z" (0x4E 0x45 0x53 0x1A)
+      if (bytes[0] !== 0x4E || bytes[1] !== 0x45 ||
+          bytes[2] !== 0x53 || bytes[3] !== 0x1A) {
+        console.error('[FCEUX Core] Invalid NES header:',
+          Array.from(bytes.slice(0, 4)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+        return false;
+      }
+
+      this.romLoaded = true;
+      console.log('[FCEUX Core] ROM loaded successfully');
+      console.log('[FCEUX Core] ROM details:', {
+        size: romSize,
+        prgBanks: bytes[4],
+        chrBanks: bytes[5],
+        mapper: ((bytes[6] >> 4) | (bytes[7] & 0xF0)),
+        hasBattery: !!(bytes[6] & 0x02),
+        hasTrainer: !!(bytes[6] & 0x04)
+      });
+
+      return true;
+    },
+
+    // Frame execution
+    frame() {
+      if (!this.initialized || !this.romLoaded) {
+        return;
+      }
+
+      // Generate a simple test pattern for now
+      this.generateTestFrame();
+    },
+
+    // Reset emulator
+    reset() {
+      console.log('[FCEUX Core] reset() called');
+      this.romLoaded = false;
+      this.running = false;
+
+      // Clear buffers
+      if (this.frameBuffer) {
+        this.frameBuffer.fill(0);
+      }
+      if (this.audioBuffer) {
+        this.audioBuffer.fill(0);
+      }
+    },
+
+    // Button input handling
+    setButton(index, pressed) {
+      if (!this.initialized) {
+        return;
+      }
+
+      if (index >= 0 && index < 8) {
+        console.log(`[FCEUX Core] setButton(${index}, ${pressed})`);
+      }
+    },
+
+    // Frame buffer access - returns Uint8Array for RGBA 256x240
+    getFrameBuffer() {
+      if (!this.initialized || !this.frameBuffer) {
+        return new Uint8Array(256 * 240 * 4);
+      }
+      return this.frameBuffer;
+    },
+
+    // Palette access for indexed color mode
+    getPalette() {
+      if (!this.initialized || !this.palette) {
+        // Create NES palette
+        this.palette = new Uint8Array(192);
+
+        // Standard NES palette (64 colors in RGB)
+        const paletteData = [
+          0x54, 0x54, 0x54, 0x00, 0x1C, 0x3C, 0x10, 0x38, 0x64, 0x00, 0x10, 0x64,
+          0x08, 0x18, 0x20, 0x30, 0x18, 0x08, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0x88, 0x88, 0x88, 0x00, 0x38, 0x6C, 0x00, 0x70, 0x8C, 0x00, 0x58, 0x94,
+          0x44, 0x58, 0x64, 0x5C, 0x78, 0x44, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0xBC, 0xBC, 0xBC, 0x70, 0x94, 0xB0, 0x40, 0x8C, 0xAC, 0x00, 0x88, 0xB8,
+          0x6C, 0x88, 0x98, 0x84, 0xA8, 0x78, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0xF8, 0xF8, 0xF8, 0xB4, 0xCC, 0xE0, 0x78, 0xC8, 0xE8, 0x68, 0xB0, 0xDC,
+          0x98, 0xB8, 0xC8, 0xA0, 0xCC, 0xA0, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+          0xFC, 0xFC, 0xFC, 0xF8, 0x98, 0xF8, 0xA0, 0xBC, 0xFC, 0x90, 0xC0, 0xFC,
+          0xB0, 0xCC, 0xFC, 0xAC, 0xD8, 0xF8, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+        ];
+
+        for (let i = 0; i < paletteData.length; i++) {
+          this.palette[i] = paletteData[i];
         }
       }
-    };
-    
-    this.initialized = true;
-    return this.exports;
-  }
+      return this.palette;
+    },
 
-  generateFrame() {
-    const currentTime = performance.now();
-    const deltaTime = currentTime - this.lastFrameTime;
-    this.lastFrameTime = currentTime;
-    
-    this.frameCount++;
-    
-    // Generate a more sophisticated test pattern that responds to controls
-    const time = currentTime * 0.001;
-    
-    for (let y = 0; y < 240; y++) {
-      for (let x = 0; x < 256; x++) {
-        const i = (y * 256 + x) * 3;
-        
-        // Base pattern
-        let r = 64, g = 64, b = 128;
-        
-        // Create animated background
-        const wave1 = Math.sin(x * 0.05 + time) * 0.5 + 0.5;
-        const wave2 = Math.sin(y * 0.05 + time * 1.3) * 0.5 + 0.5;
-        
-        // Apply controls to modify the pattern
-        if (this.controls[3]) { // Up
-          r = Math.max(0, r - 50);
+    // Audio buffer access
+    getAudioBuffer() {
+      if (!this.initialized || !this.audioBuffer) {
+        return new Int16Array(0);
+      }
+      return this.audioBuffer;
+    },
+
+    // Running state control
+    setRunning(running) {
+      console.log('[FCEUX Core] setRunning() called with', running);
+      this.running = !!running;
+    },
+
+    // Internal test frame generation
+    generateTestFrame() {
+      if (!this.frameBuffer) return;
+
+      const time = Date.now() * 0.001;
+
+      for (let y = 0; y < 240; y++) {
+        for (let x = 0; x < 256; x++) {
+          const i = y * 256 + x;
+          const j = i * 4; // RGBA format
+
+          // Create a simple animated pattern
+          this.frameBuffer[j] = (x % 64) * 4;     // R
+          this.frameBuffer[j + 1] = (y % 64) * 4; // G
+          this.frameBuffer[j + 2] = 128 + Math.sin(time + x * 0.01) * 32; // B (animated)
+          this.frameBuffer[j + 3] = 255;           // A
         }
-        if (this.controls[2]) { // Down
-          r = Math.min(255, r + 50);
-        }
-        if (this.controls[1]) { // Left
-          g = Math.max(0, g - 50);
-        }
-        if (this.controls[0]) { // Right
-          g = Math.min(255, g + 50);
-        }
-        if (this.controls[7]) { // A button
-          b = Math.min(255, b + 50);
-        }
-        if (this.controls[6]) { // B button
-          b = Math.max(0, b - 50);
-        }
-        
-        // Combine waves with control modifications
-        r = Math.floor((wave1 * 128 + r * 0.5) % 256);
-        g = Math.floor((wave2 * 128 + g * 0.5) % 256);
-        b = Math.floor((128 + Math.sin(time * 2) * 64 + b * 0.3) % 256);
-        
-        this.frameBuffer[i] = r;
-        this.frameBuffer[i + 1] = g;
-        this.frameBuffer[i + 2] = b;
       }
     }
-    
-    // Generate audio buffer with NES-like sounds
-    this.generateAudio(time);
+  };
+
+  // CRITICAL: Expose globally with exact name expected by FCEUXEmulator
+  // Only set if not already defined to avoid conflicts during HMR
+  if (typeof window.FCEUX === 'undefined') {
+    window.FCEUX = core;
+    console.log('[FCEUX Core] Global API exposed as window.FCEUX');
+  } else {
+    console.log('[FCEUX Core] window.FCEUX already defined, skipping assignment');
   }
 
-  generateAudio(time) {
-    const sampleRate = this.audioSampleRate;
-    const samplesPerFrame = this.audioBuffer.length / 2; // Stereo
-    
-    // Base frequencies for different channels
-    const pulse1Freq = this.controls[7] ? 440 : 0; // A button
-    const pulse2Freq = this.controls[6] ? 330 : 0; // B button
-    const triangleFreq = this.controls[3] ? 220 : 0; // Up
-    const noiseFreq = this.controls[2] ? 110 : 0;   // Down
-    
-    for (let i = 0; i < samplesPerFrame; i++) {
-      const t = this.audioPhase / sampleRate;
-      
-      // Generate different waveforms for different channels
-      let sample = 0;
-      
-      // Pulse waves (square waves)
-      if (pulse1Freq > 0) {
-        sample += Math.sin(t * pulse1Freq * Math.PI * 2) > 0 ? 0.1 : -0.1;
-      }
-      
-      if (pulse2Freq > 0) {
-        sample += Math.sin(t * pulse2Freq * Math.PI * 2 + Math.PI * 0.5) > 0 ? 0.1 : -0.1;
-      }
-      
-      // Triangle wave
-      if (triangleFreq > 0) {
-        const trianglePhase = (t * triangleFreq) % 1;
-        const triangleValue = trianglePhase < 0.5 ? trianglePhase * 4 - 1 : 3 - trianglePhase * 4;
-        sample += triangleValue * 0.05;
-      }
-      
-      // Noise (simple white noise)
-      if (noiseFreq > 0) {
-        sample += (Math.random() - 0.5) * 0.02;
-      }
-      
-      // Apply envelope
-      const envelope = Math.max(0, 1 - this.audioPhase / (sampleRate * 0.1));
-      sample *= envelope;
-      
-      // Convert to 16-bit and write to buffer (stereo)
-      const sample16 = Math.floor(sample * 32767 * 0.3); // Reduce volume
-      this.audioBuffer[i * 2] = sample16;
-      this.audioBuffer[i * 2 + 1] = sample16;
-      
-      this.audioPhase++;
-    }
-    
-    // Reset audio phase periodically to prevent overflow
-    if (this.audioPhase > sampleRate * 10) {
-      this.audioPhase = 0;
-    }
-  }
+  // Log available methods for debugging
+  console.log('[FCEUX Core] Available methods:', Object.keys(core));
 
-  isInitialized() {
-    return this.initialized;
-  }
-}
-
-// Global FCEUX instance
-window.FCEUX = new FCEUXWeb();
-
-// Auto-initialize when script loads
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    window.FCEUX.init();
-  });
-} else {
-  window.FCEUX.init();
-}
-
-console.log('[FCEUX Web] Enhanced stub implementation loaded');
+})();

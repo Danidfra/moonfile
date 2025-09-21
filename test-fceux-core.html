@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FCEUX Core Interface Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: monospace;
+        }
+        #canvas {
+            border: 1px solid #333;
+            image-rendering: pixelated;
+        }
+        #log {
+            margin-top: 20px;
+            height: 400px;
+            overflow-y: auto;
+            background: #111;
+            padding: 10px;
+            border: 1px solid #333;
+        }
+        .log-entry {
+            margin: 2px 0;
+            font-size: 12px;
+        }
+        .log-error {
+            color: #f44;
+        }
+        .log-info {
+            color: #4f4;
+        }
+        .log-debug {
+            color: #88f;
+        }
+        .log-success {
+            color: #4f4;
+            font-weight: bold;
+        }
+        button {
+            margin: 5px;
+            padding: 8px 16px;
+            background: #333;
+            color: #fff;
+            border: 1px solid #555;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #444;
+        }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+    </style>
+</head>
+<body>
+    <h1>FCEUX Core Interface Test</h1>
+    <canvas id="canvas" width="256" height="240"></canvas>
+    <div>
+        <button id="initBtn">Initialize Core</button>
+        <button id="loadRomBtn" disabled>Load Test ROM</button>
+        <button id="playBtn" disabled>Play</button>
+        <button id="pauseBtn" disabled>Pause</button>
+        <button id="resetBtn" disabled>Reset</button>
+    </div>
+    <div id="log"></div>
+
+    <script src="/lib/fceux/fceux-web.js"></script>
+    <script>
+        const canvas = document.getElementById('canvas');
+        const initBtn = document.getElementById('initBtn');
+        const loadRomBtn = document.getElementById('loadRomBtn');
+        const playBtn = document.getElementById('playBtn');
+        const pauseBtn = document.getElementById('pauseBtn');
+        const resetBtn = document.getElementById('resetBtn');
+        const logDiv = document.getElementById('log');
+
+        function log(message, type = 'debug') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logDiv.appendChild(entry);
+            logDiv.scrollTop = logDiv.scrollHeight;
+            console.log(message);
+        }
+
+        let core = null;
+        let isRunning = false;
+
+        initBtn.addEventListener('click', async () => {
+            try {
+                log('=== Starting Core Initialization ===', 'info');
+                
+                // Check if FCEUX is available
+                if (typeof window.FCEUX === 'undefined') {
+                    throw new Error('FCEUX not found on window object');
+                }
+                
+                core = window.FCEUX;
+                log(`Found FCEUX core, type: ${typeof core}`, 'debug');
+                
+                // Check available methods
+                const methods = Object.keys(core);
+                log(`Available core methods: ${methods.join(', ')}`, 'debug');
+                
+                // Check required methods
+                const requiredMethods = ['init', 'loadRom', 'frame', 'reset', 'setButton', 'getFrameBuffer', 'setRunning'];
+                for (const method of requiredMethods) {
+                    if (typeof core[method] !== 'function') {
+                        throw new Error(`Missing required method: ${method}`);
+                    }
+                    log(`✓ ${method} method available`, 'debug');
+                }
+                
+                log('All required methods are available', 'success');
+                
+                // Initialize the core
+                log('Calling core.init()...', 'debug');
+                const exports = await core.init();
+                log(`core.init() completed, exports: ${exports ? 'available' : 'undefined'}`, 'debug');
+                
+                // Re-check methods after init
+                const postInitMethods = Object.keys(core);
+                log(`Methods after init: ${postInitMethods.join(', ')}`, 'debug');
+                
+                loadRomBtn.disabled = false;
+                initBtn.disabled = true;
+                log('=== Core initialization completed successfully ===', 'success');
+                
+            } catch (error) {
+                log(`Core initialization failed: ${error.message}`, 'error');
+            }
+        });
+
+        loadRomBtn.addEventListener('click', async () => {
+            try {
+                log('=== Loading Test ROM ===', 'info');
+                
+                // Create a simple test ROM with valid NES header
+                const testROM = new Uint8Array([
+                    0x4E, 0x45, 0x53, 0x1A, // NES header
+                    0x01,                   // PRG ROM size (1 bank = 16KB)
+                    0x01,                   // CHR ROM size (1 bank = 8KB)
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Flags
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00  // Remaining header
+                ]);
+                
+                log(`Test ROM created, size: ${testROM.length} bytes`, 'debug');
+                log(`First 16 bytes: ${Array.from(testROM.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')}`, 'debug');
+                
+                // Load ROM
+                log('Calling core.loadRom()...', 'debug');
+                const success = core.loadRom(testROM, testROM.length);
+                log(`core.loadRom() returned: ${success}`, 'debug');
+                
+                if (!success) {
+                    throw new Error('loadRom returned false');
+                }
+                
+                log('✅ loadROM call succeeded', 'success');
+                
+                playBtn.disabled = false;
+                resetBtn.disabled = false;
+                loadRomBtn.disabled = true;
+                log('=== ROM loading completed successfully ===', 'success');
+                
+            } catch (error) {
+                log(`ROM loading failed: ${error.message}`, 'error');
+            }
+        });
+
+        playBtn.addEventListener('click', () => {
+            try {
+                log('Starting emulation...', 'info');
+                
+                if (typeof core.setRunning === 'function') {
+                    core.setRunning(true);
+                    log('core.setRunning(true) called', 'debug');
+                }
+                
+                isRunning = true;
+                playBtn.disabled = true;
+                pauseBtn.disabled = false;
+                
+                startFrameLoop();
+                log('=== Emulation started ===', 'success');
+                
+            } catch (error) {
+                log(`Failed to start emulation: ${error.message}`, 'error');
+            }
+        });
+
+        pauseBtn.addEventListener('click', () => {
+            try {
+                log('Pausing emulation...', 'info');
+                
+                if (typeof core.setRunning === 'function') {
+                    core.setRunning(false);
+                    log('core.setRunning(false) called', 'debug');
+                }
+                
+                isRunning = false;
+                playBtn.disabled = false;
+                pauseBtn.disabled = true;
+                
+                log('=== Emulation paused ===', 'success');
+                
+            } catch (error) {
+                log(`Failed to pause emulation: ${error.message}`, 'error');
+            }
+        });
+
+        resetBtn.addEventListener('click', () => {
+            try {
+                log('Resetting emulation...', 'info');
+                
+                if (typeof core.reset === 'function') {
+                    core.reset();
+                    log('core.reset() called', 'debug');
+                }
+                
+                log('=== Emulation reset ===', 'success');
+                
+            } catch (error) {
+                log(`Failed to reset emulation: ${error.message}`, 'error');
+            }
+        });
+
+        function startFrameLoop() {
+            const ctx = canvas.getContext('2d');
+            const imageData = ctx.createImageData(256, 240);
+            
+            const frameLoop = () => {
+                if (!isRunning) return;
+                
+                try {
+                    // Execute frame
+                    if (typeof core.frame === 'function') {
+                        core.frame();
+                    }
+                    
+                    // Get frame buffer and render
+                    if (typeof core.getFrameBuffer === 'function') {
+                        const framePtr = core.getFrameBuffer();
+                        
+                        if (framePtr) {
+                            // Try to get the frame data from WASM memory
+                            // For now, generate a test pattern
+                            const data = imageData.data;
+                            for (let y = 0; y < 240; y++) {
+                                for (let x = 0; x < 256; x++) {
+                                    const i = (y * 256 + x) * 4;
+                                    
+                                    // Simple gradient test pattern
+                                    data[i] = (x % 64) * 4;     // R
+                                    data[i + 1] = (y % 64) * 4; // G
+                                    data[i + 2] = 128;           // B
+                                    data[i + 3] = 255;           // A
+                                }
+                            }
+                            
+                            ctx.putImageData(imageData, 0, 0);
+                        }
+                    }
+                    
+                } catch (error) {
+                    log(`Frame error: ${error.message}`, 'error');
+                }
+                
+                requestAnimationFrame(frameLoop);
+            };
+            
+            frameLoop();
+        }
+
+        // Log initial state
+        log('FCEUX Core Interface Test loaded', 'info');
+        log('Waiting for core initialization...', 'debug');
+    </script>
+</body>
+</html>
