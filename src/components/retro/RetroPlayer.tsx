@@ -16,8 +16,8 @@ interface RetroPlayerProps {
   className?: string;
 }
 
-type EmulatorState = 'loading' | 'decoding' | 'validating' | 'ready' | 'running' | 'paused' | 'error';
-type ErrorType = 'rom-not-found' | 'rom-invalid' | 'emulator-error' | 'network-error' | 'too-large' | 'decode-error' | 'validation-error' | 'size-mismatch' | 'hash-mismatch' | 'unsupported-compression' | 'unsupported-encoding';
+type EmulatorState = 'idle' | 'fetching' | 'decoding' | 'validating' | 'loading-emulator' | 'ready' | 'running' | 'paused' | 'error';
+type ErrorType = 'rom-not-found' | 'rom-invalid' | 'emulator-error' | 'network-error' | 'too-large' | 'decode-error' | 'validation-error' | 'size-mismatch' | 'hash-mismatch' | 'unsupported-compression' | 'unsupported-encoding' | 'test-rom-failed';
 
 export function RetroPlayer({
   meta,
@@ -46,6 +46,20 @@ export function RetroPlayer({
   });
   const [romInfo, setRomInfo] = useState<any>(null);
   const [validationResult, setValidationResult] = useState<any>(null);
+  const [debugInfo, setDebugInfo] = useState<{
+    currentPhase: string;
+    lastError?: string;
+    eventId?: string;
+    dTag?: string;
+    parsedTags?: Record<string, string>;
+    decodedSize?: number;
+    startTime?: number;
+    phaseTimes?: Record<string, number>;
+  }>({
+    currentPhase: 'idle',
+    startTime: Date.now(),
+    phaseTimes: {}
+  });
 
   // Initialize emulator
   useEffect(() => {
@@ -79,26 +93,86 @@ export function RetroPlayer({
     }
   }, [audioEnabled]);
 
+  // Debug logging helper
+  const logPhase = (phase: string, details?: any) => {
+    const now = Date.now();
+    const elapsed = debugInfo.startTime ? now - debugInfo.startTime : 0;
+    console.log(`[Retro] ${phase}`, details || '', `(t+${elapsed}ms)`);
+
+    setDebugInfo(prev => ({
+      ...prev,
+      currentPhase: phase,
+      phaseTimes: {
+        ...prev.phaseTimes,
+        [phase]: now
+      }
+    }));
+  };
+
+  const logError = (phase: string, error: any) => {
+    console.error(`[Retro] ERROR in ${phase}:`, error);
+    setDebugInfo(prev => ({
+      ...prev,
+      currentPhase: 'error',
+      lastError: `${phase}: ${error instanceof Error ? error.message : String(error)}`
+    }));
+  };
+
   // Load ROM
   useEffect(() => {
     const loadROM = async () => {
       if (!emulatorRef.current) return;
 
       try {
-        setState('loading');
+        // Reset debug info
+        setDebugInfo({
+          currentPhase: 'idle',
+          startTime: Date.now(),
+          phaseTimes: {}
+        });
+
         setError(null);
         setErrorMessage(null);
+        setValidationResult(null);
+        setRomInfo(null);
 
         let romData: Uint8Array;
 
         if (romSource.source === 'nostr') {
-          // Phase 2: Decode and validate from Nostr event
+          // Extract debug info from Nostr event
+          const getTagValue = (tagName: string): string | undefined => {
+            const tag = romSource.event.tags.find(t => t[0] === tagName);
+            return tag?.[1];
+          };
+
+          const dTag = getTagValue('d');
+          const parsedTags = {
+            encoding: getTagValue('encoding') || 'base64',
+            compression: getTagValue('compression') || 'none',
+            size: getTagValue('size') || 'unknown',
+            sha256: getTagValue('sha256') || 'unknown',
+            mime: getTagValue('mime') || 'unknown'
+          };
+
+          setDebugInfo(prev => ({
+            ...prev,
+            dTag,
+            parsedTags,
+            eventId: nostrEvent?.id
+          }));
+
+          logPhase('Fetching event...');
+          // The event is already fetched by the parent component, so we just validate it
+          logPhase('Event fetched:', nostrEvent?.id);
+
+          logPhase('Decoding with encoding=' + parsedTags.encoding);
           setState('decoding');
 
           const validation = await ROMLoader.validateROMFromNostrEvent(romSource.event);
           setValidationResult(validation);
 
           if (!validation.isValid) {
+            logError('decoding', new Error(validation.error || 'ROM validation failed'));
             setError('validation-error' as ErrorType);
             setErrorMessage(validation.error || 'ROM validation failed');
             setState('error');
@@ -106,45 +180,108 @@ export function RetroPlayer({
           }
 
           romData = validation.decodedBytes!;
+          logPhase('Decoded bytes:', romData.length);
+
+          setDebugInfo(prev => ({
+            ...prev,
+            decodedSize: romData.length
+          }));
+
+          logPhase('Validating size', { expected: parsedTags.size, actual: romData.length });
+          setState('validating');
 
           // Get ROM info
           const info = ROMLoader.getROMInfo(romData);
           setRomInfo(info);
 
           // Add short hash to validation result for display
-          validation.shortHash = await ROMLoader.computeSHA256(romData).then(hash => hash.substring(0, 8));
+          if (validation.actualHash) {
+            validation.shortHash = validation.actualHash.substring(0, 8);
+          } else {
+            const computedHash = await ROMLoader.computeSHA256(romData);
+            validation.actualHash = computedHash;
+            validation.shortHash = computedHash.substring(0, 8);
+          }
+
+          if (validation.actualHash && validation.expectedHash) {
+            if (validation.actualHash === validation.expectedHash.toLowerCase()) {
+              logPhase('SHA256 OK', { hash: validation.shortHash });
+            } else {
+              logError('validating', new Error(`SHA256 mismatch: expected ${validation.expectedHash}, got ${validation.actualHash}`));
+              setError('hash-mismatch' as ErrorType);
+              setErrorMessage('SHA256 hash does not match expected value');
+              setState('error');
+              return;
+            }
+          } else {
+            logPhase('SHA256 validation skipped (no expected hash provided)');
+          }
+
+          if (validation.expectedSize && validation.actualSize) {
+            if (validation.actualSize === validation.expectedSize) {
+              logPhase('Size validation OK:', validation.actualSize, 'bytes');
+            } else {
+              logError('validating', new Error(`Size mismatch: expected ${validation.expectedSize}, got ${validation.actualSize}`));
+              setError('size-mismatch' as ErrorType);
+              setErrorMessage('ROM size does not match expected size');
+              setState('error');
+              return;
+            }
+          } else {
+            logPhase('Size validation skipped (no expected size provided)');
+          }
         } else {
           // Phase 1: Load from URL
-          setState('loading');
+          logPhase('Fetching ROM from URL...');
+          setState('fetching');
 
           romData = await ROMLoader.loadROM(romSource, {
             maxSize: 4 * 1024 * 1024, // 4MB max
           });
+          logPhase('ROM fetched:', romData.length, 'bytes');
+
+          setDebugInfo(prev => ({
+            ...prev,
+            decodedSize: romData.length
+          }));
 
           // Validate NES ROM
+          logPhase('Validating NES ROM structure...');
+          setState('validating');
+
           const isValid = await ROMLoader.validateNESROM(romData);
           if (!isValid) {
+            logError('validating', new Error('Invalid NES ROM format'));
             setError('rom-invalid');
+            setErrorMessage('Invalid NES ROM file format');
             setState('error');
             return;
           }
+          logPhase('NES ROM validation OK');
 
           // Get ROM info
           const info = ROMLoader.getROMInfo(romData);
           setRomInfo(info);
+          logPhase('ROM info extracted', { mapper: info.mapper, prg: info.prgBanks, chr: info.chrBanks });
         }
 
         // Load ROM into emulator
+        logPhase('Loading ROM into emulator...');
+        setState('loading-emulator');
+
         const success = emulatorRef.current!.loadROM(romData);
         if (!success) {
+          logError('loading-emulator', new Error('Failed to load ROM into emulator'));
           setError('emulator-error');
+          setErrorMessage('Failed to load ROM into emulator');
           setState('error');
           return;
         }
 
+        logPhase('Emulator started');
         setState('ready');
       } catch (err) {
-        console.error('ROM loading failed:', err);
+        logError('loading', err);
 
         let errorType: ErrorType = 'emulator-error';
         let errorMsg = err instanceof Error ? err.message : 'Unknown error';
@@ -176,7 +313,7 @@ export function RetroPlayer({
     };
 
     loadROM();
-  }, [romSource]);
+  }, [romSource, nostrEvent]);
 
   // Cleanup on unmount
   useEffect(() => {
@@ -284,8 +421,74 @@ export function RetroPlayer({
   };
 
   const handleRetry = () => {
-    // Reload the page to retry
-    window.location.reload();
+    // Reload the component to retry
+    setError(null);
+    setErrorMessage(null);
+    setValidationResult(null);
+    setRomInfo(null);
+    setState('idle');
+  };
+
+  const handleLoadTestROM = async () => {
+    if (!emulatorRef.current) return;
+
+    try {
+      logPhase('Loading Test ROM...');
+      setState('fetching');
+      setError(null);
+      setErrorMessage(null);
+
+      // Load test ROM from static URL
+      const testRomSource: ROMSource = {
+        source: 'url',
+        url: '/roms/test-rom.nes'
+      };
+
+      const romData = await ROMLoader.loadROM(testRomSource, {
+        maxSize: 4 * 1024 * 1024,
+      });
+      logPhase('Test ROM fetched:', romData.length, 'bytes');
+
+      // Validate NES ROM
+      logPhase('Validating Test ROM...');
+      setState('validating');
+
+      const isValid = await ROMLoader.validateNESROM(romData);
+      if (!isValid) {
+        logError('validating', new Error('Invalid Test ROM format'));
+        setError('test-rom-failed' as ErrorType);
+        setErrorMessage('Test ROM is not a valid NES file');
+        setState('error');
+        return;
+      }
+      logPhase('Test ROM validation OK');
+
+      // Get ROM info
+      const info = ROMLoader.getROMInfo(romData);
+      setRomInfo(info);
+      logPhase('Test ROM info', { mapper: info.mapper, prg: info.prgBanks, chr: info.chrBanks });
+
+      // Load ROM into emulator
+      logPhase('Loading Test ROM into emulator...');
+      setState('loading-emulator');
+
+      const success = emulatorRef.current!.loadROM(romData);
+      if (!success) {
+        logError('loading-emulator', new Error('Failed to load Test ROM into emulator'));
+        setError('test-rom-failed' as ErrorType);
+        setErrorMessage('Failed to load Test ROM into emulator');
+        setState('error');
+        return;
+      }
+
+      logPhase('Test ROM loaded successfully');
+      setState('ready');
+    } catch (err) {
+      logError('loading-test-rom', err);
+      setError('test-rom-failed' as ErrorType);
+      setErrorMessage(err instanceof Error ? err.message : 'Failed to load Test ROM');
+      setState('error');
+    }
   };
 
   const handleCopyEventId = () => {
@@ -321,6 +524,8 @@ export function RetroPlayer({
         return 'Unsupported compression format';
       case 'unsupported-encoding':
         return 'Unsupported encoding format';
+      case 'test-rom-failed':
+        return 'Test ROM failed to load - emulator may have issues';
       default:
         return 'An unknown error occurred';
     }
@@ -328,12 +533,16 @@ export function RetroPlayer({
 
   const getStateMessage = () => {
     switch (state) {
-      case 'loading':
-        return 'Loading ROM...';
+      case 'idle':
+        return 'Ready to load...';
+      case 'fetching':
+        return 'Fetching ROM...';
       case 'decoding':
         return 'Decoding ROM...';
       case 'validating':
         return 'Validating ROM...';
+      case 'loading-emulator':
+        return 'Loading into emulator...';
       case 'ready':
         return 'Ready to play';
       case 'running':
@@ -420,19 +629,38 @@ export function RetroPlayer({
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-0">
                   <div className="relative aspect-video bg-black flex items-center justify-center">
-                    {(state === 'loading' || state === 'decoding' || state === 'validating') && (
+                    {(state === 'idle' || state === 'fetching' || state === 'decoding' || state === 'validating' || state === 'loading-emulator') && (
                       <div className="text-center">
                         <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
                         <p className="text-gray-400">{getStateMessage()}</p>
+                        {state === 'fetching' && (
+                          <p className="text-gray-500 text-sm mt-2">
+                            {romSource.source === 'nostr' ? 'Fetching from Nostr event...' : 'Downloading ROM file...'}
+                          </p>
+                        )}
                         {state === 'decoding' && (
                           <p className="text-gray-500 text-sm mt-2">
-                            {romSource.source === 'nostr' ? 'Decoding from Nostr event...' : 'Loading ROM...'}
+                            {romSource.source === 'nostr' ? 'Decoding from Nostr event...' : 'Processing ROM data...'}
                           </p>
                         )}
                         {state === 'validating' && (
                           <p className="text-gray-500 text-sm mt-2">
                             Validating ROM integrity...
                           </p>
+                        )}
+                        {state === 'loading-emulator' && (
+                          <p className="text-gray-500 text-sm mt-2">
+                            Loading ROM into emulator...
+                          </p>
+                        )}
+
+                        {/* Debug info during loading */}
+                        {process.env.NODE_ENV === 'development' && (
+                          <div className="mt-4 text-xs text-gray-600 bg-gray-800 rounded p-2 text-left">
+                            <div>Phase: {debugInfo.currentPhase}</div>
+                            {debugInfo.eventId && <div>Event: {debugInfo.eventId.substring(0, 16)}...</div>}
+                            {debugInfo.decodedSize && <div>Size: {Math.round(debugInfo.decodedSize / 1024)}KB</div>}
+                          </div>
                         )}
                       </div>
                     )}
@@ -463,11 +691,61 @@ export function RetroPlayer({
                           </div>
                         )}
 
+                        {/* Debug Panel */}
+                        {(process.env.NODE_ENV === 'development' || window.location.search.includes('debug=1')) && (
+                          <div className="bg-gray-800 rounded-lg p-4 mb-4 text-left">
+                            <h4 className="text-sm font-semibold text-white mb-2">Debug Information</h4>
+                            <div className="text-xs text-gray-400 space-y-1">
+                              <div><strong>Current Phase:</strong> {debugInfo.currentPhase}</div>
+                              {debugInfo.lastError && (
+                                <div><strong>Last Error:</strong> {debugInfo.lastError}</div>
+                              )}
+                              {debugInfo.eventId && (
+                                <div><strong>Event ID:</strong> {debugInfo.eventId}</div>
+                              )}
+                              {debugInfo.dTag && (
+                                <div><strong>D-Tag:</strong> {debugInfo.dTag}</div>
+                              )}
+                              {debugInfo.parsedTags && (
+                                <div className="mt-2">
+                                  <div><strong>Parsed Tags:</strong></div>
+                                  <div className="ml-2">
+                                    {Object.entries(debugInfo.parsedTags).map(([key, value]) => (
+                                      <div key={key}>  {key}: {value}</div>
+                                    ))}
+                                  </div>
+                                </div>
+                              )}
+                              {debugInfo.decodedSize && (
+                                <div><strong>Decoded Size:</strong> {debugInfo.decodedSize} bytes</div>
+                              )}
+                              {debugInfo.phaseTimes && Object.keys(debugInfo.phaseTimes).length > 0 && (
+                                <div className="mt-2">
+                                  <div><strong>Phase Timings:</strong></div>
+                                  <div className="ml-2">
+                                    {Object.entries(debugInfo.phaseTimes).map(([phase, time]) => {
+                                      const elapsed = time - (debugInfo.startTime || time);
+                                      return <div key={phase}>  {phase}: t+{elapsed}ms</div>;
+                                    })}
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        )}
+
                         <div className="space-y-2">
                           <Button onClick={handleRetry} className="w-full">
                             <RefreshCw className="w-4 h-4 mr-2" />
                             Retry
                           </Button>
+
+                          {/* Test ROM button - helps isolate emulator issues */}
+                          <Button onClick={handleLoadTestROM} variant="outline" className="w-full">
+                            <Play className="w-4 h-4 mr-2" />
+                            Run Test ROM
+                          </Button>
+
                           {nostrEvent && (
                             <Button onClick={handleCopyEventId} variant="outline" className="w-full">
                               <Copy className="w-4 h-4 mr-2" />
@@ -545,6 +823,7 @@ export function RetroPlayer({
                         state === 'paused' ? 'bg-yellow-400' :
                         state === 'ready' ? 'bg-blue-400' :
                         state === 'error' ? 'bg-red-400' :
+                        (state === 'fetching' || state === 'decoding' || state === 'validating' || state === 'loading-emulator') ? 'bg-purple-400' :
                         'bg-gray-600'
                       }`}></div>
                       {getStateMessage()}
@@ -717,6 +996,44 @@ export function RetroPlayer({
                             </div>
                           )}
                         </div>
+                      </div>
+                    )}
+
+                    {/* Debug Panel for development */}
+                    {(process.env.NODE_ENV === 'development' || window.location.search.includes('debug=1')) && (
+                      <div className="pt-2 border-t border-gray-800">
+                        <details className="group">
+                          <summary className="text-xs text-gray-500 cursor-pointer hover:text-gray-300 list-none">
+                            <span className="inline-flex items-center gap-1">
+                              Debug Info
+                              <span className="inline-block transition-transform group-open:rotate-90">▶</span>
+                            </span>
+                          </summary>
+                          <div className="mt-2 text-xs text-gray-400 space-y-1">
+                            <div><strong>Phase:</strong> {debugInfo.currentPhase}</div>
+                            {debugInfo.lastError && (
+                              <div><strong>Error:</strong> {debugInfo.lastError}</div>
+                            )}
+                            {debugInfo.eventId && (
+                              <div><strong>Event:</strong> {debugInfo.eventId.substring(0, 16)}...</div>
+                            )}
+                            {debugInfo.dTag && (
+                              <div><strong>D-Tag:</strong> {debugInfo.dTag}</div>
+                            )}
+                            {debugInfo.decodedSize && (
+                              <div><strong>Size:</strong> {debugInfo.decodedSize} bytes</div>
+                            )}
+                            {debugInfo.phaseTimes && Object.keys(debugInfo.phaseTimes).length > 0 && (
+                              <div className="mt-2">
+                                <div><strong>Timings:</strong></div>
+                                {Object.entries(debugInfo.phaseTimes).map(([phase, time]) => {
+                                  const elapsed = time - (debugInfo.startTime || time);
+                                  return <div key={phase} className="ml-2">  {phase}: +{elapsed}ms</div>;
+                                })}
+                              </div>
+                            )}
+                          </div>
+                        </details>
                       </div>
                     )}
 

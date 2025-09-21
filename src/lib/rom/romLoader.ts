@@ -61,6 +61,7 @@ export class ROMLoader {
 
   private static async loadFromURL(url: string): Promise<Uint8Array> {
     try {
+      console.log('[Retro] Fetching URL:', url);
       const response = await fetch(url);
 
       if (!response.ok) {
@@ -72,8 +73,11 @@ export class ROMLoader {
       }
 
       const arrayBuffer = await response.arrayBuffer();
-      return new Uint8Array(arrayBuffer);
+      const bytes = new Uint8Array(arrayBuffer);
+      console.log('[Retro] URL fetch complete, bytes:', bytes.length);
+      return bytes;
     } catch (error) {
+      console.error('[Retro] URL fetch failed:', error);
       if (error instanceof Error) {
         throw new Error(`Failed to load ROM from URL: ${error.message}`);
       }
@@ -94,6 +98,8 @@ export class ROMLoader {
     const sha256 = getTagValue('sha256');
     const mime = getTagValue('mime');
 
+    console.log('[Retro] Parsed tags:', { encoding, compression, sizeBytes, sha256: sha256 ? sha256.substring(0, 8) + '...' : 'none' });
+
     // Validate compression (only 'none' supported for now)
     if (compression !== 'none') {
       throw new Error(`Unsupported compression: ${compression}`);
@@ -109,6 +115,7 @@ export class ROMLoader {
     let decodedBytes: Uint8Array;
 
     try {
+      console.log('[Retro] Starting decode with encoding:', encoding, 'content length:', event.content.length);
       switch (encoding) {
         case 'base64':
           decodedBytes = this.decodeBase64(event.content);
@@ -122,21 +129,30 @@ export class ROMLoader {
         default:
           throw new Error(`Unsupported encoding: ${encoding}`);
       }
+      console.log('[Retro] Decode successful, bytes:', decodedBytes.length);
     } catch (error) {
+      console.error('[Retro] Decode failed:', error);
       throw new Error(`Failed to decode ${encoding}: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
 
     // Validate size after decoding
+    console.log('[Retro] Validating size: expected', sizeBytes, 'actual', decodedBytes.length);
     if (sizeBytes && decodedBytes.length !== sizeBytes) {
       throw new Error(`Size mismatch: expected ${sizeBytes} bytes, got ${decodedBytes.length} bytes`);
     }
 
     // Validate SHA256 if provided
     if (sha256) {
+      console.log('[Retro] Validating SHA256...');
       const computedHash = await this.computeSHA256(decodedBytes);
+      console.log('[Retro] SHA256 computed:', computedHash.substring(0, 8) + '...');
+      console.log('[Retro] SHA256 expected:', sha256);
+
       if (computedHash !== sha256.toLowerCase()) {
+        console.error('[Retro] SHA256 mismatch');
         throw new Error(`SHA256 mismatch: expected ${sha256}, got ${computedHash}`);
       }
+      console.log('[Retro] SHA256 validation OK');
     }
 
     // Optional: Warn about MIME type
@@ -164,10 +180,13 @@ export class ROMLoader {
     }
   }
 
-  private static async computeSHA256(data: Uint8Array): Promise<string> {
+  public static async computeSHA256(data: Uint8Array): Promise<string> {
+    console.log('[Retro] Computing SHA256 for', data.length, 'bytes');
     const hashBuffer = await crypto.subtle.digest('SHA-256', data);
     const hashArray = Array.from(new Uint8Array(hashBuffer));
-    return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
+    console.log('[Retro] SHA256 computed:', hash.substring(0, 8) + '...');
+    return hash;
   }
 
   private static decodeBase64(base64: string): Uint8Array {
@@ -222,9 +241,12 @@ export class ROMLoader {
   }
 
   static async validateNESROM(romData: Uint8Array): Promise<boolean> {
+    console.log('[Retro] Validating NES ROM structure, size:', romData.length);
+
     // Basic NES ROM validation
     // Check if the ROM has a valid header
     if (romData.length < 16) {
+      console.error('[Retro] ROM too small for NES header:', romData.length, 'bytes');
       return false;
     }
 
@@ -232,7 +254,15 @@ export class ROMLoader {
     const header = new Uint8Array(romData.buffer, romData.byteOffset, 4);
     const expectedHeader = new Uint8Array([0x4E, 0x45, 0x53, 0x1A]);
 
-    return header.every((byte, index) => byte === expectedHeader[index]);
+    const headerMatch = header.every((byte, index) => byte === expectedHeader[index]);
+
+    if (!headerMatch) {
+      console.error('[Retro] Invalid NES header:', Array.from(header).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+      return false;
+    }
+
+    console.log('[Retro] NES ROM validation OK');
+    return true;
   }
 
   static getROMInfo(romData: Uint8Array): {
@@ -307,6 +337,7 @@ export class ROMLoader {
     shortHash?: string;
   }> {
     try {
+      console.log('[Retro] Starting ROM validation from Nostr event');
       const decodedBytes = await this.decodeFromNostrEvent(event);
       const computedHash = await this.computeSHA256(decodedBytes);
 
@@ -321,14 +352,28 @@ export class ROMLoader {
       const encoding = getTagValue('encoding') || 'base64';
       const compression = getTagValue('compression') || 'none';
 
+      console.log('[Retro] Validation data:', {
+        actualSize: decodedBytes.length,
+        expectedSize,
+        actualHash: computedHash.substring(0, 8) + '...',
+        expectedHash: expectedHash ? expectedHash.substring(0, 8) + '...' : 'none',
+        encoding,
+        compression
+      });
+
       // Check size validation
       const sizeMatches = !expectedSize || decodedBytes.length === expectedSize;
+      console.log('[Retro] Size validation:', sizeMatches ? 'OK' : 'FAILED');
 
       // Check hash validation
       const hashMatches = !expectedHash || computedHash === expectedHash.toLowerCase();
+      console.log('[Retro] Hash validation:', hashMatches ? 'OK' : 'FAILED');
+
+      const isValid = sizeMatches && hashMatches;
+      console.log('[Retro] Overall validation:', isValid ? 'OK' : 'FAILED');
 
       return {
-        isValid: sizeMatches && hashMatches,
+        isValid,
         decodedBytes,
         actualSize: decodedBytes.length,
         expectedSize,
@@ -340,6 +385,7 @@ export class ROMLoader {
         error: !sizeMatches ? 'Size mismatch' : !hashMatches ? 'SHA256 mismatch' : undefined
       };
     } catch (error) {
+      console.error('[Retro] ROM validation failed:', error);
       return {
         isValid: false,
         error: error instanceof Error ? error.message : 'Unknown error'
