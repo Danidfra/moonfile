@@ -57,6 +57,18 @@ export class NESEmulator {
     this.config = config;
 
     if (this.ctx) {
+      // Set canvas attributes directly (not just CSS)
+      canvas.width = 256;
+      canvas.height = 240;
+
+      // Handle HiDPI scaling
+      const dpr = window.devicePixelRatio || 1;
+      if (dpr > 1) {
+        canvas.width = 256 * dpr;
+        canvas.height = 240 * dpr;
+        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+      }
+
       this.ctx.imageSmoothingEnabled = false;
       this.imageData = this.ctx.createImageData(256, 240);
     }
@@ -132,7 +144,7 @@ export class NESEmulator {
   }
 
   private onFrame = (frame: Uint8Array): void => {
-    // frame is 256*240*3 (RGB)
+    // Handle both Uint8Array (RGB) and Uint32Array (0x00RRGGBB) formats
     if (this.config.onFrame) {
       this.config.onFrame(frame);
       return;
@@ -141,13 +153,34 @@ export class NESEmulator {
     // Default frame rendering
     if (this.ctx && this.imageData) {
       const data = this.imageData.data;
-      for (let i = 0, j = 0; i < frame.length; i += 3, j += 4) {
-        data[j] = frame[i];     // R
-        data[j + 1] = frame[i + 1]; // G
-        data[j + 2] = frame[i + 2]; // B
-        data[j + 3] = 0xFF;       // A
+
+      // Check if frame is Uint32Array (0x00RRGGBB format)
+      if (frame instanceof Uint32Array) {
+        console.log('[NESEmulator] Drawing Uint32Array frame, length:', frame.length);
+        const frame32 = frame as Uint32Array;
+        const buf8 = new Uint8Array(data.buffer);
+
+        // Convert 0x00RRGGBB to 0xFFRRGGBB
+        for (let i = 0; i < frame32.length; i++) {
+          buf8[i * 4] = (frame32[i] >> 16) & 0xFF;     // R
+          buf8[i * 4 + 1] = (frame32[i] >> 8) & 0xFF;    // G
+          buf8[i * 4 + 2] = frame32[i] & 0xFF;           // B
+          buf8[i * 4 + 3] = 0xFF;                        // A
+        }
+      } else {
+        // Handle Uint8Array (RGB format)
+        console.log('[NESEmulator] Drawing Uint8Array RGB frame, length:', frame.length);
+        for (let i = 0, j = 0; i < frame.length; i += 3, j += 4) {
+          data[j] = frame[i];         // R
+          data[j + 1] = frame[i + 1]; // G
+          data[j + 2] = frame[i + 2]; // B
+          data[j + 3] = 0xFF;         // A
+        }
       }
+
+      // Use putImageData directly to avoid tiling
       this.ctx.putImageData(this.imageData, 0, 0);
+      console.log('[NESEmulator] Frame drawn to canvas');
     }
   };
 

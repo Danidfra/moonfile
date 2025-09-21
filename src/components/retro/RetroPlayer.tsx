@@ -864,7 +864,7 @@ export function RetroPlayer({
               {/* Game canvas */}
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-0">
-                  <div className="relative aspect-video bg-black flex items-center justify-center">
+                  <div className="relative bg-black flex items-center justify-center" style={{ aspectRatio: '256/240' }}>
                     {/* Always-on canvas */}
                     <canvas
                       ref={canvasRef}
