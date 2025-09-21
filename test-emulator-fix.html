@@ -1,0 +1,430 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FCEUX Emulator Fix Test</title>
+    <style>
+        body {
+            margin: 0;
+            padding: 20px;
+            background: #000;
+            color: #fff;
+            font-family: monospace;
+        }
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        .canvas-container {
+            background: #111;
+            border: 2px solid #333;
+            display: inline-block;
+            margin: 20px 0;
+        }
+        canvas {
+            display: block;
+            image-rendering: pixelated;
+        }
+        .controls {
+            margin: 20px 0;
+        }
+        button {
+            background: #6366f1;
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            margin: 5px;
+            border-radius: 5px;
+            cursor: pointer;
+        }
+        button:hover {
+            background: #4f46e5;
+        }
+        button:disabled {
+            background: #4b5563;
+            cursor: not-allowed;
+        }
+        .status {
+            margin: 10px 0;
+            padding: 10px;
+            background: #1f2937;
+            border-radius: 5px;
+        }
+        .logs {
+            margin: 20px 0;
+            padding: 10px;
+            background: #1f2937;
+            border-radius: 5px;
+            max-height: 200px;
+            overflow-y: auto;
+            font-size: 12px;
+        }
+        .log-entry {
+            margin: 2px 0;
+            padding: 2px 5px;
+        }
+        .log-info { color: #60a5fa; }
+        .log-warn { color: #fbbf24; }
+        .log-error { color: #f87171; }
+        .log-success { color: #34d399; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>FCEUX Emulator Fix Test</h1>
+        
+        <div class="canvas-container">
+            <canvas id="gameCanvas" width="512" height="480"></canvas>
+        </div>
+        
+        <div class="controls">
+            <button id="loadRom">Load Test ROM</button>
+            <button id="playBtn" disabled>Play</button>
+            <button id="pauseBtn" disabled>Pause</button>
+            <button id="resetBtn" disabled>Reset</button>
+            <button id="disposeBtn">Dispose</button>
+        </div>
+        
+        <div class="status">
+            <div>Status: <span id="status">Ready</span></div>
+            <div>Running: <span id="isRunning">false</span></div>
+            <div>Frame Count: <span id="frameCount">0</span></div>
+        </div>
+        
+        <div class="logs" id="logs">
+            <div class="log-entry log-info">Test page loaded</div>
+        </div>
+    </div>
+
+    <!-- Load FCEUX core -->
+    <script src="/lib/fceux/fceux.js"></script>
+    
+    <script>
+        // Simple logger
+        const logContainer = document.getElementById('logs');
+        function log(message, type = 'info') {
+            const entry = document.createElement('div');
+            entry.className = `log-entry log-${type}`;
+            entry.textContent = `[${new Date().toLocaleTimeString()}] ${message}`;
+            logContainer.appendChild(entry);
+            logContainer.scrollTop = logContainer.scrollHeight;
+            console.log(message);
+        }
+
+        // Test ROM data (simple test pattern)
+        const testROM = new Uint8Array([
+            0x4E, 0x45, 0x53, 0x1A, // NES header
+            0x01,                   // 1 PRG ROM bank
+            0x01,                   // 1 CHR ROM bank
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Flags
+            0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, // Remaining header
+            // Simple PRG data (just to have something)
+            0x4C, 0x00, 0x00, 0x60, // JMP $6000 (infinite loop)
+            0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, // NOPs
+            0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA, 0xEA,
+        ]);
+
+        let emulator = null;
+        let frameCount = 0;
+
+        // Wait for FCEUX core to load
+        function waitForCore() {
+            if (typeof window.FCEUX !== 'undefined') {
+                log('FCEUX core loaded', 'success');
+                setupEmulator();
+            } else {
+                log('Waiting for FCEUX core...', 'warn');
+                setTimeout(waitForCore, 100);
+            }
+        }
+
+        function setupEmulator() {
+            // Import our emulator class (simulate the import)
+            // In real scenario, this would be imported from the built JS
+            log('Setting up emulator...', 'info');
+            
+            // Mock the FCEUXEmulator class for testing
+            class FCEUXEmulator {
+                constructor() {
+                    this.core = null;
+                    this.ready = false;
+                    this.canvas = null;
+                    this.ctx = null;
+                    this.imageData = null;
+                    this.rafId = 0;
+                    this.running = false;
+                    this.frameCount = 0;
+                    log('FCEUXEmulator constructed', 'info');
+                }
+
+                async init(canvas, opts) {
+                    log('Initializing emulator...', 'info');
+                    
+                    this.canvas = canvas;
+                    this.ctx = canvas.getContext('2d', { alpha: false });
+                    
+                    if (this.ctx) {
+                        const dpr = Math.min(window.devicePixelRatio || 1, 2);
+                        const scale = 2;
+                        canvas.width = 256 * dpr * scale;
+                        canvas.height = 240 * dpr * scale;
+                        
+                        canvas.style.width = `${256 * scale}px`;
+                        canvas.style.height = `${240 * scale}px`;
+                        
+                        this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+                        this.ctx.imageSmoothingEnabled = false;
+                        
+                        this.imageData = this.ctx.createImageData(256, 240);
+                        
+                        log(`Canvas setup: ${canvas.width}x${canvas.height}, DPR: ${dpr}, Scale: ${scale}`, 'success');
+                    }
+
+                    // Initialize core
+                    this.core = window.FCEUX;
+                    if (!this.core) {
+                        throw new Error('FCEUX core not found');
+                    }
+
+                    await this.core.init();
+                    this.ready = true;
+                    log('Emulator initialized successfully', 'success');
+                }
+
+                loadROM(bytes) {
+                    log('Loading ROM...', 'info');
+                    
+                    if (!this.ready) {
+                        throw new Error('Emulator not ready');
+                    }
+
+                    // Validate NES header
+                    if (bytes[0] !== 0x4E || bytes[1] !== 0x45 || bytes[2] !== 0x53 || bytes[3] !== 0x1A) {
+                        throw new Error('Invalid NES header');
+                    }
+
+                    const success = this.core.loadRom(bytes, bytes.length);
+                    if (success) {
+                        log('ROM loaded successfully', 'success');
+                        return true;
+                    } else {
+                        log('Failed to load ROM', 'error');
+                        return false;
+                    }
+                }
+
+                play() {
+                    log('Play called', 'info');
+                    
+                    if (!this.ready) {
+                        log('Emulator not ready', 'error');
+                        return;
+                    }
+
+                    if (!this.running) {
+                        this.running = true;
+                        this.core.setRunning(true);
+                        
+                        log('Starting game loop...', 'info');
+                        
+                        const loop = () => {
+                            if (!this.running) {
+                                log('Game loop stopped', 'warn');
+                                return;
+                            }
+                            
+                            this.core.frame();
+                            this.blitFrame();
+                            this.rafId = requestAnimationFrame(loop);
+                        };
+                        
+                        if (!this.rafId) {
+                            this.rafId = requestAnimationFrame(loop);
+                        }
+
+                        log('Emulator started', 'success');
+                    }
+                }
+
+                pause() {
+                    log('Pause called', 'info');
+                    
+                    this.running = false;
+                    this.core.setRunning(false);
+                    
+                    if (this.rafId) {
+                        cancelAnimationFrame(this.rafId);
+                        this.rafId = 0;
+                    }
+                    
+                    log('Emulator paused', 'success');
+                }
+
+                reset() {
+                    log('Reset called', 'info');
+                    
+                    if (this.core.reset) {
+                        this.core.reset();
+                    }
+                    log('Emulator reset', 'success');
+                }
+
+                blitFrame() {
+                    if (!this.ctx || !this.imageData) {
+                        return;
+                    }
+
+                    try {
+                        const src = this.core.getFrameBuffer();
+                        if (!src || src.length !== 256 * 240 * 3) {
+                            return;
+                        }
+
+                        const w = 256, h = 240;
+                        const dst = this.imageData.data;
+                        
+                        let si = 0, di = 0;
+                        for (let i = 0; i < w * h; i++) {
+                            dst[di++] = src[si++];   // R
+                            dst[di++] = src[si++];   // G
+                            dst[di++] = src[si++];   // B
+                            dst[di++] = 255;         // A
+                        }
+
+                        this.ctx.putImageData(this.imageData, 0, 0);
+
+                        this.frameCount++;
+                        if (this.frameCount % 60 === 0) {
+                            log(`Blit frame #${this.frameCount}`, 'info');
+                            document.getElementById('frameCount').textContent = this.frameCount;
+                        }
+                    } catch (error) {
+                        log(`Blit frame error: ${error.message}`, 'error');
+                    }
+                }
+
+                dispose() {
+                    log('Disposing emulator...', 'info');
+                    
+                    this.running = false;
+                    if (this.rafId) {
+                        cancelAnimationFrame(this.rafId);
+                        this.rafId = 0;
+                    }
+
+                    this.canvas = null;
+                    this.ctx = null;
+                    this.imageData = null;
+                    this.core = null;
+                    this.ready = false;
+                    this.running = false;
+
+                    log('Emulator disposed', 'success');
+                }
+
+                getIsRunning() {
+                    return this.running;
+                }
+
+                getIsPaused() {
+                    return !this.running;
+                }
+
+                getIsReady() {
+                    return this.ready;
+                }
+            }
+
+            emulator = new FCEUXEmulator();
+            const canvas = document.getElementById('gameCanvas');
+            
+            emulator.init(canvas, { audio: false }).then(() => {
+                document.getElementById('loadRom').disabled = false;
+                updateStatus('Ready - ROM can be loaded');
+            }).catch(error => {
+                log(`Init failed: ${error.message}`, 'error');
+            });
+        }
+
+        function updateStatus(status) {
+            document.getElementById('status').textContent = status;
+            log(`Status: ${status}`, 'info');
+        }
+
+        function updateRunningState() {
+            const running = emulator ? emulator.getIsRunning() : false;
+            document.getElementById('isRunning').textContent = running;
+            
+            document.getElementById('playBtn').disabled = running || !emulator?.getIsReady();
+            document.getElementById('pauseBtn').disabled = !running;
+            document.getElementById('resetBtn').disabled = !emulator?.getIsReady();
+        }
+
+        // Event listeners
+        document.getElementById('loadRom').addEventListener('click', async () => {
+            if (!emulator) return;
+            
+            try {
+                const success = emulator.loadROM(testROM);
+                if (success) {
+                    updateStatus('ROM loaded - ready to play');
+                    updateRunningState();
+                    log('Test ROM loaded successfully', 'success');
+                } else {
+                    updateStatus('Failed to load ROM');
+                    log('ROM load failed', 'error');
+                }
+            } catch (error) {
+                updateStatus(`ROM load error: ${error.message}`);
+                log(`ROM load error: ${error.message}`, 'error');
+            }
+        });
+
+        document.getElementById('playBtn').addEventListener('click', () => {
+            if (!emulator) return;
+            
+            emulator.play();
+            updateStatus('Running');
+            updateRunningState();
+            log('Play button clicked', 'info');
+        });
+
+        document.getElementById('pauseBtn').addEventListener('click', () => {
+            if (!emulator) return;
+            
+            emulator.pause();
+            updateStatus('Paused');
+            updateRunningState();
+            log('Pause button clicked', 'info');
+        });
+
+        document.getElementById('resetBtn').addEventListener('click', () => {
+            if (!emulator) return;
+            
+            emulator.reset();
+            log('Reset button clicked', 'info');
+        });
+
+        document.getElementById('disposeBtn').addEventListener('click', () => {
+            if (!emulator) return;
+            
+            emulator.dispose();
+            emulator = null;
+            updateStatus('Disposed');
+            updateRunningState();
+            log('Dispose button clicked', 'info');
+            
+            // Reset buttons
+            document.getElementById('loadRom').disabled = true;
+            document.getElementById('playBtn').disabled = true;
+            document.getElementById('pauseBtn').disabled = true;
+            document.getElementById('resetBtn').disabled = true;
+            document.getElementById('frameCount').textContent = '0';
+        });
+
+        // Start waiting for core
+        waitForCore();
+    </script>
+</body>
+</html>

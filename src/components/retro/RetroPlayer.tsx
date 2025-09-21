@@ -640,23 +640,29 @@ export function RetroPlayer({
   }, [controls, state]);
 
   const handlePlay = () => {
+    console.log('[RetroPlayer] handlePlay called, current state:', state);
     if (emulatorRef.current) {
       emulatorRef.current.play();
       setState('running');
+      console.log('[RetroPlayer] Play started, state set to running');
     }
   };
 
   const handlePause = () => {
+    console.log('[RetroPlayer] handlePause called, current state:', state);
     if (emulatorRef.current) {
       emulatorRef.current.pause();
       setState('paused');
+      console.log('[RetroPlayer] Pause called, state set to paused');
     }
   };
 
   const handleReset = () => {
+    console.log('[RetroPlayer] handleReset called, current state:', state);
     if (emulatorRef.current) {
       emulatorRef.current.reset();
       setState('running');
+      console.log('[RetroPlayer] Reset completed, state set to running');
     }
   };
 
