@@ -33,7 +33,7 @@ export default function GamePage() {
   });
   const [gameMeta, setGameMeta] = useState<any>(null);
   const [romInfo, setRomInfo] = useState<any>(null);
-  
+
   const { status, error, setStatus, setError, setRomInfo: setStoreRomInfo } = useRetroStore();
 
   // Debug logging helper
@@ -76,7 +76,7 @@ export default function GamePage() {
         // Decode ROM from event content
         logDebug('Decoding ROM', { contentLength: event.content.length });
         const romBytes = decodeBase64ToBytes(event.content);
-        
+
         // Validate ROM
         logDebug('Validating ROM', { size: romBytes.length });
         validateNESRom(romBytes);
@@ -84,7 +84,7 @@ export default function GamePage() {
         // Parse header and compute hash
         const header = parseINesHeader(romBytes);
         const hash = await sha256(romBytes);
-        
+
         logDebug('ROM validated', {
           header,
           shortHash: hash.substring(0, 8),
@@ -127,7 +127,7 @@ export default function GamePage() {
       // Lazy-load the core
       const fceuxCore = new FCEUXWebAdapter();
       await fceuxCore.init();
-      
+
       logDebug('Core initialized');
       setCore(fceuxCore);
 
@@ -306,8 +306,9 @@ export default function GamePage() {
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-0">
                   <div className="relative bg-black flex items-center justify-center">
-                    {/* Canvas container with proper aspect ratio */}
-                    <div className="relative w-full aspect-[256/240]">
+                    {/* Canvas container with proper aspect ratio and max height */}
+                    <div className="mx-auto w-full max-w-3xl p-2">
+                      <div className="relative w-full aspect-[256/240] max-h-[80vh]">
                       <canvas
                         ref={canvasRef}
                         width={256}
@@ -365,6 +366,7 @@ export default function GamePage() {
                           </div>
                         </div>
                       )}
+                      </div>
                     </div>
                   </div>
                 </CardContent>

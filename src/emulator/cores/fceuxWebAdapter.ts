@@ -1,5 +1,48 @@
 import { NesCore, FrameSpec, PixelFormat } from '../NesCore';
 
+// Helper function to wait for FCEUX script to load
+function waitForFCEUXScript(timeout: number = 5000): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (typeof (window as any).FCEUX !== 'undefined') {
+      resolve();
+      return;
+    }
+
+    const startTime = Date.now();
+
+    const checkInterval = setInterval(() => {
+      if (typeof (window as any).FCEUX !== 'undefined') {
+        clearInterval(checkInterval);
+        resolve();
+      } else if (Date.now() - startTime > timeout) {
+        clearInterval(checkInterval);
+        reject(new Error(`FCEUX script not loaded after ${timeout}ms timeout`));
+      }
+    }, 50);
+
+    // Also listen for script load events
+    const scriptTags = Array.from(document.getElementsByTagName('script'));
+    const fceuxScript = scriptTags.find(script => script.src.includes('fceux'));
+
+    if (fceuxScript && !(fceuxScript as HTMLScriptElement).readyState?.includes('complete')) {
+      fceuxScript.addEventListener('load', () => {
+        setTimeout(() => {
+          if (typeof (window as any).FCEUX !== 'undefined') {
+            resolve();
+          } else {
+            reject(new Error('FCEUX script loaded but window.FCEUX not available'));
+          }
+        }, 100);
+      });
+
+      fceuxScript.addEventListener('error', () => {
+        clearInterval(checkInterval);
+        reject(new Error('Failed to load FCEUX script'));
+      });
+    }
+  });
+}
+
 export class FCEUXWebAdapter implements NesCore {
   private core: any = null;
   private running = false;
@@ -11,15 +54,31 @@ export class FCEUXWebAdapter implements NesCore {
 
   async init(): Promise<boolean> {
     try {
-      // Load FCEUX core from window (loaded via script tag)
-      const core = (window as any).fceuxWeb;
-      if (!core) {
-        throw new Error('FCEUX core not found on window object. Make sure the script is loaded.');
+      // Wait for FCEUX script to load
+      if (localStorage.getItem('debug')?.includes('retro:*')) {
+        console.log('[FCEUXWebAdapter] Waiting for FCEUX script to load...');
       }
 
+      await waitForFCEUXScript();
+
+      const core = (window as any).FCEUX;
+
       if (localStorage.getItem('debug')?.includes('retro:*')) {
-        console.log('[FCEUXWebAdapter] Core loaded from window:', typeof core);
+        console.log('[FCEUXWebAdapter] FCEUX script loaded, window.FCEUX exists:', !!core);
+        console.log('[FCEUXWebAdapter] Core type:', typeof core);
         console.log('[FCEUXWebAdapter] Core methods:', Object.keys(core));
+      }
+
+      if (!core) {
+        throw new Error('FCEUX core not available after script loading timeout');
+      }
+
+      // Verify core has required methods
+      const requiredInitMethods = ['init', 'loadRom', 'frame', 'reset', 'setButton', 'getFrameBuffer', 'setRunning'];
+      const missingMethods = requiredInitMethods.filter(method => typeof core[method] !== 'function');
+
+      if (missingMethods.length > 0) {
+        throw new Error(`FCEUX core missing required methods: ${missingMethods.join(', ')}`);
       }
 
       this.core = core;
