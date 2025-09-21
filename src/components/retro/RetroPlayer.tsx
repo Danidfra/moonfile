@@ -252,21 +252,34 @@ export function RetroPlayer({
             romData = decodeBase64ToBytes(content);
             console.log("[Retro] Base64 decode completed");
 
+            // NEW: Detailed logging after Base64 decode
+            console.log("✅ ROM successfully decoded");
+            console.log("[Retro] Decoded byte length:", romData.length);
+            console.log("[Retro] First 16 bytes (header):", Array.from(romData.slice(0, 16)));
+            console.log("[Retro] Last 16 bytes:", Array.from(romData.slice(-16)));
+
+            // Additional validation logging
+            console.log("[Retro] Header as hex:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            console.log("[Retro] Expected NES header: 0x4E 0x45 0x53 0x1A");
+
             // Validate NES header
             if (!validateNESHeader(romData)) {
+              console.error("❌ NES header validation failed");
               logError('decoding', new Error('Invalid NES ROM header - not a valid NES file'));
               setError('rom-invalid' as ErrorType);
               setErrorMessage('Invalid NES ROM file format');
               setState('error');
               return;
+            } else {
+              console.log("✅ NES header validation passed");
             }
 
-            logPhase('Decoded bytes:', romData.length);
+            logPhase('Decoded bytes', { size: romData.length });
 
-            // Log decoded byte details
-            console.log("[Retro] decoded len:", romData.length);
-            console.log("[Retro] bytes start:", Array.from(romData.slice(0, 16)));
-            console.log("[Retro] bytes end:", Array.from(romData.slice(-16)));
+            setDebugInfo(prev => ({
+              ...prev,
+              decodedSize: romData.length
+            }));
 
             setDebugInfo(prev => ({
               ...prev,
@@ -351,6 +364,16 @@ export function RetroPlayer({
             });
             logPhase('ROM fetched', { size: romData.length, unit: 'bytes' });
 
+            // NEW: Detailed logging after URL ROM load
+            console.log("✅ ROM successfully loaded from URL");
+            console.log("[Retro] Loaded byte length:", romData.length);
+            console.log("[Retro] First 16 bytes (header):", Array.from(romData.slice(0, 16)));
+            console.log("[Retro] Last 16 bytes:", Array.from(romData.slice(-16)));
+
+            // Additional validation logging
+            console.log("[Retro] Header as hex:", Array.from(romData.slice(0, 16)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' '));
+            console.log("[Retro] Expected NES header: 0x4E 0x45 0x53 0x1A");
+
             setDebugInfo(prev => ({
               ...prev,
               decodedSize: romData.length
@@ -362,11 +385,14 @@ export function RetroPlayer({
 
             const isValid = await ROMLoader.validateNESROM(romData);
             if (!isValid) {
+              console.error("❌ NES ROM validation failed");
               logError('validating', new Error('Invalid NES ROM format'));
               setError('rom-invalid');
               setErrorMessage('Invalid NES ROM file format');
               setState('error');
               return;
+            } else {
+              console.log("✅ NES ROM validation passed");
             }
             logPhase('NES ROM validation OK');
 
@@ -405,6 +431,16 @@ export function RetroPlayer({
             console.error("[Retro] Invalid ROM data type:", typeof romData);
             throw new Error('ROM data is not Uint8Array');
           }
+
+          // NEW: Final validation before emulator loading
+          console.log("🎮 Preparing to load ROM into emulator:");
+          console.log("[Retro] ROM data type:", romData.constructor.name);
+          console.log("[Retro] ROM byte length:", romData.length);
+          console.log("[Retro] ROM header check:", Array.from(romData.slice(0, 4)));
+          console.log("[Retro] ROM data checksum preview (first/last 8 bytes):",
+            Array.from(romData.slice(0, 8)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ') + " ... " +
+            Array.from(romData.slice(-8)).map(b => '0x' + b.toString(16).padStart(2, '0')).join(' ')
+          );
 
           console.log("[Retro] Passing ROM to emulator:", romData.length, "bytes");
           const success = emulatorRef.current!.loadROM(romData);
