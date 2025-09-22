@@ -12,10 +12,11 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ArrowLeft, Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, RefreshCw } from 'lucide-react';
 
-// Import new emulator components
+// Import emulator utilities (keep ROM parsing)
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
-import { FCEUXWebAdapter } from '@/emulator/cores/fceuxWebAdapter';
+// TODO: Import new emulator core instead of FCEUXWebAdapter
+// import { FCEUXWebAdapter } from '@/emulator/cores/fceuxWebAdapter';
 import { NesPlayer } from '@/emulator/NesPlayer';
 
 import type { NostrEvent } from '@nostrify/nostrify';
@@ -60,7 +61,8 @@ export default function GamePage() {
 
   // Emulator state
   const [player, setPlayer] = useState<NesPlayer | null>(null);
-  const [core, setCore] = useState<FCEUXWebAdapter | null>(null);
+  // TODO: Replace with new emulator core type
+  const [core, setCore] = useState<unknown | null>(null);
   const [romData, setRomData] = useState<Uint8Array | null>(null);
   const [status, setStatus] = useState<PlayerState>('loading');
   const [error, setError] = useState<string | null>(null);
@@ -183,6 +185,7 @@ export default function GamePage() {
 
   /**
    * Initialize emulator and start game (requires user gesture for audio)
+   * TODO: Replace FCEUX core with new emulator core integration
    */
   const handleStart = async () => {
     if (!romData || !canvasRef.current) {
@@ -195,7 +198,8 @@ export default function GamePage() {
       setStatus('loading');
       setError(null);
 
-      // Initialize FCEUX core
+      // TODO: Initialize new emulator core instead of FCEUXWebAdapter
+      /*
       const fceuxCore = new FCEUXWebAdapter();
       const initSuccess = await fceuxCore.init();
 
@@ -282,6 +286,10 @@ export default function GamePage() {
       setStatus('running');
 
       console.log('[GamePage] Emulator started successfully');
+      */
+
+      // Temporary placeholder until new emulator core is integrated
+      throw new Error('Emulator core has been removed. Please integrate new emulator core.');
 
     } catch (err) {
       console.error('[GamePage] Error starting emulator:', err);
@@ -307,11 +315,13 @@ export default function GamePage() {
 
   /**
    * Reset the game
+   * TODO: Update to use new emulator core
    */
   const handleReset = () => {
     if (!core) return;
 
-    core.reset();
+    // TODO: Replace with new emulator core reset method
+    // core.reset();
     if (status === 'paused' && player) {
       player.play();
       setStatus('running');
@@ -395,7 +405,8 @@ export default function GamePage() {
         const controlKey = Object.keys(controls)[button] as keyof typeof controls;
         if (!controls[controlKey]) {
           setControls(prev => ({ ...prev, [controlKey]: true }));
-          core.setButton(button, true);
+          // TODO: Replace with new emulator core setButton method
+          // core.setButton(button, true);
           e.preventDefault();
         }
       }
@@ -409,7 +420,8 @@ export default function GamePage() {
         const controlKey = Object.keys(controls)[button] as keyof typeof controls;
         if (controls[controlKey]) {
           setControls(prev => ({ ...prev, [controlKey]: false }));
-          core.setButton(button, false);
+          // TODO: Replace with new emulator core setButton method
+          // core.setButton(button, false);
           e.preventDefault();
         }
       }

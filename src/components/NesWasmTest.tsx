@@ -1,8 +1,10 @@
 /**
  * NES WebAssembly Test Component
- * 
+ *
  * Minimal React component that tests loading a .nes ROM into a NES WebAssembly core.
  * This component validates the entire emulator pipeline from WASM loading to canvas rendering.
+ *
+ * TODO: Update to work with new emulator core instead of FCEUX
  */
 
 import React, { useEffect, useRef, useState } from 'react';
@@ -43,11 +45,18 @@ export const NesWasmTest: React.FC = () => {
 
   /**
    * Main test function that runs the complete NES WASM pipeline
+   * TODO: Update to work with new emulator core
    */
   const runNesWasmTest = async (): Promise<void> => {
     console.log('🧪 Starting NES WebAssembly Test...\n');
     setIsRunning(true);
 
+    // TODO: Replace FCEUX-specific test with new emulator core test
+    setTestResult(prev => ({ ...prev, error: 'FCEUX emulator core has been removed. Please integrate new emulator core.' }));
+    setIsRunning(false);
+    return;
+
+    /*
     try {
       // Reset test results
       setTestResult({
@@ -119,16 +128,17 @@ export const NesWasmTest: React.FC = () => {
     } finally {
       setIsRunning(false);
     }
+    */
   };
 
   /**
    * Load and instantiate the WebAssembly core
    */
-  const loadWasmCore = async (): Promise<WasmExports> => {
+  const _loadWasmCore = async (): Promise<WasmExports> => {
     // Fetch WASM file with cache busting
     const wasmUrl = `/wasm/fceux.wasm?v=${Date.now()}`;
     const response = await fetch(wasmUrl);
-    
+
     if (!response.ok) {
       throw new Error(`Failed to fetch WASM: ${response.status} ${response.statusText}`);
     }
@@ -156,23 +166,23 @@ export const NesWasmTest: React.FC = () => {
     const instance = await WebAssembly.instantiate(wasmModule, imports);
 
     // Validate required exports
-    const exports = instance.exports as any;
+    const exports = instance.exports as Record<string, unknown>;
     const requiredExports = ['loadRom', 'frame', 'getFrameBuffer'];
     const missingExports = requiredExports.filter(name => typeof exports[name] !== 'function');
-    
+
     if (missingExports.length > 0) {
       throw new Error(`WASM missing required exports: ${missingExports.join(', ')}`);
     }
 
     console.log('Available WASM exports:', Object.keys(exports).filter(k => typeof exports[k] === 'function'));
 
-    return exports as WasmExports;
+    return exports as unknown as WasmExports;
   };
 
   /**
    * Load NES ROM from public folder or base64
    */
-  const loadNesRom = async (): Promise<Uint8Array> => {
+  const _loadNesRom = async (): Promise<Uint8Array> => {
     try {
       // Try to load test ROM from public folder
       const romResponse = await fetch('/roms/test-rom.nes');
@@ -180,7 +190,7 @@ export const NesWasmTest: React.FC = () => {
         const romBuffer = await romResponse.arrayBuffer();
         return new Uint8Array(romBuffer);
       }
-    } catch (error) {
+    } catch (_error) {
       console.log('Could not load test ROM from /roms/test-rom.nes, trying base64...');
     }
 
@@ -191,7 +201,7 @@ export const NesWasmTest: React.FC = () => {
         const base64String = await base64Response.text();
         return decodeBase64ToBytes(base64String.trim());
       }
-    } catch (error) {
+    } catch (_error) {
       console.log('Could not load base64 ROM from /roms/test-rom-base64.txt');
     }
 
@@ -217,7 +227,7 @@ export const NesWasmTest: React.FC = () => {
    */
   const createMinimalTestRom = (): Uint8Array => {
     const rom = new Uint8Array(16 + 16384 + 8192); // Header + 1 PRG bank + 1 CHR bank
-    
+
     // NES header
     rom[0] = 0x4E; // 'N'
     rom[1] = 0x45; // 'E'
@@ -227,24 +237,24 @@ export const NesWasmTest: React.FC = () => {
     rom[5] = 1;    // 1 CHR-ROM bank
     rom[6] = 0;    // Mapper 0, horizontal mirroring
     rom[7] = 0;    // No special flags
-    
+
     // Fill with test pattern
     for (let i = 16; i < rom.length; i++) {
       rom[i] = i % 256;
     }
-    
+
     return rom;
   };
 
   /**
    * Load ROM into WASM core memory
    */
-  const loadRomIntoWasm = async (wasmExports: WasmExports, romBytes: Uint8Array): Promise<boolean> => {
+  const _loadRomIntoWasm = async (wasmExports: WasmExports, romBytes: Uint8Array): Promise<boolean> => {
     // Validate ROM header
     if (romBytes.length < 16) {
       throw new Error('ROM too small for NES header');
     }
-    
+
     if (romBytes[0] !== 0x4E || romBytes[1] !== 0x45 || romBytes[2] !== 0x53 || romBytes[3] !== 0x1A) {
       throw new Error('Invalid NES header');
     }
@@ -255,7 +265,7 @@ export const NesWasmTest: React.FC = () => {
     // Copy ROM to WASM memory
     const memoryArray = new Uint8Array(wasmExports.memory.buffer);
     const romOffset = 100 * 1024; // Place ROM at 100KB offset
-    
+
     if (romOffset + romBytes.length > wasmExports.memory.buffer.byteLength) {
       throw new Error('ROM too large for WASM memory');
     }
@@ -271,7 +281,7 @@ export const NesWasmTest: React.FC = () => {
   /**
    * Generate multiple frames
    */
-  const generateFrames = (wasmExports: WasmExports, frameCount: number): void => {
+  const _generateFrames = (wasmExports: WasmExports, frameCount: number): void => {
     for (let i = 0; i < frameCount; i++) {
       wasmExports.frame();
       console.log(`Generated frame ${i + 1}/${frameCount}`);
@@ -281,7 +291,7 @@ export const NesWasmTest: React.FC = () => {
   /**
    * Extract frame buffer from WASM memory
    */
-  const extractFrameBuffer = (wasmExports: WasmExports): Uint8Array => {
+  const _extractFrameBuffer = (wasmExports: WasmExports): Uint8Array => {
     // Get frame buffer pointer
     const frameBufferPtr = wasmExports.getFrameBuffer();
     console.log(`Frame buffer pointer: ${frameBufferPtr}`);
@@ -293,7 +303,7 @@ export const NesWasmTest: React.FC = () => {
     // Get buffer size
     const expectedSize = 256 * 240 * 4; // RGBA32
     let bufferSize = expectedSize;
-    
+
     if (wasmExports.getFrameBufferSize) {
       bufferSize = wasmExports.getFrameBufferSize();
       console.log(`Buffer size from WASM: ${bufferSize}`);
@@ -301,7 +311,7 @@ export const NesWasmTest: React.FC = () => {
 
     // Extract from WASM memory
     const memoryArray = new Uint8Array(wasmExports.memory.buffer);
-    
+
     if (frameBufferPtr + bufferSize > wasmExports.memory.buffer.byteLength) {
       throw new Error('Frame buffer pointer out of bounds');
     }
@@ -315,9 +325,9 @@ export const NesWasmTest: React.FC = () => {
   /**
    * Validate frame buffer data
    */
-  const validateFrameBuffer = (frameBuffer: Uint8Array): boolean => {
+  const _validateFrameBuffer = (frameBuffer: Uint8Array): boolean => {
     const expectedSize = 256 * 240 * 4;
-    
+
     if (frameBuffer.length !== expectedSize) {
       console.error(`Frame buffer wrong size: ${frameBuffer.length}, expected ${expectedSize}`);
       return false;
@@ -333,7 +343,7 @@ export const NesWasmTest: React.FC = () => {
     }
 
     console.log(`Frame buffer validation: size=${frameBuffer.length}, hasData=${hasData}`);
-    
+
     // Sample first few pixels
     if (frameBuffer.length >= 16) {
       console.log('Sample pixels:');
@@ -353,7 +363,7 @@ export const NesWasmTest: React.FC = () => {
   /**
    * Render frame buffer to canvas
    */
-  const renderToCanvas = (frameBuffer: Uint8Array): boolean => {
+  const _renderToCanvas = (frameBuffer: Uint8Array): boolean => {
     const canvas = canvasRef.current;
     if (!canvas) {
       console.error('Canvas not available');
@@ -389,7 +399,7 @@ export const NesWasmTest: React.FC = () => {
   return (
     <div className="p-6 max-w-4xl mx-auto">
       <h2 className="text-2xl font-bold mb-6">NES WebAssembly Test</h2>
-      
+
       {/* Test Controls */}
       <div className="mb-6">
         <button
@@ -411,12 +421,16 @@ export const NesWasmTest: React.FC = () => {
           <div>{getStatusIcon(testResult.frameBufferValid, !!testResult.error)} Frame Buffer Valid</div>
           <div>{getStatusIcon(testResult.canvasRendered, !!testResult.error)} Canvas Rendered</div>
         </div>
-        
+
         {testResult.error && (
           <div className="mt-4 p-3 bg-red-100 border border-red-400 text-red-700 rounded">
             <strong>Error:</strong> {testResult.error}
           </div>
         )}
+
+        <div className="mt-4 p-3 bg-yellow-100 border border-yellow-400 text-yellow-700 rounded">
+          <strong>Note:</strong> FCEUX emulator core has been removed. This test component needs to be updated for the new emulator core.
+        </div>
       </div>
 
       {/* Canvas Display */}

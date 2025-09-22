@@ -3,9 +3,10 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
-import { UniversalWasmCore } from '@/emulator/cores/wasmAdapter';
+// TODO: Replace with new emulator core imports
+// import { UniversalWasmCore } from '@/emulator/cores/wasmAdapter';
 import { NesPlayer, setFrameDebugLogging } from '@/emulator/NesPlayer';
-import { NesCore, FrameSpec } from '@/emulator/NesCore';
+// import { NesCore, FrameSpec } from '@/emulator/NesCore';
 
 interface LogEntry {
   timestamp: string;
@@ -13,6 +14,8 @@ interface LogEntry {
   message: string;
 }
 
+// TODO: Replace with new emulator core adapter
+/*
 class WasmCoreAdapter implements NesCore {
   constructor(private wasmCore: UniversalWasmCore) {}
 
@@ -52,14 +55,16 @@ class WasmCoreAdapter implements NesCore {
     return this.wasmCore.getPalette();
   }
 }
+*/
 
 export default function TestMario() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [isLoading, setIsLoading] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
-  const [wasmCore, setWasmCore] = useState<UniversalWasmCore | null>(null);
-  const [nesPlayer, setNesPlayer] = useState<NesPlayer | null>(null);
+  // TODO: Replace with new emulator core type
+  const [wasmCore, _setWasmCore] = useState<unknown | null>(null);
+  const [nesPlayer, _setNesPlayer] = useState<NesPlayer | null>(null);
   const [romLoaded, setRomLoaded] = useState(false);
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
   const [debugMode, setDebugMode] = useState(true);
@@ -70,21 +75,23 @@ export default function TestMario() {
     console.log(`[TestMario ${level.toUpperCase()}]`, message);
   }, []);
 
-  const logFrameBufferDebug = useCallback((wasmCore: UniversalWasmCore) => {
+  // TODO: Update to work with new emulator core
+  const logFrameBufferDebug = useCallback((wasmCore: unknown) => {
     if (!debugMode) return;
 
     try {
       addLog('info', '🔍 Running frame buffer debug analysis...');
 
       // Get frame buffer directly
-      const frameBuffer = wasmCore.getFrameBuffer();
-      const frameSpec = wasmCore.getFrameSpec();
+      // TODO: Replace with new emulator core methods
+      const frameBuffer = (wasmCore as any).getFrameBuffer();
+      const frameSpec = (wasmCore as any).getFrameSpec();
 
       addLog('info', `Frame buffer size: ${frameBuffer.length} bytes`);
       addLog('info', `Frame spec: ${frameSpec.width}x${frameSpec.height}, format: ${frameSpec.format}`);
 
       // Log first 16 bytes
-      const preview = Array.from(frameBuffer.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      const preview = Array.from(frameBuffer.slice(0, 16)).map((b: number) => b.toString(16).padStart(2, '0')).join(' ');
       addLog('info', `First 16 bytes (hex): ${preview}`);
 
       // Check for patterns
@@ -120,10 +127,12 @@ export default function TestMario() {
     setLogs([]);
   }, []);
 
-  // Load WASM core
+  // TODO: Replace with new emulator core loading
   const loadWasmCore = useCallback(async () => {
     try {
       addLog('info', 'Loading WASM core...');
+      // TODO: Replace UniversalWasmCore.load with new emulator core loading
+      /*
       const core = await UniversalWasmCore.load('/wasm/fceux.wasm');
 
       addLog('info', 'Initializing WASM core...');
@@ -136,6 +145,9 @@ export default function TestMario() {
       setWasmCore(core);
       addLog('info', '✅ WASM core loaded and initialized successfully');
       return core;
+      */
+
+      throw new Error('FCEUX emulator core has been removed. Please integrate new emulator core.');
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', `❌ Failed to load WASM core: ${errorMessage}`);
@@ -143,8 +155,8 @@ export default function TestMario() {
     }
   }, [addLog]);
 
-  // Load ROM file
-  const loadRom = useCallback(async (core: UniversalWasmCore) => {
+  // TODO: Update to work with new emulator core
+  const loadRom = useCallback(async (core: unknown) => {
     try {
       addLog('info', 'Loading Super Mario Bros ROM...');
 
@@ -171,7 +183,8 @@ export default function TestMario() {
       addLog('info', '✅ ROM header validation passed');
 
       // Load ROM into emulator
-      const loadResult = await core.loadRom(romBytes);
+      // TODO: Replace with new emulator core loadRom method
+      const loadResult = await (core as any).loadRom(romBytes);
       if (!loadResult) {
         throw new Error('Failed to load ROM into emulator');
       }
@@ -200,7 +213,8 @@ export default function TestMario() {
       // Load ROM
       await loadRom(core);
 
-      // Setup player if canvas is available
+      // TODO: Setup player with new emulator core
+      /*
       if (canvasRef.current && core) {
         addLog('info', 'Setting up NES player...');
 
@@ -210,6 +224,7 @@ export default function TestMario() {
 
         addLog('info', '✅ NES player setup complete');
       }
+      */
 
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -248,7 +263,8 @@ export default function TestMario() {
       return;
     }
 
-    wasmCore.reset();
+    // TODO: Replace with new emulator core reset method
+    // wasmCore.reset();
     addLog('info', 'Game reset');
   }, [wasmCore, addLog]);
 
@@ -308,7 +324,8 @@ export default function TestMario() {
       const buttonIndex = keyMap[event.code];
       if (buttonIndex !== undefined) {
         event.preventDefault();
-        wasmCore.setButton(buttonIndex, true);
+        // TODO: Replace with new emulator core setButton method
+        // wasmCore.setButton(buttonIndex, true);
         setPressedKeys(prev => new Set([...prev, event.code]));
       }
     };
@@ -330,7 +347,8 @@ export default function TestMario() {
       const buttonIndex = keyMap[event.code];
       if (buttonIndex !== undefined) {
         event.preventDefault();
-        wasmCore.setButton(buttonIndex, false);
+        // TODO: Replace with new emulator core setButton method
+        // wasmCore.setButton(buttonIndex, false);
         setPressedKeys(prev => {
           const newSet = new Set(prev);
           newSet.delete(event.code);

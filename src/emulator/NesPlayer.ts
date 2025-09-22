@@ -169,6 +169,7 @@ export class NesPlayer {
 
   /**
    * Render current frame to canvas
+   * TODO: Update to work with new emulator core
    */
   private blit(): void {
     try {
@@ -180,6 +181,7 @@ export class NesPlayer {
         this.debugInitialized = true;
       }
 
+      // TODO: Replace with new emulator core getFrameSpec method
       const { width, height, format } = this.core.getFrameSpec();
 
       if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
@@ -189,6 +191,7 @@ export class NesPlayer {
       // Get frame buffer with validation
       let src: Uint8Array;
       try {
+        // TODO: Replace with new emulator core getFrameBuffer method
         src = this.core.getFrameBuffer();
       } catch (error) {
         console.error('[NesPlayer] Failed to get frame buffer:', error);
@@ -230,7 +233,7 @@ export class NesPlayer {
       }
 
       // Method 1: Try new ImageData constructor (preferred method)
-      let imageData: ImageData;
+      let imageData: ImageData | undefined;
       let conversionNeeded = false;
 
       if (format === 'RGBA32' && src.length === expectedSize) {
@@ -270,6 +273,12 @@ export class NesPlayer {
           console.log('[NesPlayer] ✅ Using manual conversion method');
           this.verifyImageData(imageData, src);
         }
+      }
+
+      // Ensure imageData is defined before drawing
+      if (!imageData) {
+        console.error('[NesPlayer] Failed to create ImageData, skipping frame');
+        return;
       }
 
       // Verify canvas state before drawing
@@ -387,6 +396,7 @@ export class NesPlayer {
 
   /**
    * Start the game loop
+   * TODO: Update to work with new emulator core
    */
   play(): void {
     if (this.rafId !== null) {
@@ -396,7 +406,8 @@ export class NesPlayer {
 
     console.log('[NesPlayer] Starting game loop');
     this.isPlaying = true;
-    this.core.setRunning(true);
+    // TODO: Replace with new emulator core setRunning method
+    // this.core.setRunning(true);
 
     const gameLoop = () => {
       if (!this.isPlaying) {
@@ -404,10 +415,11 @@ export class NesPlayer {
       }
 
       try {
+        // TODO: Replace with new emulator core frame method
         // Advance emulator by one frame
-        this.core.frame();
+        // this.core.frame();
 
-        // Render frame to canvas
+        // Render frame to canvas (keep canvas rendering logic)
         this.blit();
 
         // Schedule next frame
@@ -424,6 +436,7 @@ export class NesPlayer {
 
   /**
    * Pause the game loop
+   * TODO: Update to work with new emulator core
    */
   pause(): void {
     if (this.rafId !== null) {
@@ -433,7 +446,8 @@ export class NesPlayer {
     }
 
     this.isPlaying = false;
-    this.core.setRunning(false);
+    // TODO: Replace with new emulator core setRunning method
+    // this.core.setRunning(false);
   }
 
   /**
