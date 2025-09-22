@@ -4,7 +4,7 @@
  * Manages the game loop, rendering frames to canvas, handling pause/resume and cleanup.
  */
 
-import { NesCore, FrameSpec, PixelFormat } from './NesCore';
+import { NesCore, PixelFormat } from './NesCore';
 
 export class NesPlayer {
   private ctx: CanvasRenderingContext2D;
@@ -58,10 +58,10 @@ export class NesPlayer {
       }
 
       // Validate frame buffer
-      if (!src || !(src instanceof Uint8Array)) {
+      if (!src || !ArrayBuffer.isView(src) || !(src.constructor === Uint8Array)) {
         console.error('[NesPlayer] Invalid frame buffer:', {
           type: typeof src,
-          isUint8Array: src instanceof Uint8Array,
+          isUint8Array: src?.constructor === Uint8Array,
           value: src
         });
         return; // Skip this frame
@@ -131,7 +131,7 @@ export class NesPlayer {
         dst.set(src);
         break;
 
-      case 'RGB24':
+      case 'RGB24': {
         // Convert RGB24 to RGBA32 (add alpha channel)
         let srcIndex = 0;
         let dstIndex = 0;
@@ -142,8 +142,9 @@ export class NesPlayer {
           dst[dstIndex++] = 255;             // A (opaque)
         }
         break;
+      }
 
-      case 'INDEXED8':
+      case 'INDEXED8': {
         // Convert indexed color using palette
         const palette = this.core.getPalette?.();
         if (!palette) {
@@ -152,6 +153,7 @@ export class NesPlayer {
 
         this.convertIndexedToRGBA(src, dst, palette);
         break;
+      }
 
       default:
         throw new Error(`Unsupported pixel format: ${format}`);

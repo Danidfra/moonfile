@@ -136,7 +136,7 @@ export async function loadWasm(wasmUrl: string, imports: WasmImports = {}): Prom
     console.log('[WasmLoader] WASM module compiled successfully');
 
     // Instantiate the module with imports
-    const instance = await WebAssembly.instantiate(wasmModule, imports);
+    const instance = await WebAssembly.instantiate(wasmModule, imports as WebAssembly.Imports);
     console.log('[WasmLoader] WASM instance created successfully');
 
     // Log available exports for debugging

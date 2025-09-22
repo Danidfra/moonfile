@@ -48,6 +48,12 @@ export function Header() {
           >
             Test
           </Link>
+          <Link
+            to="/test-mario"
+            className="text-sm font-medium text-gray-300 hover:text-purple-400 transition-colors hover:scale-105"
+          >
+            Mario Test
+          </Link>
         </nav>
 
         {/* Right side */}
