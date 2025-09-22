@@ -1,6 +1,6 @@
 /**
  * NES Player Component
- * 
+ *
  * React component that uses jsnes-based Emulator to play NES games.
  * Loads ROM data and provides play/pause controls.
  */
@@ -29,7 +29,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   // Validate NES ROM header
   const validateNesHeader = (data: string): boolean => {
     console.log('[NesPlayer] Validating NES header...');
-    
+
     // Check minimum length
     if (data.length < 16) {
       console.error('[NesPlayer] ROM too short for NES header');
@@ -39,7 +39,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     // Check NES magic bytes
     const nesMagic = data.substring(0, 4);
     const expectedMagic = 'NES\x1a';
-    
+
     if (nesMagic !== expectedMagic) {
       console.error('[NesPlayer] Invalid NES magic bytes:', {
         actual: Array.from(nesMagic).map(c => c.charCodeAt(0).toString(16)),
@@ -52,7 +52,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     const prgBanks = data.charCodeAt(4);
     const chrBanks = data.charCodeAt(5);
     const mapper = (data.charCodeAt(6) >> 4) | (data.charCodeAt(7) & 0xF0);
-    
+
     console.log('[NesPlayer] ROM validation passed:', {
       prgBanks,
       chrBanks,
@@ -71,10 +71,16 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
         setError(null);
 
         console.log(`[NesPlayer] Loading ROM from: ${romPath}`);
-        
-        // Method 1: Try using loadBinary helper first
+
+        // Method 1: Try using loadBinary helper first (for regular file paths)
         const loadWithLoadBinary = (): Promise<string> => {
           return new Promise((resolve, reject) => {
+            // Skip loadBinary for blob URLs since it doesn't support them
+            if (romPath.startsWith('blob:')) {
+              reject(new Error('loadBinary does not support blob URLs'));
+              return;
+            }
+
             console.log('[NesPlayer] Attempting load with loadBinary helper...');
             loadBinary(
               romPath,
@@ -84,7 +90,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
                   reject(new Error(`loadBinary failed: ${err.message}`));
                   return;
                 }
-                
+
                 if (!data) {
                   reject(new Error('loadBinary returned no data'));
                   return;
@@ -104,13 +110,13 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
         // Method 2: Fallback to direct fetch
         const loadWithFetch = async (): Promise<string> => {
           console.log('[NesPlayer] Attempting load with direct fetch...');
-          
+
           const response = await fetch(romPath, {
             headers: {
               'Accept': 'application/octet-stream',
             },
           });
-          
+
           if (!response.ok) {
             throw new Error(`HTTP ${response.status}: ${response.statusText}`);
           }
@@ -121,7 +127,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
 
           const arrayBuffer = await response.arrayBuffer();
           const uint8Array = new Uint8Array(arrayBuffer);
-          
+
           console.log(`[NesPlayer] Fetched ${uint8Array.length} bytes`);
 
           // Convert to binary string (jsnes format)
@@ -132,7 +138,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
 
           console.log(`[NesPlayer] Converted to ${binary.length} character string`);
           console.log('[NesPlayer] First 16 chars:', binary.substring(0, 16));
-          
+
           return binary;
         };
 
@@ -241,13 +247,13 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
       {/* Game Display */}
       <Card className="w-full max-w-4xl bg-black border-2">
         <CardContent className="p-4">
-          <div 
+          <div
             className="relative bg-black rounded-lg overflow-hidden"
             style={{ aspectRatio: '256/240' }}
           >
-            <Emulator 
+            <Emulator
               key={emulatorKey}
-              romData={romData} 
+              romData={romData}
               paused={isPaused}
             />
           </div>

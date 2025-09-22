@@ -108,7 +108,7 @@ export function GameCardNostr({ game, onPlay }: GameCardNostrProps) {
         </div>
 
         <Button
-          onClick={() => navigate(`/retro/${game.id}/play`)}
+          onClick={() => navigate(`/game/${game.id}`)}
           size="sm"
           className="bg-gradient-to-r from-purple-500 to-blue-500 hover:from-purple-600 hover:to-blue-600 text-white transition-all duration-300 hover:shadow-lg hover:shadow-purple-500/50"
         >

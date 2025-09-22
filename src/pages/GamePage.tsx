@@ -2,26 +2,24 @@
  * Game Page
  *
  * Displays and runs NES games from Nostr events (kind 31996).
- * Handles ROM decoding, validation, emulator initialization, and game controls.
+ * Now uses the jsnes-based Emulator.tsx for game playback.
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useNostr } from '@nostrify/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
-import { ArrowLeft, Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw } from 'lucide-react';
 
-// Import emulator utilities (keep ROM parsing)
+// Import ROM utilities for parsing Nostr events
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
-// TODO: Import new emulator core instead of FCEUXWebAdapter
-// import { FCEUXWebAdapter } from '@/emulator/cores/fceuxWebAdapter';
-import { NesPlayer } from '@/emulator/NesPlayer';
+import NesPlayer from '@/components/NesPlayer';
 
 import type { NostrEvent } from '@nostrify/nostrify';
 
-type PlayerState = 'loading' | 'ready' | 'running' | 'paused' | 'error';
+type PlayerState = 'loading' | 'ready' | 'error';
 
 interface GameMetadata {
   id: string;
@@ -56,36 +54,15 @@ export default function GamePage() {
   const navigate = useNavigate();
   const { nostr } = useNostr();
 
-  // Canvas and emulator refs
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-
-  // Emulator state
-  const [player, setPlayer] = useState<NesPlayer | null>(null);
-  // TODO: Replace with new emulator core type
-  const [core, setCore] = useState<unknown | null>(null);
-  const [romData, setRomData] = useState<Uint8Array | null>(null);
+  // Game state
   const [status, setStatus] = useState<PlayerState>('loading');
   const [error, setError] = useState<string | null>(null);
-
-  // Game data
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
-
-  // UI state
-  const [audioEnabled, setAudioEnabled] = useState(true);
-  const [controls, setControls] = useState({
-    right: false,
-    left: false,
-    down: false,
-    up: false,
-    start: false,
-    select: false,
-    b: false,
-    a: false,
-  });
+  const [romPath, setRomPath] = useState<string | null>(null);
 
   /**
-   * Fetch game event and decode ROM
+   * Fetch game event and prepare ROM
    */
   useEffect(() => {
     const loadGameData = async () => {
@@ -129,8 +106,7 @@ export default function GamePage() {
 
         // Decode ROM from event content
         const romBytes = decodeBase64ToBytes(event.content);
-
-        console.log('[GamePage] Validating NES ROM');
+        console.log('[GamePage] ROM decoded, size:', romBytes.length, 'bytes');
 
         // Validate ROM format
         validateNESRom(romBytes);
@@ -168,10 +144,14 @@ export default function GamePage() {
         };
 
         setRomInfo(info);
-        setRomData(romBytes);
-        setStatus('ready');
 
-        console.log('[GamePage] ROM loaded and ready to start');
+        // Create ROM blob and URL for the emulator
+        const romBlob = new Blob([romBytes], { type: 'application/octet-stream' });
+        const romUrl = URL.createObjectURL(romBlob);
+        setRomPath(romUrl);
+
+        setStatus('ready');
+        console.log('[GamePage] Game ready to play');
 
       } catch (err) {
         console.error('[GamePage] Error loading game:', err);
@@ -181,164 +161,24 @@ export default function GamePage() {
     };
 
     loadGameData();
+
+    // Cleanup blob URL on unmount
+    return () => {
+      if (romPath && romPath.startsWith('blob:')) {
+        URL.revokeObjectURL(romPath);
+      }
+    };
   }, [id, nostr]);
-
-  /**
-   * Initialize emulator and start game (requires user gesture for audio)
-   * TODO: Replace FCEUX core with new emulator core integration
-   */
-  const handleStart = async () => {
-    if (!romData || !canvasRef.current) {
-      console.error('[GamePage] Cannot start: missing ROM data or canvas');
-      return;
-    }
-
-    try {
-      console.log('[GamePage] Starting emulator initialization');
-      setStatus('loading');
-      setError(null);
-
-      // TODO: Initialize new emulator core instead of FCEUXWebAdapter
-      /*
-      const fceuxCore = new FCEUXWebAdapter();
-      const initSuccess = await fceuxCore.init();
-
-      if (!initSuccess) {
-        throw new Error('Failed to initialize emulator core');
-      }
-
-      console.log('[GamePage] Emulator core initialized');
-      setCore(fceuxCore);
-
-      // Load ROM into core
-      console.log('[GamePage] Attempting to load ROM into emulator core...');
-      const romLoaded = await fceuxCore.loadRom(romData);
-      if (!romLoaded) {
-        // Provide detailed error information
-        console.error('[GamePage] ROM loading failed - analyzing cause...');
-
-        // Re-analyze the ROM for debugging
-        const failureAnalysis = analyzeRom(romData);
-        const recommendations = generateRecommendations(failureAnalysis);
-
-        console.error('[GamePage] ROM loading failure analysis:', {
-          mapper: failureAnalysis.mapperInfo.name,
-          complexity: failureAnalysis.mapperInfo.complexity,
-          chrBanks: failureAnalysis.header.chrBanks,
-          size: failureAnalysis.size,
-          recommendations
-        });
-
-        // Create detailed error message
-        const mapperInfo = `${failureAnalysis.mapperInfo.name} (${failureAnalysis.header.mapper})`;
-        const chrInfo = failureAnalysis.header.chrBanks === 0 ? 'CHR RAM' : `${failureAnalysis.header.chrBanks} CHR banks`;
-
-        throw new Error(
-          `Failed to load ROM into emulator. ` +
-          `ROM details: ${mapperInfo}, ${failureAnalysis.header.prgBanks} PRG banks, ${chrInfo}. ` +
-          `This may be due to: ${failureAnalysis.mapperInfo.commonIssues.join(', ')}. ` +
-          `Recommendations: ${recommendations.join(', ')}`
-        );
-      }
-
-      console.log('[GamePage] ✅ ROM loaded into emulator core successfully');
-
-      // Create player with canvas
-      const nesPlayer = new NesPlayer(fceuxCore, canvasRef.current);
-      setPlayer(nesPlayer);
-
-      // Log frame specification for diagnostics
-      const spec = fceuxCore.getFrameSpec();
-
-      // Test frame buffer functionality
-      console.log('[GamePage] Testing frame buffer...');
-      try {
-        const buffer = fceuxCore.getFrameBuffer();
-
-        console.log('[GamePage] ✅ Frame buffer test successful:', {
-          width: spec.width,
-          height: spec.height,
-          format: spec.format,
-          bufferLength: buffer.length,
-          expectedLength: 256 * 240 * 4,
-          isValidBuffer: buffer instanceof Uint8Array,
-          firstPixel: buffer.length >= 4 ? `RGBA(${buffer[0]},${buffer[1]},${buffer[2]},${buffer[3]})` : 'N/A'
-        });
-
-        // Validate buffer size
-        const expectedSize = 256 * 240 * 4;
-        if (buffer.length !== expectedSize) {
-          console.error('[GamePage] ⚠️ Frame buffer size incorrect:', {
-            expected: expectedSize,
-            actual: buffer.length,
-            difference: buffer.length - expectedSize
-          });
-        }
-
-      } catch (error) {
-        console.error('[GamePage] ❌ Frame buffer test failed:', error);
-        throw new Error(`Frame buffer is broken: ${error instanceof Error ? error.message : 'Unknown error'}`);
-      }
-
-      // Start the game
-      fceuxCore.setRunning(true);
-      nesPlayer.play();
-      setStatus('running');
-
-      console.log('[GamePage] Emulator started successfully');
-      */
-
-      // Temporary placeholder until new emulator core is integrated
-      throw new Error('Emulator core has been removed. Please integrate new emulator core.');
-
-    } catch (err) {
-      console.error('[GamePage] Error starting emulator:', err);
-      setError(err instanceof Error ? err.message : 'Failed to start emulator');
-      setStatus('error');
-    }
-  };
-
-  /**
-   * Toggle play/pause
-   */
-  const handlePlayPause = () => {
-    if (!player) return;
-
-    if (status === 'running') {
-      player.pause();
-      setStatus('paused');
-    } else if (status === 'paused') {
-      player.play();
-      setStatus('running');
-    }
-  };
-
-  /**
-   * Reset the game
-   * TODO: Update to use new emulator core
-   */
-  const handleReset = () => {
-    if (!core) return;
-
-    // TODO: Replace with new emulator core reset method
-    // core.reset();
-    if (status === 'paused' && player) {
-      player.play();
-      setStatus('running');
-    }
-  };
 
   /**
    * Retry loading the game
    */
   const handleRetry = () => {
     // Clean up current state
-    if (player) {
-      player.dispose();
-      setPlayer(null);
+    if (romPath && romPath.startsWith('blob:')) {
+      URL.revokeObjectURL(romPath);
     }
-    setCore(null);
-    setRomData(null);
+    setRomPath(null);
     setRomInfo(null);
     setError(null);
 
@@ -353,88 +193,67 @@ export default function GamePage() {
     navigate('/games');
   };
 
-  /**
-   * Toggle fullscreen
-   */
-  const handleFullscreen = () => {
-    if (canvasRef.current?.requestFullscreen) {
-      canvasRef.current.requestFullscreen();
-    }
-  };
+  if (status === 'loading') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Card className="w-full max-w-2xl border-gray-800 bg-gray-900">
+          <CardContent className="p-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
+            <h3 className="text-lg font-semibold text-white mb-2">Loading Game</h3>
+            <p className="text-gray-400">Fetching game data from Nostr...</p>
+            <div className="mt-4">
+              <Button onClick={handleBack} variant="outline" size="sm">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Games
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-  /**
-   * Toggle audio
-   */
-  const handleToggleAudio = () => {
-    setAudioEnabled(!audioEnabled);
-    // TODO: Implement audio mute/unmute in core
-  };
+  if (status === 'error') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Card className="w-full max-w-2xl border-red-500 bg-gray-900">
+          <CardContent className="p-8 text-center">
+            <div className="text-red-400 text-6xl mb-4">⚠️</div>
+            <h3 className="text-xl font-semibold text-white mb-2">Error Loading Game</h3>
+            <p className="text-gray-400 mb-4">{error}</p>
+            <div className="space-y-2">
+              <Button onClick={handleRetry} className="w-full">
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Try Again
+              </Button>
+              <Button onClick={handleBack} variant="outline" className="w-full">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Games
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
-  /**
-   * Cleanup on unmount
-   */
-  useEffect(() => {
-    return () => {
-      if (player) {
-        console.log('[GamePage] Cleaning up player on unmount');
-        player.dispose();
-      }
-    };
-  }, [player]);
-
-  /**
-   * Keyboard controls
-   */
-  useEffect(() => {
-    const keyMap: Record<string, number> = {
-      'arrowright': 0,  // Right
-      'arrowleft': 1,   // Left
-      'arrowdown': 2,   // Down
-      'arrowup': 3,     // Up
-      'enter': 4,       // Start
-      'shift': 5,       // Select
-      'z': 6,           // B
-      'x': 7,           // A
-    };
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      const button = keyMap[key];
-
-      if (button !== undefined && core) {
-        const controlKey = Object.keys(controls)[button] as keyof typeof controls;
-        if (!controls[controlKey]) {
-          setControls(prev => ({ ...prev, [controlKey]: true }));
-          // TODO: Replace with new emulator core setButton method
-          // core.setButton(button, true);
-          e.preventDefault();
-        }
-      }
-    };
-
-    const handleKeyUp = (e: KeyboardEvent) => {
-      const key = e.key.toLowerCase();
-      const button = keyMap[key];
-
-      if (button !== undefined && core) {
-        const controlKey = Object.keys(controls)[button] as keyof typeof controls;
-        if (controls[controlKey]) {
-          setControls(prev => ({ ...prev, [controlKey]: false }));
-          // TODO: Replace with new emulator core setButton method
-          // core.setButton(button, false);
-          e.preventDefault();
-        }
-      }
-    };
-
-    window.addEventListener('keydown', handleKeyDown);
-    window.addEventListener('keyup', handleKeyUp);
-
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-      window.removeEventListener('keyup', handleKeyUp);
-    };
-  }, [controls, core]);
+  if (!gameMeta || !romPath) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Card className="w-full max-w-2xl border-gray-800 bg-gray-900">
+          <CardContent className="p-8 text-center">
+            <p className="text-gray-400">Game data not available</p>
+            <div className="mt-4">
+              <Button onClick={handleBack} variant="outline">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Games
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -449,7 +268,7 @@ export default function GamePage() {
               </Button>
 
               <div>
-                <h1 className="text-xl font-bold text-white">{gameMeta?.title || 'Loading Game...'}</h1>
+                <h1 className="text-xl font-bold text-white">{gameMeta.title}</h1>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   {romInfo?.header.mapper !== undefined && (
                     <span className="bg-gray-800 px-2 py-1 rounded text-xs">
@@ -461,23 +280,13 @@ export default function GamePage() {
                       {Math.round(romInfo.size / 1024)}KB
                     </span>
                   )}
+                  {gameMeta.status && (
+                    <span className="bg-purple-800 px-2 py-1 rounded text-xs">
+                      {gameMeta.status}
+                    </span>
+                  )}
                 </div>
               </div>
-            </div>
-
-            <div className="flex items-center gap-2">
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleToggleAudio}
-                className={audioEnabled ? 'text-green-400' : 'text-red-400'}
-              >
-                {audioEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4" />}
-              </Button>
-
-              <Button variant="ghost" size="sm" onClick={handleFullscreen} className="text-gray-300 hover:text-white">
-                <Maximize className="w-4 h-4" />
-              </Button>
             </div>
           </div>
         </div>
@@ -487,204 +296,91 @@ export default function GamePage() {
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
           <div className="lg:col-span-3">
-            <div className="space-y-6">
-              {/* Game canvas */}
-              <Card className="border-gray-800 bg-gray-900">
-                <CardContent className="p-0">
-                  <div className="relative bg-black flex items-center justify-center">
-                    {/* Canvas container with proper aspect ratio */}
-                    <div className="relative w-full aspect-[256/240] max-w-4xl mx-auto">
-                      <canvas
-                        ref={canvasRef}
-                        width={256}
-                        height={240}
-                        className="absolute inset-0 w-full h-full block"
-                        style={{
-                          imageRendering: 'pixelated',
-                          background: 'black'
-                        }}
-                      />
-
-                      {/* Loading overlay */}
-                      {status === 'loading' && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/80">
-                          <div className="text-center">
-                            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
-                            <p className="text-gray-400">Loading game...</p>
-                          </div>
-                        </div>
-                      )}
-
-                      {/* Ready/Start overlay */}
-                      {status === 'ready' && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/50">
-                          <Card className="border-purple-500 bg-purple-900/20">
-                            <CardContent className="p-6 text-center">
-                              <h3 className="text-lg font-semibold text-white mb-4">Ready to Play</h3>
-                              <Button onClick={handleStart} className="bg-purple-600 hover:bg-purple-700">
-                                <Play className="w-4 h-4 mr-2" />
-                                Start Game
-                              </Button>
-                              {romInfo && (
-                                <div className="text-gray-400 text-xs mt-2 space-y-1">
-                                  <p>ROM: {romInfo.header.mapper} mapper, {romInfo.header.prgBanks}PRG, {romInfo.header.chrBanks}CHR</p>
-                                  <p className="text-yellow-400">Note: Using demo WASM core (826 bytes). For real games, a full emulator core (&gt;100KB) is needed.</p>
-                                </div>
-                              )}
-                            </CardContent>
-                          </Card>
-                        </div>
-                      )}
-
-                      {/* Error overlay */}
-                      {status === 'error' && (
-                        <div className="absolute inset-0 flex items-center justify-center bg-black/90">
-                          <div className="text-center p-8 max-w-md">
-                            <div className="text-red-400 text-6xl mb-4">⚠️</div>
-                            <h3 className="text-xl font-semibold text-white mb-2">Error</h3>
-                            <p className="text-gray-400 mb-4">{error}</p>
-                            <div className="space-y-2">
-                              <Button onClick={handleRetry} className="w-full">
-                                <RefreshCw className="w-4 h-4 mr-2" />
-                                Try Again
-                              </Button>
-                              <Button onClick={handleBack} variant="outline" className="w-full">
-                                Back to Games
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Control bar */}
-              {(status === 'running' || status === 'paused') && (
-                <Card className="border-gray-800 bg-gray-900">
-                  <CardContent className="p-4">
-                    <div className="flex items-center justify-center gap-4">
-                      <Button
-                        onClick={handlePlayPause}
-                        className="bg-purple-600 hover:bg-purple-700"
-                      >
-                        {status === 'running' ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4" />}
-                        {status === 'running' ? 'Pause' : 'Play'}
-                      </Button>
-
-                      <Button
-                        onClick={handleReset}
-                        variant="outline"
-                        className="border-gray-600 text-gray-300 hover:text-white"
-                      >
-                        <RotateCcw className="w-4 h-4 mr-2" />
-                        Reset
-                      </Button>
-
-                      <div className="flex items-center gap-2 text-sm text-gray-400">
-                        <div className={`w-2 h-2 rounded-full ${
-                          status === 'running' ? 'bg-green-400' : 'bg-yellow-400'
-                        }`}></div>
-                        {status === 'running' ? 'Running' : 'Paused'}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
-              )}
-
-              {/* Keyboard controls hint */}
-              <Card className="border-gray-800 bg-gray-900">
-                <CardContent className="p-4">
-                  <h3 className="text-sm font-semibold text-white mb-2">Keyboard Controls</h3>
-                  <div className="grid grid-cols-2 gap-4 text-xs text-gray-400">
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <kbd className="px-2 py-1 bg-gray-800 rounded text-white">↑ ↓ ← →</kbd>
-                        <span>Direction</span>
-                      </div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <kbd className="px-2 py-1 bg-gray-800 rounded text-white">Enter</kbd>
-                        <span>Start</span>
-                      </div>
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2 mb-1">
-                        <kbd className="px-2 py-1 bg-gray-800 rounded text-white">Shift</kbd>
-                        <span>Select</span>
-                      </div>
-                      <div className="flex items-center gap-2">
-                        <kbd className="px-2 py-1 bg-gray-800 rounded text-white mr-2">Z</kbd>
-                        <kbd className="px-2 py-1 bg-gray-800 rounded text-white">X</kbd>
-                        <span>B / A</span>
-                      </div>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+            <NesPlayer 
+              romPath={romPath}
+              title={gameMeta.title}
+              className="w-full"
+            />
           </div>
 
           {/* Side panel */}
           <div className="lg:col-span-1">
             <div className="space-y-6">
               {/* Game info */}
-              {gameMeta && (
-                <Card className="border-gray-800 bg-gray-900">
-                  <CardContent className="p-4 space-y-4">
-                    <h3 className="text-lg font-semibold text-white">Game Info</h3>
+              <Card className="border-gray-800 bg-gray-900">
+                <CardContent className="p-4 space-y-4">
+                  <h3 className="text-lg font-semibold text-white">Game Info</h3>
 
-                    {gameMeta.assets?.cover && (
-                      <div className="aspect-video rounded-lg overflow-hidden">
-                        <img
-                          src={gameMeta.assets.cover}
-                          alt={gameMeta.title}
-                          className="w-full h-full object-cover"
-                        />
+                  {gameMeta.assets?.cover && (
+                    <div className="aspect-video rounded-lg overflow-hidden">
+                      <img
+                        src={gameMeta.assets.cover}
+                        alt={gameMeta.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+
+                  {gameMeta.summary && (
+                    <div>
+                      <span className="text-gray-500">Description:</span>
+                      <p className="text-gray-300 text-sm mt-1">{gameMeta.summary}</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 text-sm">
+                    {gameMeta.genres?.length > 0 && (
+                      <div>
+                        <span className="text-gray-500">Genre:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {gameMeta.genres.slice(0, 3).map((genre: string) => (
+                            <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                              {genre}
+                            </span>
+                          ))}
+                        </div>
                       </div>
                     )}
 
-                    <div className="space-y-2 text-sm">
-                      {gameMeta.genres?.length > 0 && (
-                        <div>
-                          <span className="text-gray-500">Genre:</span>
-                          <div className="flex flex-wrap gap-1 mt-1">
-                            {gameMeta.genres.slice(0, 3).map((genre: string) => (
-                              <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
-                                {genre}
-                              </span>
-                            ))}
-                          </div>
+                    {gameMeta.platforms?.length > 0 && (
+                      <div>
+                        <span className="text-gray-500">Platform:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {gameMeta.platforms.slice(0, 2).map((platform: string) => (
+                            <span key={platform} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                              {platform}
+                            </span>
+                          ))}
                         </div>
-                      )}
-
-                      {romInfo && (
-                        <div className="pt-2 border-t border-gray-800">
-                          <span className="text-gray-500">ROM Info:</span>
-                          <div className="text-xs text-gray-400 mt-1 space-y-1">
-                            <div>PRG Banks: {romInfo.header.prgBanks}</div>
-                            <div>CHR Banks: {romInfo.header.chrBanks}</div>
-                            <div>Mapper: {romInfo.header.mapper}</div>
-                            <div>Size: {Math.round(romInfo.size / 1024)}KB</div>
-                            <div>SHA256: {romInfo.sha256.substring(0, 8)}...</div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="pt-4 border-t border-gray-800 mt-4">
-                        <Link
-                          to="https://soapbox.pub/mkstack"
-                          target="_blank"
-                          rel="noopener noreferrer"
-                          className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
-                        >
-                          Vibed with MKStack
-                        </Link>
                       </div>
+                    )}
+
+                    {romInfo && (
+                      <div className="pt-2 border-t border-gray-800">
+                        <span className="text-gray-500">ROM Info:</span>
+                        <div className="text-xs text-gray-400 mt-1 space-y-1">
+                          <div>PRG Banks: {romInfo.header.prgBanks}</div>
+                          <div>CHR Banks: {romInfo.header.chrBanks}</div>
+                          <div>Mapper: {romInfo.header.mapper}</div>
+                          <div>Size: {Math.round(romInfo.size / 1024)}KB</div>
+                          <div>SHA256: {romInfo.sha256.substring(0, 8)}...</div>
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-4 border-t border-gray-800 mt-4">
+                      <Link
+                        to="https://soapbox.pub/mkstack"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                      >
+                        Vibed with MKStack
+                      </Link>
                     </div>
-                  </CardContent>
-                </Card>
-              )}
+                  </div>
+                </CardContent>
+              </Card>
             </div>
           </div>
         </div>

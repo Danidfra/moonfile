@@ -8,6 +8,7 @@ import Contact from "./pages/Contact";
 import Publish from "./pages/Publish";
 import TestPage from "./pages/TestPage";
 import TestMario from "./pages/TestMario";
+import RetroPlay from "./pages/RetroPlay";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
 import GamePage from "./pages/GamePage";
@@ -24,8 +25,9 @@ export function AppRouter() {
         <Route path="/publish" element={<Publish />} />
         <Route path="/test" element={<TestPage />} />
         <Route path="/test-mario" element={<TestMario />} />
-        {/* Game player route */}
+        {/* Game player routes */}
         <Route path="/game/:id" element={<GamePage />} />
+        <Route path="/retro/:gameId/play" element={<RetroPlay />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
