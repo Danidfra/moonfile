@@ -11,10 +11,29 @@ export default defineConfig(() => ({
     fs: {
       // Allow serving files from the public directory
       allow: ['..']
+    },
+    middlewareMode: false,
+    // Configure headers for WASM files
+    headers: {
+      'Cache-Control': 'no-store',
     }
   },
   plugins: [
     react(),
+    // Custom plugin to handle WASM files properly
+    {
+      name: 'wasm-headers',
+      configureServer(server) {
+        server.middlewares.use('/wasm', (req, res, next) => {
+          if (req.url?.endsWith('.wasm')) {
+            res.setHeader('Content-Type', 'application/wasm');
+            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Content-Encoding', 'identity'); // Disable compression
+          }
+          next();
+        });
+      }
+    }
   ],
   // Ensure WASM files are served with correct MIME type
   assetsInclude: ['**/*.wasm'],

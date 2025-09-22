@@ -48,22 +48,23 @@ export class FCEUXWebAdapter implements NesCore {
       const missingRequired = requiredFunctions.filter(fn => typeof exports[fn] !== 'function');
 
       if (missingRequired.length > 0) {
-        console.warn('[FCEUXWebAdapter] Missing required WASM exports:', missingRequired);
-        // For now, we'll try to continue with a fallback implementation
-        this.core = this.createFallbackCore(exports, memory);
-      } else {
-        this.core = exports;
+        console.error('[FCEUXWebAdapter] Missing required WASM exports:', missingRequired);
+        throw new Error(`Bad WASM: missing required exports: ${missingRequired.join(', ')}. This indicates a corrupted or incompatible WASM file.`);
       }
+
+      this.core = exports;
 
       // Initialize the core if available
       if (typeof this.core.init === 'function') {
         const initResult = this.core.init();
         if (!initResult) {
           console.warn('[FCEUXWebAdapter] WASM core init returned false, continuing anyway');
+        } else {
+          console.log('[FCEUXWebAdapter] WASM core initialized successfully');
         }
       }
 
-      console.log('[FCEUXWebAdapter] Core initialized successfully');
+      console.log('[FCEUXWebAdapter] Core initialized successfully - using real WASM emulator');
 
       // Log frame specification
       const spec = this.getFrameSpec();
@@ -75,96 +76,24 @@ export class FCEUXWebAdapter implements NesCore {
         bufferLength: buffer.length
       });
 
+      // Confirm we're not using fallback mode
+      console.log('[FCEUXWebAdapter] ✅ Real NES emulator core active (no gradient fallback)');
+
       return true;
 
     } catch (error) {
       console.error('[FCEUXWebAdapter] Initialization failed:', error);
-      // Try fallback initialization
-      return this.initFallback();
-    }
-  }
 
-  /**
-   * Create a fallback core implementation when WASM exports are incomplete
-   */
-  private createFallbackCore(exports: any, memory: WebAssembly.Memory): any {
-    console.log('[FCEUXWebAdapter] Creating fallback core implementation');
-
-    // Create frame buffer in WASM memory or as fallback
-    const frameBuffer = new Uint8Array(256 * 240 * 4); // RGBA format
-
-    return {
-      init: exports.init || (() => {
-        console.log('[FCEUXWebAdapter] Fallback init()');
-        return true;
-      }),
-      loadRom: exports.loadRom || ((rom: Uint8Array) => {
-        console.log('[FCEUXWebAdapter] Fallback loadRom(), size:', rom.length);
-        // Basic validation
-        if (rom.length < 16) return false;
-        if (rom[0] !== 0x4E || rom[1] !== 0x45 || rom[2] !== 0x53 || rom[3] !== 0x1A) return false;
-        return true;
-      }),
-      frame: exports.frame || (() => {
-        // Generate a simple test pattern
-        this.generateTestPattern(frameBuffer);
-      }),
-      reset: exports.reset || (() => {
-        console.log('[FCEUXWebAdapter] Fallback reset()');
-        frameBuffer.fill(0);
-      }),
-      setButton: exports.setButton || ((index: number, pressed: number) => {
-        console.log('[FCEUXWebAdapter] Fallback setButton()', index, pressed);
-      }),
-      setRunning: exports.setRunning || ((running: boolean) => {
-        console.log('[FCEUXWebAdapter] Fallback setRunning()', running);
-      }),
-      getFrameBuffer: exports.getFrameBuffer || (() => frameBuffer),
-      getFrameSpec: exports.getFrameSpec || (() => ({ width: 256, height: 240, format: 'RGBA32' })),
-      getPalette: exports.getPalette || (() => null),
-      getAudioBuffer: exports.getAudioBuffer || (() => new Int16Array(0))
-    };
-  }
-
-  /**
-   * Generate a test pattern for debugging
-   */
-  private generateTestPattern(buffer: Uint8Array): void {
-    const width = 256;
-    const height = 240;
-
-    for (let y = 0; y < height; y++) {
-      for (let x = 0; x < width; x++) {
-        const index = (y * width + x) * 4;
-        const time = Date.now() / 1000;
-
-        // Create a simple animated pattern
-        buffer[index + 0] = Math.floor(128 + 127 * Math.sin(x / 32 + time));     // R
-        buffer[index + 1] = Math.floor(128 + 127 * Math.sin(y / 32 + time));     // G
-        buffer[index + 2] = Math.floor(128 + 127 * Math.sin((x + y) / 32 + time)); // B
-        buffer[index + 3] = 255; // A
+      // Never fall back to gradient mode - fail fast with clear error
+      if (error instanceof Error && error.message.includes('Bad WASM')) {
+        throw new Error(`Emulator initialization failed: ${error.message}`);
       }
+
+      throw new Error(`Emulator initialization failed: ${error instanceof Error ? error.message : 'Unknown error'}`);
     }
   }
 
-  /**
-   * Fallback initialization when WASM loading fails completely
-   */
-  private async initFallback(): Promise<boolean> {
-    console.log('[FCEUXWebAdapter] Initializing fallback mode (no WASM)');
 
-    try {
-      // Create a completely software-based fallback
-      const memory = new WebAssembly.Memory({ initial: 1, maximum: 1 });
-      this.core = this.createFallbackCore({}, memory);
-
-      console.log('[FCEUXWebAdapter] Fallback mode initialized');
-      return true;
-    } catch (error) {
-      console.error('[FCEUXWebAdapter] Fallback initialization failed:', error);
-      return false;
-    }
-  }
 
   /**
    * Load ROM into the emulator core

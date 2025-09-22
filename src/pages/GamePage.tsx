@@ -1,6 +1,6 @@
 /**
  * Game Page
- * 
+ *
  * Displays and runs NES games from Nostr events (kind 31996).
  * Handles ROM decoding, validation, emulator initialization, and game controls.
  */
@@ -53,21 +53,21 @@ export default function GamePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { nostr } = useNostr();
-  
+
   // Canvas and emulator refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  
+
   // Emulator state
   const [player, setPlayer] = useState<NesPlayer | null>(null);
   const [core, setCore] = useState<FCEUXWebAdapter | null>(null);
   const [romData, setRomData] = useState<Uint8Array | null>(null);
   const [status, setStatus] = useState<PlayerState>('loading');
   const [error, setError] = useState<string | null>(null);
-  
+
   // Game data
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
-  
+
   // UI state
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [controls, setControls] = useState({
@@ -117,21 +117,21 @@ export default function GamePage() {
         // Check encoding tag
         const encodingTag = event.tags.find(tag => tag[0] === 'encoding');
         const encoding = encodingTag?.[1];
-        
+
         if (encoding !== 'base64') {
           throw new Error(`Unsupported encoding: ${encoding || 'none'}. Expected base64.`);
         }
 
         console.log('[GamePage] Decoding base64 ROM from event content');
-        
+
         // Decode ROM from event content
         const romBytes = decodeBase64ToBytes(event.content);
-        
+
         console.log('[GamePage] Validating NES ROM');
-        
+
         // Validate ROM format
         validateNESRom(romBytes);
-        
+
         // Parse header and compute hash
         const header = parseINesHeader(romBytes);
         const hash = await sha256(romBytes);
@@ -246,7 +246,7 @@ export default function GamePage() {
    */
   const handleReset = () => {
     if (!core) return;
-    
+
     core.reset();
     if (status === 'paused' && player) {
       player.play();
@@ -267,7 +267,7 @@ export default function GamePage() {
     setRomData(null);
     setRomInfo(null);
     setError(null);
-    
+
     // Restart loading process
     setStatus('loading');
   };
@@ -326,7 +326,7 @@ export default function GamePage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       const button = keyMap[key];
-      
+
       if (button !== undefined && core) {
         const controlKey = Object.keys(controls)[button] as keyof typeof controls;
         if (!controls[controlKey]) {
@@ -340,7 +340,7 @@ export default function GamePage() {
     const handleKeyUp = (e: KeyboardEvent) => {
       const key = e.key.toLowerCase();
       const button = keyMap[key];
-      
+
       if (button !== undefined && core) {
         const controlKey = Object.keys(controls)[button] as keyof typeof controls;
         if (controls[controlKey]) {
@@ -450,9 +450,10 @@ export default function GamePage() {
                                 Start Game
                               </Button>
                               {romInfo && (
-                                <p className="text-gray-400 text-xs mt-2">
-                                  ROM: {romInfo.header.mapper} mapper, {romInfo.header.prgBanks}PRG, {romInfo.header.chrBanks}CHR
-                                </p>
+                                <div className="text-gray-400 text-xs mt-2 space-y-1">
+                                  <p>ROM: {romInfo.header.mapper} mapper, {romInfo.header.prgBanks}PRG, {romInfo.header.chrBanks}CHR</p>
+                                  <p className="text-yellow-400">Note: Using demo WASM core (826 bytes). For real games, a full emulator core (>100KB) is needed.</p>
+                                </div>
                               )}
                             </CardContent>
                           </Card>
