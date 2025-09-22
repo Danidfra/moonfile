@@ -1,173 +1,97 @@
 #!/bin/bash
 
-# Build FCEUX WebAssembly from source
-# This script attempts to build FCEUX with WebAssembly support
+# FCEUX WebAssembly Build Script
+# Compiles FCEUX to WebAssembly with all required exports
 
-echo "Building FCEUX WebAssembly..."
+set -e
 
-# Check if Emscripten is installed
-if ! command -v emcc &> /dev/null; then
-    echo "Emscripten not found. Installing..."
-    
-    # Install Emscripten using the official installer
-    cd /tmp
-    git clone https://github.com/emscripten-core/emsdk.git
-    cd emsdk
-    
-    # Install and activate the latest emscripten
-    ./emsdk install latest
-    ./emsdk activate latest
-    
-    # Source the environment
-    source ./emsdk_env.sh
-    
-    cd -
+echo "🚀 Building FCEUX WebAssembly Core..."
+
+# Setup environment
+source /tmp/emsdk/emsdk_env.sh
+
+# Build directory
+BUILD_DIR="/tmp/fceux-wasm-build"
+FCEUX_DIR="/tmp/fceux-wasm"
+OUTPUT_DIR="$(pwd)/public/wasm"
+
+mkdir -p "$BUILD_DIR"
+mkdir -p "$OUTPUT_DIR"
+
+echo "📁 Build directory: $BUILD_DIR"
+echo "📁 Output directory: $OUTPUT_DIR"
+
+# Check if we need to install scons
+if ! command -v scons &> /dev/null; then
+    echo "📦 Installing SCons..."
+    pip3 install --user scons
+    export PATH="$HOME/.local/bin:$PATH"
 fi
 
-# Clone FCEUX repository if not present
-if [ ! -d "fceux" ]; then
-    echo "Cloning FCEUX repository..."
-    git clone https://github.com/TASEmulators/fceux.git
+cd "$FCEUX_DIR"
+
+echo "🔧 Configuring FCEUX for Emscripten..."
+
+# Set up environment variables for build
+export CPPPATH="/tmp/zlib-1.3.1:$FCEUX_DIR/src/lua/src"
+export LIBPATH="/tmp/zlib-1.3.1:$FCEUX_DIR/src/lua"
+
+# Clean previous builds
+echo "🧹 Cleaning previous builds..."
+git clean -xfd || true
+
+echo "🔨 Building FCEUX with Emscripten..."
+
+# Build command with all necessary flags
+EMCC_FAST_COMPILER=1 emconfigure scons \
+    RELEASE=1 \
+    GTK=0 \
+    LUA=0 \
+    SYSTEM_LUA=0 \
+    CREATE_AVI=0 \
+    OPENGL=0 \
+    EMSCRIPTEN=1 \
+    -j4
+
+echo "📦 Generating WebAssembly files..."
+
+# Find the generated object file
+FCEUX_OBJ=$(find . -name "fceux" -type f | head -1)
+
+if [ ! -f "$FCEUX_OBJ" ]; then
+    echo "❌ FCEUX object file not found"
+    exit 1
 fi
 
-cd fceux
+echo "📄 Found FCEUX object: $FCEUX_OBJ"
 
-# Create WebAssembly build directory
-mkdir -p build-wasm
-cd build-wasm
+# Generate WASM and JS files with required exports
+emcc "$FCEUX_OBJ" \
+    -s WASM=1 \
+    -s ALLOW_MEMORY_GROWTH=1 \
+    -s INITIAL_MEMORY=64MB \
+    -s MAXIMUM_MEMORY=128MB \
+    -s EXPORTED_FUNCTIONS='["_main","_init","_loadRom","_frame","_reset","_getFrameBuffer","_getFrameBufferSize","_setButton","_setRunning","_getPalette"]' \
+    -s EXPORTED_RUNTIME_METHODS='["ccall","cwrap","getValue","setValue","writeArrayToMemory"]' \
+    -s MODULARIZE=1 \
+    -s EXPORT_NAME="FCEUXModule" \
+    -s USE_SDL=2 \
+    -s ASYNCIFY=1 \
+    -O3 \
+    -o "$BUILD_DIR/fceux.js"
 
-# Configure for WebAssembly build
-echo "Configuring FCEUX for WebAssembly..."
-emcmake cmake .. -DFCEUX_WEB=ON -DBUILD_SHARED=OFF -DCMAKE_BUILD_TYPE=Release
+echo "✅ FCEUX WebAssembly build completed!"
 
-# Build FCEUX WebAssembly
-echo "Building FCEUX WebAssembly..."
-emmake make -j$(nproc)
+# Copy files to output directory
+cp "$BUILD_DIR/fceux.wasm" "$OUTPUT_DIR/fceux.wasm"
+cp "$BUILD_DIR/fceux.js" "$OUTPUT_DIR/fceux.js"
 
-# Copy the generated files to the public directory
-if [ -f "fceux-web.js" ] && [ -f "fceux-web.wasm" ]; then
-    echo "Build successful! Copying files..."
-    cp fceux-web.js ../../public/lib/fceux/
-    cp fceux-web.wasm ../../public/lib/fceux/
-    echo "FCEUX WebAssembly files copied to public/lib/fceux/"
-else
-    echo "Build failed. Files not found. Creating stub implementation..."
-    
-    # Create stub implementation if build fails
-    cat > ../../public/lib/fceux/fceux-web.js << 'EOF'
-// FCEUX WebAssembly Stub Implementation
-// This will be replaced by real FCEUX WebAssembly build when available
+echo "📊 Build results:"
+echo "   WASM size: $(wc -c < "$OUTPUT_DIR/fceux.wasm") bytes"
+echo "   JS size: $(wc -c < "$OUTPUT_DIR/fceux.js") bytes"
 
-class FCEUXWeb {
-  constructor() {
-    this.initialized = false;
-    this.memory = null;
-    this.exports = null;
-    this.romLoaded = false;
-    this.frameBuffer = new Uint8Array(256 * 240 * 3);
-    this.audioBuffer = new Int16Array(1024);
-    this.controls = new Array(8).fill(0);
-  }
+echo "✅ Files ready:"
+echo "   $OUTPUT_DIR/fceux.wasm"
+echo "   $OUTPUT_DIR/fceux.js"
 
-  async init() {
-    console.log('[FCEUX Web] Initializing FCEUX WebAssembly stub');
-    
-    // Create a mock memory buffer
-    this.memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
-    
-    // Mock exports that simulate FCEUX functionality
-    this.exports = {
-      memory: this.memory,
-      init: () => console.log('[FCEUX Web] init called'),
-      loadRom: (romData) => {
-        console.log('[FCEUX Web] loadRom called with', romData.length, 'bytes');
-        this.romLoaded = true;
-        return true;
-      },
-      frame: () => {
-        if (this.romLoaded) {
-          this.generateTestFrame();
-        }
-      },
-      reset: () => {
-        console.log('[FCEUX Web] reset called');
-        this.controls.fill(0);
-      },
-      setButton: (buttonIndex, pressed) => {
-        if (buttonIndex >= 0 && buttonIndex < this.controls.length) {
-          this.controls[buttonIndex] = pressed;
-        }
-      },
-      getFrameBuffer: () => this.frameBuffer,
-      getAudioBuffer: () => this.audioBuffer,
-    };
-    
-    this.initialized = true;
-    return this.exports;
-  }
-
-  generateTestFrame() {
-    // Generate a simple test pattern
-    const time = Date.now() * 0.001;
-    
-    for (let y = 0; y < 240; y++) {
-      for (let x = 0; x < 256; x++) {
-        const i = (y * 256 + x) * 3;
-        
-        // Create an animated pattern
-        const wave1 = Math.sin(x * 0.05 + time) * 0.5 + 0.5;
-        const wave2 = Math.sin(y * 0.05 + time * 1.3) * 0.5 + 0.5;
-        
-        this.frameBuffer[i] = wave1 * 255;     // R
-        this.frameBuffer[i + 1] = wave2 * 255; // G
-        this.frameBuffer[i + 2] = 128;           // B
-      }
-    }
-    
-    // Update audio buffer with simple tone
-    for (let i = 0; i < this.audioBuffer.length; i++) {
-      this.audioBuffer[i] = Math.sin(time * 440 * Math.PI * 2 + i * 0.1) * 1000;
-    }
-  }
-
-  isInitialized() {
-    return this.initialized;
-  }
-}
-
-// Global FCEUX instance
-window.FCEUX = new FCEUXWeb();
-
-// Auto-initialize when script loads
-if (document.readyState === 'loading') {
-  document.addEventListener('DOMContentLoaded', () => {
-    window.FCEUX.init();
-  });
-} else {
-  window.FCEUX.init();
-}
-EOF
-
-    # Create minimal WASM file
-    python3 -c "
-import struct
-
-# Create a minimal WASM file that just exports memory
-wasm_binary = bytearray([
-    # Magic number
-    0x00, 0x61, 0x73, 0x6d,
-    # Version
-    0x01, 0x00, 0x00, 0x00,
-])
-
-with open('../../public/lib/fceux/fceux-web.wasm', 'wb') as f:
-    f.write(wasm_binary)
-    
-print('Created minimal WASM stub')
-" 2>/dev/null || echo "WASM stub creation skipped"
-fi
-
-cd ../..
-
-echo "FCEUX WebAssembly setup complete!"
-echo "Note: Using stub implementation. Replace with real FCEUX WebAssembly build for full functionality."
+echo "🎉 FCEUX WebAssembly build complete!"
