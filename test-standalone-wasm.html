@@ -1,0 +1,185 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Standalone WASM Test</title>
+    <style>
+        body { font-family: monospace; padding: 20px; }
+        .success { color: green; }
+        .error { color: red; }
+        canvas { border: 1px solid #ccc; margin: 10px 0; }
+        button { margin: 5px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <h1>Standalone WebAssembly Test</h1>
+    <div id="log"></div>
+    <canvas id="canvas" width="256" height="240"></canvas>
+    <div>
+        <button onclick="testInit()">Test Init</button>
+        <button onclick="testFrame()">Test Frame</button>
+        <button onclick="testButtons()">Test Buttons</button>
+        <button onclick="testRom()">Test ROM Loading</button>
+    </div>
+
+    <script>
+        let wasmInstance = null;
+        let canvas = null;
+        let ctx = null;
+
+        function log(message, isError = false) {
+            const div = document.getElementById('log');
+            const p = document.createElement('p');
+            p.textContent = new Date().toLocaleTimeString() + ': ' + message;
+            p.className = isError ? 'error' : 'success';
+            div.appendChild(p);
+            console.log(message);
+        }
+
+        async function loadWasm() {
+            try {
+                log('Loading WASM from /wasm/fceux.wasm...');
+                
+                const response = await fetch('/wasm/fceux.wasm');
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+                
+                const wasmBytes = await response.arrayBuffer();
+                log(`WASM loaded: ${wasmBytes.byteLength} bytes`);
+                
+                // Instantiate with ZERO imports - this is the key test!
+                log('Instantiating with empty imports object...');
+                const { instance } = await WebAssembly.instantiate(wasmBytes, {});
+                
+                wasmInstance = instance;
+                log('✅ SUCCESS: WASM instantiated with zero imports!');
+                
+                // Log available exports
+                const exports = Object.keys(instance.exports);
+                log(`Available exports: ${exports.join(', ')}`);
+                
+                // Setup canvas
+                canvas = document.getElementById('canvas');
+                ctx = canvas.getContext('2d');
+                
+                return true;
+                
+            } catch (error) {
+                log(`❌ FAILED: ${error.message}`, true);
+                return false;
+            }
+        }
+
+        function testInit() {
+            if (!wasmInstance) {
+                log('WASM not loaded', true);
+                return;
+            }
+            
+            try {
+                const result = wasmInstance.exports.init();
+                log(`✅ init() returned: ${result}`);
+            } catch (error) {
+                log(`❌ init() failed: ${error.message}`, true);
+            }
+        }
+
+        function testFrame() {
+            if (!wasmInstance) {
+                log('WASM not loaded', true);
+                return;
+            }
+            
+            try {
+                // Generate a frame
+                wasmInstance.exports.frame();
+                
+                // Get frame buffer
+                const frameBufferPtr = wasmInstance.exports.getFrameBuffer();
+                const frameBufferSize = wasmInstance.exports.getFrameBufferSize();
+                
+                log(`Frame generated. Buffer at ${frameBufferPtr}, size: ${frameBufferSize} bytes`);
+                
+                // Read frame buffer from WASM memory
+                const memory = wasmInstance.exports.memory;
+                const frameData = new Uint8Array(memory.buffer, frameBufferPtr, frameBufferSize);
+                
+                // Create ImageData and draw to canvas
+                const imageData = new ImageData(new Uint8ClampedArray(frameData), 256, 240);
+                ctx.putImageData(imageData, 0, 0);
+                
+                log('✅ Frame rendered to canvas');
+                
+            } catch (error) {
+                log(`❌ Frame test failed: ${error.message}`, true);
+            }
+        }
+
+        function testButtons() {
+            if (!wasmInstance) {
+                log('WASM not loaded', true);
+                return;
+            }
+            
+            try {
+                // Test button presses
+                wasmInstance.exports.setButton(0, 1); // Right button
+                wasmInstance.exports.setButton(128, 1); // A button
+                
+                log('✅ Buttons set (Right + A)');
+                
+                // Generate frame with button effects
+                testFrame();
+                
+            } catch (error) {
+                log(`❌ Button test failed: ${error.message}`, true);
+            }
+        }
+
+        function testRom() {
+            if (!wasmInstance) {
+                log('WASM not loaded', true);
+                return;
+            }
+            
+            try {
+                // Create a minimal NES ROM header
+                const nesHeader = new Uint8Array([
+                    0x4E, 0x45, 0x53, 0x1A, // "NES\x1A"
+                    0x01, // 1 PRG bank
+                    0x01, // 1 CHR bank  
+                    0x00, // Flags 6
+                    0x00, // Flags 7
+                    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 // Padding
+                ]);
+                
+                // Copy to WASM memory
+                const memory = wasmInstance.exports.memory;
+                const romPtr = 1024; // Use offset 1024 for ROM data
+                const romView = new Uint8Array(memory.buffer, romPtr, nesHeader.length);
+                romView.set(nesHeader);
+                
+                // Test ROM loading
+                const result = wasmInstance.exports.loadRom(romPtr, nesHeader.length);
+                
+                if (result) {
+                    log('✅ ROM loading test passed');
+                } else {
+                    log('❌ ROM loading test failed', true);
+                }
+                
+            } catch (error) {
+                log(`❌ ROM test failed: ${error.message}`, true);
+            }
+        }
+
+        // Load WASM when page loads
+        window.addEventListener('load', async () => {
+            const success = await loadWasm();
+            if (success) {
+                testInit();
+            }
+        });
+    </script>
+</body>
+</html>
