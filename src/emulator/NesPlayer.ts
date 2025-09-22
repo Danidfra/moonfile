@@ -6,12 +6,23 @@
 
 import { NesCore, PixelFormat } from './NesCore';
 
+// Debug logging flag - can be enabled/disabled easily
+let ENABLE_FRAME_DEBUG_LOGS = true;
+
+// Export function to control debug logging
+export function setFrameDebugLogging(enabled: boolean): void {
+  ENABLE_FRAME_DEBUG_LOGS = enabled;
+  console.log('[NesPlayer] Frame debug logging:', enabled ? 'ENABLED' : 'DISABLED');
+}
+
 export class NesPlayer {
   private ctx: CanvasRenderingContext2D;
   private imageData?: ImageData;
   private rafId: number | null = null;
   private isPlaying = false;
   private visibilityHandler?: () => void;
+  private frameCount = 0;
+  private debugInitialized = false;
 
   constructor(private core: NesCore, private canvas: HTMLCanvasElement) {
     console.log('[NesPlayer] Initializing player with canvas:', canvas.width, 'x', canvas.height);
@@ -24,6 +35,11 @@ export class NesPlayer {
 
     this.ctx = ctx;
     this.ctx.imageSmoothingEnabled = false; // Preserve pixel art
+
+    // Initial debug logging
+    if (ENABLE_FRAME_DEBUG_LOGS) {
+      this.logCanvasDebugInfo();
+    }
 
     // Handle page visibility changes (pause when tab is hidden)
     this.visibilityHandler = () => {
@@ -42,11 +58,133 @@ export class NesPlayer {
   }
 
   /**
+   * Log canvas and context debug information
+   */
+  private logCanvasDebugInfo(): void {
+    console.log('[NesPlayer] Canvas Debug Info:', {
+      canvasWidth: this.canvas.width,
+      canvasHeight: this.canvas.height,
+      canvasClientWidth: this.canvas.clientWidth,
+      canvasClientHeight: this.canvas.clientHeight,
+      contextType: this.ctx.constructor.name,
+      imageSmoothingEnabled: this.ctx.imageSmoothingEnabled,
+      globalAlpha: this.ctx.globalAlpha,
+      globalCompositeOperation: this.ctx.globalCompositeOperation
+    });
+
+    // Force disable image smoothing and log result
+    this.ctx.imageSmoothingEnabled = false;
+    console.log('[NesPlayer] Image smoothing forced to:', this.ctx.imageSmoothingEnabled);
+  }
+
+  /**
+   * Test canvas rendering with a solid red pixel
+   */
+  private testCanvasRendering(): void {
+    if (!ENABLE_FRAME_DEBUG_LOGS) return;
+
+    try {
+      // Create a 1x1 red pixel ImageData
+      const testPixel = new Uint8ClampedArray([255, 0, 0, 255]); // Red, opaque
+      const testImageData = new ImageData(testPixel, 1, 1);
+
+      // Draw test pixel at (100, 100)
+      this.ctx.putImageData(testImageData, 100, 100);
+
+      console.log('[NesPlayer] ✅ Test red pixel drawn at (100, 100)');
+
+      // Read back the pixel to verify it was written
+      const readBack = this.ctx.getImageData(100, 100, 1, 1);
+      console.log('[NesPlayer] Test pixel readback:', Array.from(readBack.data));
+
+    } catch (error) {
+      console.error('[NesPlayer] ❌ Test canvas rendering failed:', error);
+    }
+  }
+
+  /**
+   * Log frame buffer preview data
+   */
+  private logFrameBufferPreview(frameBuffer: Uint8Array): void {
+    if (!ENABLE_FRAME_DEBUG_LOGS) return;
+
+    console.log('[NesPlayer] Frame buffer preview (first 32 bytes):', Array.from(frameBuffer.slice(0, 32)));
+
+    // Log some sample pixels from different areas
+    const samples = [
+      { name: 'Top-left', offset: 0 },
+      { name: 'Top-right', offset: (255 * 4) },
+      { name: 'Center', offset: ((120 * 256) + 128) * 4 },
+      { name: 'Bottom-left', offset: (239 * 256) * 4 },
+      { name: 'Bottom-right', offset: ((239 * 256) + 255) * 4 }
+    ];
+
+    samples.forEach(sample => {
+      if (sample.offset + 3 < frameBuffer.length) {
+        const r = frameBuffer[sample.offset];
+        const g = frameBuffer[sample.offset + 1];
+        const b = frameBuffer[sample.offset + 2];
+        const a = frameBuffer[sample.offset + 3];
+        console.log(`[NesPlayer] ${sample.name} pixel: RGBA(${r}, ${g}, ${b}, ${a})`);
+      }
+    });
+
+    // Check for common issues
+    const allZero = frameBuffer.every(byte => byte === 0);
+    const allMax = frameBuffer.every(byte => byte === 255);
+    const hasVariation = new Set(frameBuffer).size > 1;
+
+    console.log('[NesPlayer] Frame buffer analysis:', {
+      allZero,
+      allMax,
+      hasVariation,
+      uniqueValues: new Set(frameBuffer.slice(0, 1000)).size // Sample first 1000 bytes
+    });
+  }
+
+  /**
+   * Verify ImageData creation and content
+   */
+  private verifyImageData(imageData: ImageData, sourceBuffer: Uint8Array): void {
+    if (!ENABLE_FRAME_DEBUG_LOGS) return;
+
+    console.log('[NesPlayer] ImageData verification:', {
+      width: imageData.width,
+      height: imageData.height,
+      dataLength: imageData.data.length,
+      sourceLength: sourceBuffer.length,
+      dataConstructor: imageData.data.constructor.name
+    });
+
+    // Check if data was copied correctly
+    const firstPixelSource = Array.from(sourceBuffer.slice(0, 4));
+    const firstPixelImageData = Array.from(imageData.data.slice(0, 4));
+
+    console.log('[NesPlayer] First pixel comparison:', {
+      source: firstPixelSource,
+      imageData: firstPixelImageData,
+      match: JSON.stringify(firstPixelSource) === JSON.stringify(firstPixelImageData)
+    });
+  }
+
+  /**
    * Render current frame to canvas
    */
   private blit(): void {
     try {
+      this.frameCount++;
+
+      // One-time debug initialization
+      if (ENABLE_FRAME_DEBUG_LOGS && !this.debugInitialized) {
+        this.testCanvasRendering();
+        this.debugInitialized = true;
+      }
+
       const { width, height, format } = this.core.getFrameSpec();
+
+      if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
+        console.log(`[NesPlayer] Frame ${this.frameCount} - Frame spec:`, { width, height, format });
+      }
 
       // Get frame buffer with validation
       let src: Uint8Array;
@@ -65,6 +203,11 @@ export class NesPlayer {
           value: src
         });
         return; // Skip this frame
+      }
+
+      // Debug logging for frame buffer
+      if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
+        this.logFrameBufferPreview(src);
       }
 
       // Calculate expected buffer size based on format
@@ -86,19 +229,68 @@ export class NesPlayer {
         }
       }
 
-      // Create or recreate ImageData if dimensions changed
-      if (!this.imageData || this.imageData.width !== width || this.imageData.height !== height) {
-        this.imageData = this.ctx.createImageData(width, height);
-        console.log('[NesPlayer] Created new ImageData:', width, 'x', height);
+      // Method 1: Try new ImageData constructor (preferred method)
+      let imageData: ImageData;
+      let conversionNeeded = false;
+
+      if (format === 'RGBA32' && src.length === expectedSize) {
+        try {
+          // Direct ImageData creation from frame buffer
+          imageData = new ImageData(new Uint8ClampedArray(src), width, height);
+
+          if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
+            console.log('[NesPlayer] ✅ Using direct ImageData constructor');
+            this.verifyImageData(imageData, src);
+          }
+        } catch (error) {
+          console.warn('[NesPlayer] Direct ImageData creation failed, falling back to manual method:', error);
+          conversionNeeded = true;
+        }
+      } else {
+        conversionNeeded = true;
       }
 
-      const dst = this.imageData.data; // Uint8ClampedArray (RGBA format)
+      // Method 2: Fallback to manual ImageData creation and conversion
+      if (conversionNeeded) {
+        // Create or recreate ImageData if dimensions changed
+        if (!this.imageData || this.imageData.width !== width || this.imageData.height !== height) {
+          this.imageData = this.ctx.createImageData(width, height);
+          if (ENABLE_FRAME_DEBUG_LOGS) {
+            console.log('[NesPlayer] Created new ImageData via context:', width, 'x', height);
+          }
+        }
 
-      // Convert source format to RGBA
-      this.convertToRGBA(src, dst, format);
+        const dst = this.imageData.data; // Uint8ClampedArray (RGBA format)
+
+        // Convert source format to RGBA
+        this.convertToRGBA(src, dst, format);
+        imageData = this.imageData;
+
+        if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
+          console.log('[NesPlayer] ✅ Using manual conversion method');
+          this.verifyImageData(imageData, src);
+        }
+      }
+
+      // Verify canvas state before drawing
+      if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
+        console.log('[NesPlayer] Pre-draw canvas state:', {
+          imageSmoothingEnabled: this.ctx.imageSmoothingEnabled,
+          globalAlpha: this.ctx.globalAlpha,
+          globalCompositeOperation: this.ctx.globalCompositeOperation
+        });
+      }
 
       // Draw to canvas
-      this.ctx.putImageData(this.imageData, 0, 0);
+      this.ctx.putImageData(imageData, 0, 0);
+
+      if (ENABLE_FRAME_DEBUG_LOGS && this.frameCount <= 3) {
+        console.log(`[NesPlayer] ✅ Frame ${this.frameCount} rendered to canvas`);
+
+        // Verify what was actually drawn by reading back a pixel
+        const readback = this.ctx.getImageData(128, 120, 1, 1); // Center pixel
+        console.log('[NesPlayer] Center pixel readback:', Array.from(readback.data));
+      }
 
     } catch (error) {
       console.error('[NesPlayer] Blit error:', error);

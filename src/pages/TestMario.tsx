@@ -4,7 +4,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Separator } from '@/components/ui/separator';
 import { UniversalWasmCore } from '@/emulator/cores/wasmAdapter';
-import { NesPlayer } from '@/emulator/NesPlayer';
+import { NesPlayer, setFrameDebugLogging } from '@/emulator/NesPlayer';
 import { NesCore, FrameSpec } from '@/emulator/NesCore';
 
 interface LogEntry {
@@ -62,12 +62,59 @@ export default function TestMario() {
   const [nesPlayer, setNesPlayer] = useState<NesPlayer | null>(null);
   const [romLoaded, setRomLoaded] = useState(false);
   const [pressedKeys, setPressedKeys] = useState<Set<string>>(new Set());
+  const [debugMode, setDebugMode] = useState(true);
 
   const addLog = useCallback((level: 'info' | 'error' | 'warning', message: string) => {
     const timestamp = new Date().toLocaleTimeString();
     setLogs(prev => [...prev, { timestamp, level, message }]);
     console.log(`[TestMario ${level.toUpperCase()}]`, message);
   }, []);
+
+  const logFrameBufferDebug = useCallback((wasmCore: UniversalWasmCore) => {
+    if (!debugMode) return;
+
+    try {
+      addLog('info', '🔍 Running frame buffer debug analysis...');
+
+      // Get frame buffer directly
+      const frameBuffer = wasmCore.getFrameBuffer();
+      const frameSpec = wasmCore.getFrameSpec();
+
+      addLog('info', `Frame buffer size: ${frameBuffer.length} bytes`);
+      addLog('info', `Frame spec: ${frameSpec.width}x${frameSpec.height}, format: ${frameSpec.format}`);
+
+      // Log first 16 bytes
+      const preview = Array.from(frameBuffer.slice(0, 16)).map(b => b.toString(16).padStart(2, '0')).join(' ');
+      addLog('info', `First 16 bytes (hex): ${preview}`);
+
+      // Check for patterns
+      const allSame = frameBuffer.every(b => b === frameBuffer[0]);
+      const allZero = frameBuffer.every(b => b === 0);
+      const allMax = frameBuffer.every(b => b === 255);
+
+      addLog('info', `Pattern analysis: allSame=${allSame}, allZero=${allZero}, allMax=${allMax}`);
+
+      // Sample some pixels
+      const samplePixels = [
+        { name: 'Top-left', idx: 0 },
+        { name: 'Center', idx: ((120 * 256) + 128) * 4 },
+        { name: 'Bottom-right', idx: ((239 * 256) + 255) * 4 }
+      ];
+
+      samplePixels.forEach(sample => {
+        if (sample.idx + 3 < frameBuffer.length) {
+          const r = frameBuffer[sample.idx];
+          const g = frameBuffer[sample.idx + 1];
+          const b = frameBuffer[sample.idx + 2];
+          const a = frameBuffer[sample.idx + 3];
+          addLog('info', `${sample.name}: RGBA(${r},${g},${b},${a})`);
+        }
+      });
+
+    } catch (error) {
+      addLog('error', `Frame buffer debug failed: ${error}`);
+    }
+  }, [debugMode, addLog]);
 
   const clearLogs = useCallback(() => {
     setLogs([]);
@@ -78,10 +125,10 @@ export default function TestMario() {
     try {
       addLog('info', 'Loading WASM core...');
       const core = await UniversalWasmCore.load('/wasm/fceux.wasm');
-      
+
       addLog('info', 'Initializing WASM core...');
       const initResult = await core.init();
-      
+
       if (!initResult) {
         throw new Error('WASM core initialization failed');
       }
@@ -100,7 +147,7 @@ export default function TestMario() {
   const loadRom = useCallback(async (core: UniversalWasmCore) => {
     try {
       addLog('info', 'Loading Super Mario Bros ROM...');
-      
+
       const response = await fetch('/roms/Super_mario_brothers.nes');
       if (!response.ok) {
         throw new Error(`Failed to fetch ROM: ${response.status} ${response.statusText}`);
@@ -108,7 +155,7 @@ export default function TestMario() {
 
       const romData = await response.arrayBuffer();
       const romBytes = new Uint8Array(romData);
-      
+
       addLog('info', `ROM loaded: ${romBytes.length} bytes`);
 
       // Validate NES header
@@ -131,7 +178,7 @@ export default function TestMario() {
 
       setRomLoaded(true);
       addLog('info', '✅ ROM loaded into emulator successfully');
-      
+
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       addLog('error', `❌ Failed to load ROM: ${errorMessage}`);
@@ -142,25 +189,25 @@ export default function TestMario() {
   // Initialize everything
   const initialize = useCallback(async () => {
     if (isLoading) return;
-    
+
     setIsLoading(true);
     clearLogs();
 
     try {
       // Load WASM core
       const core = await loadWasmCore();
-      
+
       // Load ROM
       await loadRom(core);
-      
+
       // Setup player if canvas is available
       if (canvasRef.current && core) {
         addLog('info', 'Setting up NES player...');
-        
+
         const coreAdapter = new WasmCoreAdapter(core);
         const player = new NesPlayer(coreAdapter, canvasRef.current);
         setNesPlayer(player);
-        
+
         addLog('info', '✅ NES player setup complete');
       }
 
@@ -187,8 +234,13 @@ export default function TestMario() {
       nesPlayer.play();
       setIsPlaying(true);
       addLog('info', 'Game started');
+
+      // Debug frame buffer after starting
+      if (debugMode && wasmCore) {
+        setTimeout(() => logFrameBufferDebug(wasmCore), 100);
+      }
     }
-  }, [nesPlayer, isPlaying, addLog]);
+  }, [nesPlayer, isPlaying, addLog, debugMode, wasmCore, logFrameBufferDebug]);
 
   const resetGame = useCallback(() => {
     if (!wasmCore) {
@@ -199,6 +251,43 @@ export default function TestMario() {
     wasmCore.reset();
     addLog('info', 'Game reset');
   }, [wasmCore, addLog]);
+
+  const testCanvas = useCallback(() => {
+    if (!canvasRef.current) {
+      addLog('error', 'Canvas not available');
+      return;
+    }
+
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) {
+      addLog('error', 'Cannot get 2D context');
+      return;
+    }
+
+    addLog('info', '🎨 Testing canvas with color pattern...');
+
+    // Create a test pattern
+    const width = 256;
+    const height = 240;
+    const testData = new Uint8ClampedArray(width * height * 4);
+
+    // Fill with a rainbow gradient pattern
+    for (let y = 0; y < height; y++) {
+      for (let x = 0; x < width; x++) {
+        const idx = (y * width + x) * 4;
+        testData[idx + 0] = (x * 255) / width;     // Red gradient
+        testData[idx + 1] = (y * 255) / height;   // Green gradient
+        testData[idx + 2] = 128;                   // Blue constant
+        testData[idx + 3] = 255;                   // Alpha opaque
+      }
+    }
+
+    const testImageData = new ImageData(testData, width, height);
+    ctx.putImageData(testImageData, 0, 0);
+
+    addLog('info', '✅ Test pattern drawn to canvas');
+  }, [addLog]);
 
   // Keyboard controls
   useEffect(() => {
@@ -297,8 +386,8 @@ export default function TestMario() {
                 }}
               />
             </div>
-            
-            <div className="flex gap-2 justify-center">
+
+            <div className="flex gap-2 justify-center flex-wrap">
               <Button
                 onClick={initialize}
                 disabled={isLoading}
@@ -306,7 +395,7 @@ export default function TestMario() {
               >
                 {isLoading ? 'Loading...' : 'Initialize'}
               </Button>
-              
+
               <Button
                 onClick={togglePlay}
                 disabled={!romLoaded}
@@ -314,7 +403,7 @@ export default function TestMario() {
               >
                 {isPlaying ? 'Pause' : 'Play'}
               </Button>
-              
+
               <Button
                 onClick={resetGame}
                 disabled={!wasmCore}
@@ -322,12 +411,51 @@ export default function TestMario() {
               >
                 Reset
               </Button>
+
+              <Button
+                onClick={() => wasmCore && logFrameBufferDebug(wasmCore)}
+                disabled={!wasmCore}
+                variant="secondary"
+                size="sm"
+              >
+                Debug Frame
+              </Button>
+
+              <Button
+                onClick={testCanvas}
+                variant="secondary"
+                size="sm"
+              >
+                Test Canvas
+              </Button>
+
+              <Button
+                onClick={() => {
+                  const newDebugMode = !debugMode;
+                  setDebugMode(newDebugMode);
+                  setFrameDebugLogging(newDebugMode);
+                  addLog('info', `Debug mode ${newDebugMode ? 'enabled' : 'disabled'}`);
+                }}
+                variant={debugMode ? "default" : "outline"}
+                size="sm"
+              >
+                Debug: {debugMode ? 'ON' : 'OFF'}
+              </Button>
             </div>
 
             <div className="text-sm text-muted-foreground space-y-1">
               <p><strong>Controls:</strong></p>
               <p>Arrow Keys: D-Pad | Enter: Start | Space: Select</p>
               <p>Z: B Button | X: A Button</p>
+
+              {canvasRef.current && (
+                <div className="mt-2 pt-2 border-t border-border">
+                  <p><strong>Canvas Info:</strong></p>
+                  <p>Size: {canvasRef.current.width}×{canvasRef.current.height} (logical)</p>
+                  <p>Display: {canvasRef.current.clientWidth}×{canvasRef.current.clientHeight} (CSS)</p>
+                  <p>Debug Mode: {debugMode ? '🟢 Enabled' : '🔴 Disabled'}</p>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -420,9 +548,9 @@ export default function TestMario() {
               </ul>
             </div>
           </div>
-          
+
           <Separator />
-          
+
           <div>
             <h4 className="font-medium mb-2">Test Purpose</h4>
             <p className="text-sm text-muted-foreground">
