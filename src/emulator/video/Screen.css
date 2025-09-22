@@ -1,0 +1,8 @@
+.Screen {
+  image-rendering: pixelated;
+  image-rendering: -moz-crisp-edges;
+  image-rendering: crisp-edges;
+  background: black;
+  display: block;
+  margin: 0 auto;
+}
