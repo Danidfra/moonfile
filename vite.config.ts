@@ -8,10 +8,16 @@ export default defineConfig(() => ({
   server: {
     host: "::",
     port: 8080,
+    fs: {
+      // Allow serving files from the public directory
+      allow: ['..']
+    }
   },
   plugins: [
     react(),
   ],
+  // Ensure WASM files are served with correct MIME type
+  assetsInclude: ['**/*.wasm'],
   build: {
     rollupOptions: {
       external: ['/lib/fceux/fceux-web.js'],

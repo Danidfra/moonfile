@@ -1,25 +1,74 @@
+/**
+ * Game Page
+ * 
+ * Displays and runs NES games from Nostr events (kind 31996).
+ * Handles ROM decoding, validation, emulator initialization, and game controls.
+ */
+
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useNostr } from '@nostrify/react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ArrowLeft, Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, RefreshCw } from 'lucide-react';
+
+// Import new emulator components
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { FCEUXWebAdapter } from '@/emulator/cores/fceuxWebAdapter';
 import { NesPlayer } from '@/emulator/NesPlayer';
-import { useRetroStore } from '@/emulator/state/retroStore';
-import type { NostrEvent } from '@/types/game';
+
+import type { NostrEvent } from '@nostrify/nostrify';
 
 type PlayerState = 'loading' | 'ready' | 'running' | 'paused' | 'error';
+
+interface GameMetadata {
+  id: string;
+  title: string;
+  summary?: string;
+  genres: string[];
+  modes: string[];
+  status?: string;
+  version?: string;
+  credits?: string;
+  platforms: string[];
+  assets: {
+    cover?: string;
+    icon?: string;
+    banner?: string;
+    screenshots: string[];
+  };
+}
+
+interface RomInfo {
+  size: number;
+  sha256: string;
+  header: {
+    mapper: number;
+    prgBanks: number;
+    chrBanks: number;
+  };
+}
 
 export default function GamePage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { nostr } = useNostr();
+  
+  // Canvas and emulator refs
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  
+  // Emulator state
   const [player, setPlayer] = useState<NesPlayer | null>(null);
   const [core, setCore] = useState<FCEUXWebAdapter | null>(null);
   const [romData, setRomData] = useState<Uint8Array | null>(null);
+  const [status, setStatus] = useState<PlayerState>('loading');
+  const [error, setError] = useState<string | null>(null);
+  
+  // Game data
+  const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
+  const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
+  
+  // UI state
   const [audioEnabled, setAudioEnabled] = useState(true);
   const [controls, setControls] = useState({
     right: false,
@@ -31,26 +80,18 @@ export default function GamePage() {
     b: false,
     a: false,
   });
-  const [gameMeta, setGameMeta] = useState<any>(null);
-  const [romInfo, setRomInfo] = useState<any>(null);
 
-  const { status, error, setStatus, setError, setRomInfo: setStoreRomInfo } = useRetroStore();
-
-  // Debug logging helper
-  const logDebug = (phase: string, data?: any) => {
-    if (localStorage.getItem('debug')?.includes('retro:*')) {
-      console.log(`[GamePage] ${phase}`, data || '');
-    }
-  };
-
-  // Fetch game event and decode ROM
+  /**
+   * Fetch game event and decode ROM
+   */
   useEffect(() => {
     const loadGameData = async () => {
       if (!nostr || !id) return;
 
       try {
-        logDebug('Fetching game event', { id });
+        console.log('[GamePage] Fetching game event with id:', id);
         setStatus('loading');
+        setError(null);
 
         // Fetch the kind:31996 event by d-tag
         const events = await nostr.query([{
@@ -62,36 +103,42 @@ export default function GamePage() {
         });
 
         if (events.length === 0) {
-          throw new Error('Game not found');
+          throw new Error(`Game with id "${id}" not found`);
         }
 
         const event = events[0] as NostrEvent;
-        logDebug('Event fetched', { id: event.id });
+        console.log('[GamePage] Event fetched successfully, id:', event.id);
 
-        // Parse game metadata
+        // Parse game metadata from event
         const meta = parseGameMetadata(event);
         setGameMeta(meta);
-        logDebug('Game metadata parsed', meta);
+        console.log('[GamePage] Game metadata parsed:', meta);
 
+        // Check encoding tag
+        const encodingTag = event.tags.find(tag => tag[0] === 'encoding');
+        const encoding = encodingTag?.[1];
+        
+        if (encoding !== 'base64') {
+          throw new Error(`Unsupported encoding: ${encoding || 'none'}. Expected base64.`);
+        }
+
+        console.log('[GamePage] Decoding base64 ROM from event content');
+        
         // Decode ROM from event content
-        logDebug('Decoding ROM', { contentLength: event.content.length });
         const romBytes = decodeBase64ToBytes(event.content);
-
-        // Validate ROM
-        logDebug('Validating ROM', { size: romBytes.length });
+        
+        console.log('[GamePage] Validating NES ROM');
+        
+        // Validate ROM format
         validateNESRom(romBytes);
-
+        
         // Parse header and compute hash
         const header = parseINesHeader(romBytes);
         const hash = await sha256(romBytes);
 
-        logDebug('ROM validated', {
-          header,
-          shortHash: hash.substring(0, 8),
-          size: romBytes.length
-        });
+        console.log('[GamePage] ROM validation passed');
 
-        const info = {
+        const info: RomInfo = {
           size: romBytes.length,
           sha256: hash,
           header: {
@@ -102,33 +149,44 @@ export default function GamePage() {
         };
 
         setRomInfo(info);
-        setStoreRomInfo(info);
         setRomData(romBytes);
         setStatus('ready');
 
+        console.log('[GamePage] ROM loaded and ready to start');
+
       } catch (err) {
-        logDebug('Error loading game', err);
+        console.error('[GamePage] Error loading game:', err);
         setError(err instanceof Error ? err.message : 'Failed to load game');
         setStatus('error');
       }
     };
 
     loadGameData();
-  }, [id, nostr, setStatus, setError, setStoreRomInfo]);
+  }, [id, nostr]);
 
-  // Initialize core and player on user gesture (Start button click)
+  /**
+   * Initialize emulator and start game (requires user gesture for audio)
+   */
   const handleStart = async () => {
-    if (!romData || !canvasRef.current) return;
+    if (!romData || !canvasRef.current) {
+      console.error('[GamePage] Cannot start: missing ROM data or canvas');
+      return;
+    }
 
     try {
-      logDebug('Starting emulator');
+      console.log('[GamePage] Starting emulator initialization');
       setStatus('loading');
+      setError(null);
 
-      // Lazy-load the core
+      // Initialize FCEUX core
       const fceuxCore = new FCEUXWebAdapter();
-      await fceuxCore.init();
+      const initSuccess = await fceuxCore.init();
 
-      logDebug('Core initialized');
+      if (!initSuccess) {
+        throw new Error('Failed to initialize emulator core');
+      }
+
+      console.log('[GamePage] Emulator core initialized');
       setCore(fceuxCore);
 
       // Load ROM into core
@@ -137,76 +195,159 @@ export default function GamePage() {
         throw new Error('Failed to load ROM into emulator');
       }
 
-      logDebug('ROM loaded into core');
+      console.log('[GamePage] ROM loaded into emulator core');
 
       // Create player with canvas
       const nesPlayer = new NesPlayer(fceuxCore, canvasRef.current);
       setPlayer(nesPlayer);
 
-      // Log frame spec for diagnostics
+      // Log frame specification for diagnostics
       const spec = fceuxCore.getFrameSpec();
       const buffer = fceuxCore.getFrameBuffer();
 
-      logDebug('Frame spec:', {
+      console.log('[GamePage] Frame specification:', {
         width: spec.width,
         height: spec.height,
         format: spec.format,
         bufferLength: buffer.length
       });
 
-      // Set running state on the core
+      // Start the game
       fceuxCore.setRunning(true);
-
-      // Start the player (which will start the RAF loop)
       nesPlayer.play();
       setStatus('running');
-      logDebug('Emulator started');
+
+      console.log('[GamePage] Emulator started successfully');
 
     } catch (err) {
-      logDebug('Error starting emulator', err);
+      console.error('[GamePage] Error starting emulator:', err);
       setError(err instanceof Error ? err.message : 'Failed to start emulator');
       setStatus('error');
     }
   };
 
-  // Cleanup on unmount
+  /**
+   * Toggle play/pause
+   */
+  const handlePlayPause = () => {
+    if (!player) return;
+
+    if (status === 'running') {
+      player.pause();
+      setStatus('paused');
+    } else if (status === 'paused') {
+      player.play();
+      setStatus('running');
+    }
+  };
+
+  /**
+   * Reset the game
+   */
+  const handleReset = () => {
+    if (!core) return;
+    
+    core.reset();
+    if (status === 'paused' && player) {
+      player.play();
+      setStatus('running');
+    }
+  };
+
+  /**
+   * Retry loading the game
+   */
+  const handleRetry = () => {
+    // Clean up current state
+    if (player) {
+      player.dispose();
+      setPlayer(null);
+    }
+    setCore(null);
+    setRomData(null);
+    setRomInfo(null);
+    setError(null);
+    
+    // Restart loading process
+    setStatus('loading');
+  };
+
+  /**
+   * Navigate back to games list
+   */
+  const handleBack = () => {
+    navigate('/games');
+  };
+
+  /**
+   * Toggle fullscreen
+   */
+  const handleFullscreen = () => {
+    if (canvasRef.current?.requestFullscreen) {
+      canvasRef.current.requestFullscreen();
+    }
+  };
+
+  /**
+   * Toggle audio
+   */
+  const handleToggleAudio = () => {
+    setAudioEnabled(!audioEnabled);
+    // TODO: Implement audio mute/unmute in core
+  };
+
+  /**
+   * Cleanup on unmount
+   */
   useEffect(() => {
     return () => {
       if (player) {
+        console.log('[GamePage] Cleaning up player on unmount');
         player.dispose();
-        logDebug('Player disposed');
       }
     };
   }, [player]);
 
-  // Keyboard controls
+  /**
+   * Keyboard controls
+   */
   useEffect(() => {
     const keyMap: Record<string, number> = {
-      'ArrowRight': 0,
-      'ArrowLeft': 1,
-      'ArrowDown': 2,
-      'ArrowUp': 3,
-      'Enter': 4,
-      'Shift': 5,
-      'z': 6,
-      'x': 7,
+      'arrowright': 0,  // Right
+      'arrowleft': 1,   // Left
+      'arrowdown': 2,   // Down
+      'arrowup': 3,     // Up
+      'enter': 4,       // Start
+      'shift': 5,       // Select
+      'z': 6,           // B
+      'x': 7,           // A
     };
 
     const handleKeyDown = (e: KeyboardEvent) => {
-      const button = keyMap[e.key.toLowerCase()];
-      if (button !== undefined && !controls[Object.keys(controls)[button] as keyof typeof controls]) {
-        setControls(prev => ({ ...prev, [Object.keys(controls)[button]]: true }));
-        core?.setButton(button, true);
-        e.preventDefault();
+      const key = e.key.toLowerCase();
+      const button = keyMap[key];
+      
+      if (button !== undefined && core) {
+        const controlKey = Object.keys(controls)[button] as keyof typeof controls;
+        if (!controls[controlKey]) {
+          setControls(prev => ({ ...prev, [controlKey]: true }));
+          core.setButton(button, true);
+          e.preventDefault();
+        }
       }
     };
 
     const handleKeyUp = (e: KeyboardEvent) => {
-      const button = keyMap[e.key.toLowerCase()];
-      if (button !== undefined && controls[Object.keys(controls)[button] as keyof typeof controls]) {
-        setControls(prev => ({ ...prev, [Object.keys(controls)[button]]: false }));
-        core?.setButton(button, false);
-        e.preventDefault();
+      const key = e.key.toLowerCase();
+      const button = keyMap[key];
+      
+      if (button !== undefined && core) {
+        const controlKey = Object.keys(controls)[button] as keyof typeof controls;
+        if (controls[controlKey]) {
+          setControls(prev => ({ ...prev, [controlKey]: false }));
+          core.setButton(button, false);
+          e.preventDefault();
+        }
       }
     };
 
@@ -218,51 +359,6 @@ export default function GamePage() {
       window.removeEventListener('keyup', handleKeyUp);
     };
   }, [controls, core]);
-
-  const handlePlayPause = () => {
-    if (!player) return;
-
-    if (status === 'running') {
-      player.pause();
-      setStatus('paused');
-    } else {
-      player.play();
-      setStatus('running');
-    }
-  };
-
-  const handleReset = () => {
-    core?.reset();
-    if (status === 'paused') {
-      player?.play();
-      setStatus('running');
-    }
-  };
-
-  const handleRetry = () => {
-    // Reset and try again
-    setError(null);
-    setStatus('loading');
-    setPlayer(null);
-    setCore(null);
-    setRomData(null);
-    setRomInfo(null);
-    setStoreRomInfo(null);
-  };
-
-  const handleBack = () => {
-    navigate('/games');
-  };
-
-  const handleFullscreen = () => {
-    if (canvasRef.current?.requestFullscreen) {
-      canvasRef.current.requestFullscreen();
-    }
-  };
-
-  const handleToggleAudio = () => {
-    setAudioEnabled(!audioEnabled);
-  };
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -320,9 +416,8 @@ export default function GamePage() {
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-0">
                   <div className="relative bg-black flex items-center justify-center">
-                    {/* Canvas container with proper aspect ratio and max height */}
-                    <div className="mx-auto w-full max-w-3xl p-3">
-                      <div className="relative w-full aspect-[256/240] max-h-[80vh]">
+                    {/* Canvas container with proper aspect ratio */}
+                    <div className="relative w-full aspect-[256/240] max-w-4xl mx-auto">
                       <canvas
                         ref={canvasRef}
                         width={256}
@@ -383,14 +478,13 @@ export default function GamePage() {
                           </div>
                         </div>
                       )}
-                      </div>
                     </div>
                   </div>
                 </CardContent>
               </Card>
 
               {/* Control bar */}
-              {status === 'running' || status === 'paused' ? (
+              {(status === 'running' || status === 'paused') && (
                 <Card className="border-gray-800 bg-gray-900">
                   <CardContent className="p-4">
                     <div className="flex items-center justify-center gap-4">
@@ -420,7 +514,7 @@ export default function GamePage() {
                     </div>
                   </CardContent>
                 </Card>
-              ) : null}
+              )}
 
               {/* Keyboard controls hint */}
               <Card className="border-gray-800 bg-gray-900">
@@ -522,8 +616,10 @@ export default function GamePage() {
   );
 }
 
-// Helper function to parse game metadata from Nostr event
-function parseGameMetadata(event: NostrEvent) {
+/**
+ * Parse game metadata from Nostr event
+ */
+function parseGameMetadata(event: NostrEvent): GameMetadata {
   const getTagValue = (tagName: string): string | undefined => {
     const tag = event.tags.find(t => t[0] === tagName);
     return tag?.[1];

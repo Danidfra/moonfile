@@ -1,137 +1,253 @@
+/**
+ * NES Player
+ * 
+ * Manages the game loop, rendering frames to canvas, handling pause/resume and cleanup.
+ */
+
 import { NesCore, FrameSpec, PixelFormat } from './NesCore';
 
 export class NesPlayer {
   private ctx: CanvasRenderingContext2D;
   private imageData?: ImageData;
   private rafId: number | null = null;
+  private isPlaying = false;
   private visibilityHandler?: () => void;
 
   constructor(private core: NesCore, private canvas: HTMLCanvasElement) {
+    console.log('[NesPlayer] Initializing player with canvas:', canvas.width, 'x', canvas.height);
+
+    // Get 2D rendering context
     const ctx = canvas.getContext('2d', { alpha: false });
-    if (!ctx) throw new Error('2D context unavailable');
+    if (!ctx) {
+      throw new Error('Failed to get 2D rendering context from canvas');
+    }
 
     this.ctx = ctx;
-    this.ctx.imageSmoothingEnabled = false;
+    this.ctx.imageSmoothingEnabled = false; // Preserve pixel art
 
-    // Handle visibility changes
+    // Handle page visibility changes (pause when tab is hidden)
     this.visibilityHandler = () => {
-      if (document.hidden) {
+      if (document.hidden && this.isPlaying) {
+        console.log('[NesPlayer] Page hidden, pausing emulator');
         this.pause();
-      } else {
+      } else if (!document.hidden && !this.isPlaying) {
+        console.log('[NesPlayer] Page visible, resuming emulator');
         this.play();
       }
     };
 
     document.addEventListener('visibilitychange', this.visibilityHandler);
+    
+    console.log('[NesPlayer] Player initialized successfully');
   }
 
-  private blit() {
-    const { width, height, format } = this.core.getFrameSpec();
-    const src = this.core.getFrameBuffer();
+  /**
+   * Render current frame to canvas
+   */
+  private blit(): void {
+    try {
+      const { width, height, format } = this.core.getFrameSpec();
+      const src = this.core.getFrameBuffer();
 
-    // Guard against wrong lengths
-    const expected =
-      format === 'RGBA32' ? width * height * 4 :
-      format === 'RGB24'  ? width * height * 3 :
-      format === 'INDEXED8' ? width * height :
-      -1;
+      // Calculate expected buffer size based on format
+      const expectedSize = this.calculateExpectedBufferSize(width, height, format);
 
-    if (src.length !== expected) {
-      console.error('[NesPlayer] Unexpected frame length', { format, got: src.length, expected });
-      return; // skip drawing this frame
-    }
-
-    // Create/recreate ImageData if dimensions changed
-    if (!this.imageData || this.imageData.width !== width || this.imageData.height !== height) {
-      this.imageData = this.ctx.createImageData(width, height);
-    }
-
-    const dst = this.imageData.data; // Uint8ClampedArray
-
-    if (format === 'RGBA32') {
-      // 256*240*4 = 245,760
-      dst.set(src); // fast path
-    } else if (format === 'RGB24') {
-      // 256*240*3 = 184,320 → expand to RGBA (alpha 255)
-      let si = 0, di = 0;
-      while (si < src.length) {
-        dst[di++] = src[si++]; // R
-        dst[di++] = src[si++]; // G
-        dst[di++] = src[si++]; // B
-        dst[di++] = 255;       // A
+      if (src.length !== expectedSize) {
+        console.error('[NesPlayer] Frame buffer size mismatch:', {
+          format,
+          expected: expectedSize,
+          actual: src.length,
+          dimensions: `${width}x${height}`
+        });
+        return; // Skip this frame
       }
-    } else if (format === 'INDEXED8') {
-      // 256*240 = 61,440 → expand using the core palette
-      const pal = this.core.getPalette?.();
-      if (!pal) throw new Error('INDEXED8 without palette');
 
-      // Accept palette either as Uint32 RGBA or Uint8[256*4]
-      const useU32 = pal instanceof Uint32Array;
-      let di = 0;
-      for (let i = 0; i < src.length; i++) {
-        const idx = src[i] & 0xff;
-        if (useU32) {
-          const rgba = pal[idx];     // 0xAABBGGRR or 0xRRGGBBAA depending on core
-          // Assume little-endian RGBA: R at byte 0. If colors look swapped, swap order below.
-          dst[di++] =  rgba        & 0xff;       // R
-          dst[di++] = (rgba >>> 8) & 0xff;       // G
-          dst[di++] = (rgba >>>16) & 0xff;       // B
-          dst[di++] = (rgba >>>24) & 0xff;       // A
-        } else {
-          const base = idx * 4;
-          dst[di++] = pal[base + 0];  // R
-          dst[di++] = pal[base + 1];  // G
-          dst[di++] = pal[base + 2];  // B
-          dst[di++] = pal[base + 3] ?? 255; // A
+      // Create or recreate ImageData if dimensions changed
+      if (!this.imageData || this.imageData.width !== width || this.imageData.height !== height) {
+        this.imageData = this.ctx.createImageData(width, height);
+        console.log('[NesPlayer] Created new ImageData:', width, 'x', height);
+      }
+
+      const dst = this.imageData.data; // Uint8ClampedArray (RGBA format)
+
+      // Convert source format to RGBA
+      this.convertToRGBA(src, dst, format);
+
+      // Draw to canvas
+      this.ctx.putImageData(this.imageData, 0, 0);
+
+    } catch (error) {
+      console.error('[NesPlayer] Blit error:', error);
+    }
+  }
+
+  /**
+   * Calculate expected buffer size for given format and dimensions
+   */
+  private calculateExpectedBufferSize(width: number, height: number, format: PixelFormat): number {
+    switch (format) {
+      case 'RGBA32':
+        return width * height * 4;
+      case 'RGB24':
+        return width * height * 3;
+      case 'INDEXED8':
+        return width * height;
+      default:
+        throw new Error(`Unsupported pixel format: ${format}`);
+    }
+  }
+
+  /**
+   * Convert source buffer to RGBA format
+   */
+  private convertToRGBA(src: Uint8Array, dst: Uint8ClampedArray, format: PixelFormat): void {
+    switch (format) {
+      case 'RGBA32':
+        // Direct copy for RGBA32
+        dst.set(src);
+        break;
+
+      case 'RGB24':
+        // Convert RGB24 to RGBA32 (add alpha channel)
+        let srcIndex = 0;
+        let dstIndex = 0;
+        while (srcIndex < src.length) {
+          dst[dstIndex++] = src[srcIndex++]; // R
+          dst[dstIndex++] = src[srcIndex++]; // G
+          dst[dstIndex++] = src[srcIndex++]; // B
+          dst[dstIndex++] = 255;             // A (opaque)
         }
-      }
-    } else {
-      throw new Error(`Unsupported frame format: ${format}`);
-    }
+        break;
 
-    this.ctx.putImageData(this.imageData, 0, 0);
+      case 'INDEXED8':
+        // Convert indexed color using palette
+        const palette = this.core.getPalette?.();
+        if (!palette) {
+          throw new Error('INDEXED8 format requires palette from core');
+        }
+
+        this.convertIndexedToRGBA(src, dst, palette);
+        break;
+
+      default:
+        throw new Error(`Unsupported pixel format: ${format}`);
+    }
   }
 
-  play() {
-    if (this.rafId !== null) return; // Already playing
+  /**
+   * Convert indexed color data to RGBA using palette
+   */
+  private convertIndexedToRGBA(
+    src: Uint8Array, 
+    dst: Uint8ClampedArray, 
+    palette: Uint8Array | Uint32Array
+  ): void {
+    const isUint32Palette = palette instanceof Uint32Array;
+    let dstIndex = 0;
 
+    for (let i = 0; i < src.length; i++) {
+      const colorIndex = src[i] & 0xFF;
+
+      if (isUint32Palette) {
+        // Uint32Array palette (packed RGBA)
+        const rgba = palette[colorIndex];
+        // Assume little-endian RGBA format
+        dst[dstIndex++] = (rgba >>> 0) & 0xFF;  // R
+        dst[dstIndex++] = (rgba >>> 8) & 0xFF;  // G
+        dst[dstIndex++] = (rgba >>> 16) & 0xFF; // B
+        dst[dstIndex++] = (rgba >>> 24) & 0xFF; // A
+      } else {
+        // Uint8Array palette (separate RGBA bytes)
+        const baseIndex = colorIndex * 4;
+        dst[dstIndex++] = palette[baseIndex + 0] || 0;     // R
+        dst[dstIndex++] = palette[baseIndex + 1] || 0;     // G
+        dst[dstIndex++] = palette[baseIndex + 2] || 0;     // B
+        dst[dstIndex++] = palette[baseIndex + 3] || 255;   // A
+      }
+    }
+  }
+
+  /**
+   * Start the game loop
+   */
+  play(): void {
+    if (this.rafId !== null) {
+      console.log('[NesPlayer] Already playing, ignoring play() call');
+      return;
+    }
+
+    console.log('[NesPlayer] Starting game loop');
+    this.isPlaying = true;
     this.core.setRunning(true);
 
-    const loop = () => {
-      this.core.frame();
-      this.blit();
-      this.rafId = requestAnimationFrame(loop);
+    const gameLoop = () => {
+      if (!this.isPlaying) {
+        return; // Exit loop if stopped
+      }
+
+      try {
+        // Advance emulator by one frame
+        this.core.frame();
+        
+        // Render frame to canvas
+        this.blit();
+        
+        // Schedule next frame
+        this.rafId = requestAnimationFrame(gameLoop);
+      } catch (error) {
+        console.error('[NesPlayer] Game loop error:', error);
+        this.pause(); // Stop on error
+      }
     };
 
-    this.rafId = requestAnimationFrame(loop);
-
-    if (localStorage.getItem('debug')?.includes('retro:*')) {
-      console.log('[NesPlayer] Started game loop');
-    }
+    // Start the loop
+    this.rafId = requestAnimationFrame(gameLoop);
   }
 
-  pause() {
+  /**
+   * Pause the game loop
+   */
+  pause(): void {
     if (this.rafId !== null) {
+      console.log('[NesPlayer] Pausing game loop');
       cancelAnimationFrame(this.rafId);
       this.rafId = null;
-      this.core.setRunning(false);
-
-      if (localStorage.getItem('debug')?.includes('retro:*')) {
-        console.log('[NesPlayer] Paused game loop');
-      }
     }
+
+    this.isPlaying = false;
+    this.core.setRunning(false);
   }
 
-  dispose() {
+  /**
+   * Check if player is currently playing
+   */
+  isRunning(): boolean {
+    return this.isPlaying;
+  }
+
+  /**
+   * Clean up resources and stop the player
+   */
+  dispose(): void {
+    console.log('[NesPlayer] Disposing player');
+
+    // Stop the game loop
     this.pause();
 
+    // Remove event listeners
     if (this.visibilityHandler) {
       document.removeEventListener('visibilitychange', this.visibilityHandler);
       this.visibilityHandler = undefined;
     }
 
-    if (localStorage.getItem('debug')?.includes('retro:*')) {
-      console.log('[NesPlayer] Disposed');
+    // Clear canvas
+    if (this.ctx) {
+      this.ctx.clearRect(0, 0, this.canvas.width, this.canvas.height);
     }
+
+    // Clear image data
+    this.imageData = undefined;
+
+    console.log('[NesPlayer] Player disposed successfully');
   }
 }
