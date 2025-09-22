@@ -14,6 +14,7 @@ import { ArrowLeft, Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, RefreshC
 
 // Import new emulator components
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
+import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
 import { FCEUXWebAdapter } from '@/emulator/cores/fceuxWebAdapter';
 import { NesPlayer } from '@/emulator/NesPlayer';
 
@@ -132,6 +133,22 @@ export default function GamePage() {
         // Validate ROM format
         validateNESRom(romBytes);
 
+        // Perform detailed ROM analysis
+        console.log('[GamePage] Performing detailed ROM analysis...');
+        const romAnalysis = analyzeRom(romBytes);
+        const recommendations = generateRecommendations(romAnalysis);
+        const compatCheck = quickCompatibilityCheck(romBytes);
+
+        console.log('[GamePage] ROM analysis complete:', {
+          compatible: compatCheck.compatible,
+          reason: compatCheck.reason,
+          recommendations
+        });
+
+        if (!compatCheck.compatible) {
+          console.warn('[GamePage] ROM compatibility warning:', compatCheck.reason);
+        }
+
         // Parse header and compute hash
         const header = parseINesHeader(romBytes);
         const hash = await sha256(romBytes);
@@ -190,12 +207,37 @@ export default function GamePage() {
       setCore(fceuxCore);
 
       // Load ROM into core
+      console.log('[GamePage] Attempting to load ROM into emulator core...');
       const romLoaded = await fceuxCore.loadRom(romData);
       if (!romLoaded) {
-        throw new Error('Failed to load ROM into emulator');
+        // Provide detailed error information
+        console.error('[GamePage] ROM loading failed - analyzing cause...');
+
+        // Re-analyze the ROM for debugging
+        const failureAnalysis = analyzeRom(romData);
+        const recommendations = generateRecommendations(failureAnalysis);
+
+        console.error('[GamePage] ROM loading failure analysis:', {
+          mapper: failureAnalysis.mapperInfo.name,
+          complexity: failureAnalysis.mapperInfo.complexity,
+          chrBanks: failureAnalysis.header.chrBanks,
+          size: failureAnalysis.size,
+          recommendations
+        });
+
+        // Create detailed error message
+        const mapperInfo = `${failureAnalysis.mapperInfo.name} (${failureAnalysis.header.mapper})`;
+        const chrInfo = failureAnalysis.header.chrBanks === 0 ? 'CHR RAM' : `${failureAnalysis.header.chrBanks} CHR banks`;
+
+        throw new Error(
+          `Failed to load ROM into emulator. ` +
+          `ROM details: ${mapperInfo}, ${failureAnalysis.header.prgBanks} PRG banks, ${chrInfo}. ` +
+          `This may be due to: ${failureAnalysis.mapperInfo.commonIssues.join(', ')}. ` +
+          `Recommendations: ${recommendations.join(', ')}`
+        );
       }
 
-      console.log('[GamePage] ROM loaded into emulator core');
+      console.log('[GamePage] ✅ ROM loaded into emulator core successfully');
 
       // Create player with canvas
       const nesPlayer = new NesPlayer(fceuxCore, canvasRef.current);
@@ -452,7 +494,7 @@ export default function GamePage() {
                               {romInfo && (
                                 <div className="text-gray-400 text-xs mt-2 space-y-1">
                                   <p>ROM: {romInfo.header.mapper} mapper, {romInfo.header.prgBanks}PRG, {romInfo.header.chrBanks}CHR</p>
-                                  <p className="text-yellow-400">Note: Using demo WASM core (826 bytes). For real games, a full emulator core (>100KB) is needed.</p>
+                                  <p className="text-yellow-400">Note: Using demo WASM core (826 bytes). For real games, a full emulator core (&gt;100KB) is needed.</p>
                                 </div>
                               )}
                             </CardContent>

@@ -115,23 +115,89 @@ export class FCEUXWebAdapter implements NesCore {
         throw new Error('Invalid NES header magic bytes');
       }
 
-      // Extract ROM info for logging
+      // Extract detailed ROM info for logging
       const prgBanks = rom[4];
       const chrBanks = rom[5];
-      const mapper = ((rom[6] >> 4) | (rom[7] & 0xF0));
+      const flags6 = rom[6];
+      const flags7 = rom[7];
+      const mapper = ((flags6 >> 4) | (flags7 & 0xF0));
+      const mirroring = flags6 & 0x01;
+      const hasBattery = (flags6 & 0x02) !== 0;
+      const hasTrainer = (flags6 & 0x04) !== 0;
+      const fourScreen = (flags6 & 0x08) !== 0;
 
-      console.log('[FCEUXWebAdapter] ROM info:', {
-        size: rom.length,
+      // Calculate expected ROM size
+      let expectedSize = 16; // Header
+      if (hasTrainer) expectedSize += 512; // Trainer
+      expectedSize += prgBanks * 16384; // PRG-ROM
+      expectedSize += chrBanks * 8192;  // CHR-ROM
+
+      console.log('[FCEUXWebAdapter] Detailed ROM analysis:', {
+        totalSize: rom.length,
+        expectedSize,
         prgBanks,
         chrBanks,
-        mapper
+        mapper,
+        mirroring: mirroring ? 'vertical' : 'horizontal',
+        hasBattery,
+        hasTrainer,
+        fourScreen,
+        flags6: '0x' + flags6.toString(16).padStart(2, '0'),
+        flags7: '0x' + flags7.toString(16).padStart(2, '0')
       });
 
-      // Load ROM into core
-      const success = this.core.loadRom(rom);
+      // Check for common issues
+      if (rom.length !== expectedSize) {
+        console.warn('[FCEUXWebAdapter] ROM size mismatch:', {
+          actual: rom.length,
+          expected: expectedSize,
+          difference: rom.length - expectedSize
+        });
+      }
+
+      if (chrBanks === 0) {
+        console.log('[FCEUXWebAdapter] ROM uses CHR RAM (0 CHR banks)');
+      }
+
+      if (mapper > 4) {
+        console.warn('[FCEUXWebAdapter] Advanced mapper detected:', mapper, '- may not be supported by simple cores');
+      }
+
+      // Check WASM memory constraints
+      if (this.wasmInstance && this.wasmInstance.exports.memory) {
+        const memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
+        const memorySize = memory.buffer.byteLength;
+        console.log('[FCEUXWebAdapter] WASM memory size:', memorySize, 'bytes');
+
+        if (rom.length > memorySize / 4) { // Conservative check
+          console.warn('[FCEUXWebAdapter] ROM may be too large for WASM memory:', {
+            romSize: rom.length,
+            memorySize,
+            ratio: rom.length / memorySize
+          });
+        }
+      }
+
+      // Try to load ROM into core
+      console.log('[FCEUXWebAdapter] Calling WASM loadRom() function...');
+
+      // For WASM cores that expect memory pointers, we may need to copy the ROM to WASM memory first
+      let success;
+      if (typeof this.core.loadRom === 'function') {
+        // Check if loadRom expects a pointer + size or direct Uint8Array
+        if (this.wasmInstance && this.wasmInstance.exports.memory) {
+          // Copy ROM to WASM memory and pass pointer
+          success = this.loadRomViaMemory(rom);
+        } else {
+          // Try direct call with Uint8Array
+          success = this.core.loadRom(rom, rom.length);
+        }
+      } else {
+        throw new Error('loadRom function not available in WASM core');
+      }
 
       if (success) {
-        console.log('[FCEUXWebAdapter] ROM loaded successfully');
+        console.log('[FCEUXWebAdapter] ✅ ROM loaded successfully into WASM core');
 
         // Log updated frame spec after ROM load
         const spec = this.getFrameSpec();
@@ -154,13 +220,56 @@ export class FCEUXWebAdapter implements NesCore {
           }
         }
       } else {
-        console.error('[FCEUXWebAdapter] ROM loading failed');
+        console.error('[FCEUXWebAdapter] ❌ ROM loading failed - WASM core rejected the ROM');
+        console.error('[FCEUXWebAdapter] This could be due to:');
+        console.error('  - Unsupported mapper:', mapper);
+        console.error('  - CHR RAM handling (0 CHR banks)');
+        console.error('  - ROM size constraints in WASM core');
+        console.error('  - Memory allocation failure');
+        console.error('  - WASM core validation logic');
       }
 
       return !!success;
 
     } catch (error) {
       console.error('[FCEUXWebAdapter] ROM loading error:', error);
+      console.error('[FCEUXWebAdapter] Error details:', {
+        name: error instanceof Error ? error.name : 'Unknown',
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined
+      });
+      return false;
+    }
+  }
+
+  /**
+   * Load ROM via WASM memory (for cores that expect pointers)
+   */
+  private loadRomViaMemory(rom: Uint8Array): boolean {
+    try {
+      const memory = this.wasmInstance!.exports.memory as WebAssembly.Memory;
+      const memoryArray = new Uint8Array(memory.buffer);
+
+      // Find a suitable location in WASM memory (after our frame buffer)
+      const romOffset = 100 * 1024; // Start at 100KB offset
+
+      if (romOffset + rom.length > memory.buffer.byteLength) {
+        console.error('[FCEUXWebAdapter] ROM too large for WASM memory:', {
+          romSize: rom.length,
+          availableSpace: memory.buffer.byteLength - romOffset
+        });
+        return false;
+      }
+
+      // Copy ROM data to WASM memory
+      memoryArray.set(rom, romOffset);
+      console.log('[FCEUXWebAdapter] ROM copied to WASM memory at offset:', romOffset);
+
+      // Call loadRom with pointer and size
+      return this.core.loadRom(romOffset, rom.length);
+
+    } catch (error) {
+      console.error('[FCEUXWebAdapter] Failed to load ROM via memory:', error);
       return false;
     }
   }
