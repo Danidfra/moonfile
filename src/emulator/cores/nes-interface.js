@@ -1,28 +1,20 @@
-export async function initNESCore(wasmURL = '/wasm/fceux.wasm', imports = {}) {
+export async function initNESCore(url = '/wasm/fceux.wasm', imports = {}) {
   console.log('[NES Interface] Initializing NES WebAssembly...');
+  const resp = await fetch(url, { credentials: 'same-origin' });
+  if (!resp.ok) throw new Error(`Failed to fetch WASM: ${resp.status} ${resp.statusText}`);
 
-  // Ensure MIME is correct and use streaming when possible
-  let instance, module;
-  const resp = await fetch(wasmURL, { credentials: 'same-origin' });
+  const ct = (resp.headers.get('content-type') || '').toLowerCase();
+  const canStream = ('instantiateStreaming' in WebAssembly) && ct.includes('application/wasm');
 
-  if (!resp.ok) {
-    throw new Error(`Failed to fetch WASM: ${resp.status} ${resp.statusText}`);
-  }
-
-  const contentType = resp.headers.get('content-type') || '';
-  const canStream = 'instantiateStreaming' in WebAssembly && contentType.includes('application/wasm');
-
-  if (canStream) {
-    const result = await WebAssembly.instantiateStreaming(resp, imports);
-    module = result.module;
-    instance = result.instance;
-  } else {
+  try {
+    if (canStream) {
+      return await WebAssembly.instantiateStreaming(resp, imports);
+    }
     const bytes = await resp.arrayBuffer();
-    const result = await WebAssembly.instantiate(bytes, imports);
-    module = result.module;
-    instance = result.instance;
+    return await WebAssembly.instantiate(bytes, imports);
+  } catch (err) {
+    console.error('[NES Interface] WASM init failed:', err);
+    // Re-throw a clear error so UI can show a friendly message
+    throw new Error('WASM blocked by Content Security Policy. Ensure script-src includes "wasm-unsafe-eval".');
   }
-
-  console.log('[NES Interface] NES core initialized');
-  return { module, instance };
 }

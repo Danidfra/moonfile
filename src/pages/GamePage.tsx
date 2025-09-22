@@ -321,7 +321,7 @@ export default function GamePage() {
                 <CardContent className="p-0">
                   <div className="relative bg-black flex items-center justify-center">
                     {/* Canvas container with proper aspect ratio and max height */}
-                    <div className="mx-auto w-full max-w-3xl p-2">
+                    <div className="mx-auto w-full max-w-3xl p-3">
                       <div className="relative w-full aspect-[256/240] max-h-[80vh]">
                       <canvas
                         ref={canvasRef}

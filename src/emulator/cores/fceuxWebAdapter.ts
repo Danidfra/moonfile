@@ -12,10 +12,10 @@ export class FCEUXWebAdapter implements NesCore {
         console.log('[FCEUXWebAdapter] Initializing FCEUX WebAssembly core...');
       }
 
-      // Create WebAssembly memory for the core
+      // Create WebAssembly memory for core
       const memory = new WebAssembly.Memory({ initial: 256, maximum: 256 });
-
-      // Provide imports as needed by the core
+      
+      // Provide imports as needed by core
       const imports = {
         env: {
           memory: memory,
@@ -25,7 +25,7 @@ export class FCEUXWebAdapter implements NesCore {
         }
       };
 
-      // Use the CSP-safe loader
+      // Use CSP-safe loader
       const { instance } = await initNESCore('/wasm/fceux.wasm', imports);
       this.wasmInstance = instance;
 
@@ -33,16 +33,19 @@ export class FCEUXWebAdapter implements NesCore {
       const ex = instance.exports as any;
 
       // Sanity checks
-      const requiredFunctions = ['init', 'loadRom', 'frame', 'getFrameBuffer', 'getFrameSpec'];
+      const requiredFunctions = ['init', 'loadRom', 'frame', 'reset', 'setButton', 'getFrameBuffer', 'getPalette', 'setRunning'];
       const missingFunctions = requiredFunctions.filter(fn => typeof ex[fn] !== 'function');
-
+      
       if (missingFunctions.length > 0) {
-        throw new Error(`WASM exports missing: ${missingFunctions.join(', ')}`);
+        // Log available exports for debugging
+        const availableExports = Object.keys(ex).filter(key => typeof ex[key] === 'function');
+        console.error('[FCEUXWebAdapter] Available exports:', availableExports);
+        throw new Error(`WASM exports missing: ${missingFunctions.join(', ')}. Available: ${availableExports.join(', ')}`);
       }
 
       this.core = ex;
-
-      // Initialize the core
+      
+      // Initialize core
       const initResult = this.core.init();
       if (!initResult) {
         throw new Error('WASM core initialization failed');
@@ -55,7 +58,7 @@ export class FCEUXWebAdapter implements NesCore {
 
       if (localStorage.getItem('debug')?.includes('retro:*')) {
         console.log('[FCEUXWebAdapter] Core initialized successfully');
-
+        
         // Log frame spec for diagnostics
         const spec = this.getFrameSpec();
         const buffer = this.getFrameBuffer();
@@ -66,12 +69,21 @@ export class FCEUXWebAdapter implements NesCore {
           bufferLength: buffer.length
         });
 
-        // Log CSP diagnostics
+        // Log CSP diagnostics and WASM response headers
         const cspMeta = document.querySelector('meta[http-equiv="Content-Security-Policy"]');
-        console.log('[FCEUXWebAdapter] CSP diagnostics:', {
-          cspMeta: cspMeta?.getAttribute('content') || 'none',
-          currentScript: (document.currentScript as HTMLScriptElement)?.src || 'none'
-        });
+        console.log('[FCEUXWebAdapter] Effective CSP:', cspMeta?.getAttribute('content') || 'none');
+        
+        // Log WASM response headers for verification
+        try {
+          const wasmResponse = await fetch('/wasm/fceux.wasm', { method: 'HEAD' });
+          console.log('[FCEUXWebAdapter] WASM Response Headers:', {
+            status: wasmResponse.status,
+            contentType: wasmResponse.headers.get('content-type'),
+            contentLength: wasmResponse.headers.get('content-length')
+          });
+        } catch (error) {
+          console.warn('[FCEUXWebAdapter] Could not fetch WASM headers:', error);
+        }
       }
 
       return true;
