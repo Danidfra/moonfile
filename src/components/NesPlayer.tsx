@@ -1,7 +1,7 @@
 /**
  * NES Player Component
  * 
- * React component that uses the jsnes-based Emulator to play NES games.
+ * React component that uses jsnes-based Emulator to play NES games.
  * Loads ROM data and provides play/pause controls.
  */
 
@@ -10,6 +10,7 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import Emulator from '@/emulator/Emulator';
+import { loadBinary } from '@/emulator/utils/errorUtils';
 
 interface NesPlayerProps {
   romPath: string;
@@ -25,6 +26,43 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   const [error, setError] = useState<string | null>(null);
   const [emulatorKey, setEmulatorKey] = useState(0); // For forcing re-mount
 
+  // Validate NES ROM header
+  const validateNesHeader = (data: string): boolean => {
+    console.log('[NesPlayer] Validating NES header...');
+    
+    // Check minimum length
+    if (data.length < 16) {
+      console.error('[NesPlayer] ROM too short for NES header');
+      return false;
+    }
+
+    // Check NES magic bytes
+    const nesMagic = data.substring(0, 4);
+    const expectedMagic = 'NES\x1a';
+    
+    if (nesMagic !== expectedMagic) {
+      console.error('[NesPlayer] Invalid NES magic bytes:', {
+        actual: Array.from(nesMagic).map(c => c.charCodeAt(0).toString(16)),
+        expected: Array.from(expectedMagic).map(c => c.charCodeAt(0).toString(16))
+      });
+      return false;
+    }
+
+    // Log ROM info
+    const prgBanks = data.charCodeAt(4);
+    const chrBanks = data.charCodeAt(5);
+    const mapper = (data.charCodeAt(6) >> 4) | (data.charCodeAt(7) & 0xF0);
+    
+    console.log('[NesPlayer] ROM validation passed:', {
+      prgBanks,
+      chrBanks,
+      mapper,
+      totalSize: data.length
+    });
+
+    return true;
+  };
+
   // Load ROM data on component mount
   useEffect(() => {
     const loadRom = async () => {
@@ -34,23 +72,90 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
 
         console.log(`[NesPlayer] Loading ROM from: ${romPath}`);
         
-        const response = await fetch(romPath);
-        if (!response.ok) {
-          throw new Error(`Failed to load ROM: ${response.status} ${response.statusText}`);
+        // Method 1: Try using loadBinary helper first
+        const loadWithLoadBinary = (): Promise<string> => {
+          return new Promise((resolve, reject) => {
+            console.log('[NesPlayer] Attempting load with loadBinary helper...');
+            loadBinary(
+              romPath,
+              (err, data) => {
+                if (err) {
+                  console.error('[NesPlayer] loadBinary failed:', err);
+                  reject(new Error(`loadBinary failed: ${err.message}`));
+                  return;
+                }
+                
+                if (!data) {
+                  reject(new Error('loadBinary returned no data'));
+                  return;
+                }
+
+                console.log(`[NesPlayer] loadBinary success: ${data.length} characters`);
+                console.log('[NesPlayer] First 16 chars:', data.substring(0, 16));
+                resolve(data);
+              },
+              (xhr) => {
+                console.log(`[NesPlayer] Load progress: ${Math.round((xhr.loaded / xhr.total) * 100)}%`);
+              }
+            );
+          });
+        };
+
+        // Method 2: Fallback to direct fetch
+        const loadWithFetch = async (): Promise<string> => {
+          console.log('[NesPlayer] Attempting load with direct fetch...');
+          
+          const response = await fetch(romPath, {
+            headers: {
+              'Accept': 'application/octet-stream',
+            },
+          });
+          
+          if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+          }
+
+          // Check content type
+          const contentType = response.headers.get('content-type');
+          console.log('[NesPlayer] Response content-type:', contentType);
+
+          const arrayBuffer = await response.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+          
+          console.log(`[NesPlayer] Fetched ${uint8Array.length} bytes`);
+
+          // Convert to binary string (jsnes format)
+          let binary = '';
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+
+          console.log(`[NesPlayer] Converted to ${binary.length} character string`);
+          console.log('[NesPlayer] First 16 chars:', binary.substring(0, 16));
+          
+          return binary;
+        };
+
+        let data: string;
+        let loadMethod = '';
+
+        // Try loadBinary first
+        try {
+          data = await loadWithLoadBinary();
+          loadMethod = 'loadBinary';
+        } catch (binaryError) {
+          console.warn('[NesPlayer] loadBinary failed, trying direct fetch:', binaryError);
+          data = await loadWithFetch();
+          loadMethod = 'direct fetch';
         }
 
-        const arrayBuffer = await response.arrayBuffer();
-        const uint8Array = new Uint8Array(arrayBuffer);
-        
-        // Convert to base64 string (jsnes expects base64)
-        let binary = '';
-        for (let i = 0; i < uint8Array.length; i++) {
-          binary += String.fromCharCode(uint8Array[i]);
+        // Validate ROM header
+        if (!validateNesHeader(data)) {
+          throw new Error('Not a valid NES ROM file');
         }
-        const base64 = btoa(binary);
 
-        console.log(`[NesPlayer] ROM loaded successfully: ${uint8Array.length} bytes`);
-        setRomData(base64);
+        console.log(`[NesPlayer] ROM loaded successfully via ${loadMethod}`);
+        setRomData(data);
         setIsLoading(false);
 
       } catch (err) {
@@ -69,14 +174,14 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   };
 
   const handleReset = () => {
-    // Force remount of emulator component to reset the game
+    // Force remount of emulator component to reset game
     setEmulatorKey(prev => prev + 1);
     setIsPaused(false);
   };
 
   const handleMuteToggle = () => {
     setIsMuted(!isMuted);
-    // Note: Audio muting would need to be implemented in the Emulator component
+    // Note: Audio muting would need to be implemented in Emulator component
     console.log(`[NesPlayer] Audio ${isMuted ? 'unmuted' : 'muted'}`);
   };
 
@@ -87,6 +192,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
           <CardContent className="p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-muted-foreground">Loading {title}...</p>
+            <p className="text-xs text-muted-foreground mt-2">ROM path: {romPath}</p>
           </CardContent>
         </Card>
       </div>
@@ -101,6 +207,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
             <div className="text-destructive text-6xl mb-4">⚠️</div>
             <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Game</h3>
             <p className="text-muted-foreground mb-4">{error}</p>
+            <p className="text-xs text-muted-foreground mb-4">ROM path: {romPath}</p>
             <Button onClick={() => window.location.reload()} variant="outline">
               Try Again
             </Button>
