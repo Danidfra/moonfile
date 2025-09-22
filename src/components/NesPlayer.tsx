@@ -10,17 +10,15 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX } from 'lucide-react';
 import Emulator from '@/emulator/Emulator';
-import { loadBinary } from '@/emulator/utils/errorUtils';
 
 interface NesPlayerProps {
-  romPath: string;
+  romPath: string; // Now this is the actual binary string data, not a URL
   title?: string;
   className?: string;
 }
 
 export default function NesPlayer({ romPath, title = "NES Game", className = "" }: NesPlayerProps) {
-  const [romData, setRomData] = useState<string | null>(null);
-  const [isLoading, setIsLoading] = useState(true);
+  const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,149 +61,36 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     return true;
   };
 
-  // Load ROM data on component mount
+  // Process ROM data on component mount
   useEffect(() => {
-    const loadRom = async () => {
+    const processRom = () => {
       try {
-        setIsLoading(true);
+        console.log('[NesPlayer] Processing ROM data...');
         setError(null);
 
-        console.log(`[NesPlayer] Loading ROM from: ${romPath}`);
-
-        // Method 1: Handle blob URLs directly (for Nostr-based games)
-        const loadFromBlobUrl = async (): Promise<string> => {
-          console.log('[NesPlayer] Loading from blob URL...');
-
-          // Fetch the blob from the blob URL
-          const response = await fetch(romPath);
-          if (!response.ok) {
-            throw new Error(`Failed to fetch blob: ${response.statusText}`);
-          }
-
-          const arrayBuffer = await response.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-
-          console.log(`[NesPlayer] Blob loaded: ${uint8Array.length} bytes`);
-
-          // Convert to binary string (jsnes format)
-          let binary = '';
-          for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-          }
-
-          console.log(`[NesPlayer] Converted blob to ${binary.length} character string`);
-          console.log('[NesPlayer] First 16 chars:', binary.substring(0, 16));
-
-          return binary;
-        };
-
-        // Method 2: Try using loadBinary helper first (for regular file paths)
-        const loadWithLoadBinary = (): Promise<string> => {
-          return new Promise((resolve, reject) => {
-            // Skip loadBinary for blob URLs since it doesn't support them
-            if (romPath.startsWith('blob:')) {
-              reject(new Error('loadBinary does not support blob URLs'));
-              return;
-            }
-
-            console.log('[NesPlayer] Attempting load with loadBinary helper...');
-            loadBinary(
-              romPath,
-              (err, data) => {
-                if (err) {
-                  console.error('[NesPlayer] loadBinary failed:', err);
-                  reject(new Error(`loadBinary failed: ${err.message}`));
-                  return;
-                }
-
-                if (!data) {
-                  reject(new Error('loadBinary returned no data'));
-                  return;
-                }
-
-                console.log(`[NesPlayer] loadBinary success: ${data.length} characters`);
-                console.log('[NesPlayer] First 16 chars:', data.substring(0, 16));
-                resolve(data);
-              },
-              (xhr) => {
-                console.log(`[NesPlayer] Load progress: ${Math.round((xhr.loaded / xhr.total) * 100)}%`);
-              }
-            );
-          });
-        };
-
-        // Method 3: Fallback to direct fetch for regular URLs
-        const loadWithFetch = async (): Promise<string> => {
-          console.log('[NesPlayer] Attempting load with direct fetch...');
-
-          const response = await fetch(romPath, {
-            headers: {
-              'Accept': 'application/octet-stream',
-            },
-          });
-
-          if (!response.ok) {
-            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
-          }
-
-          // Check content type
-          const contentType = response.headers.get('content-type');
-          console.log('[NesPlayer] Response content-type:', contentType);
-
-          const arrayBuffer = await response.arrayBuffer();
-          const uint8Array = new Uint8Array(arrayBuffer);
-
-          console.log(`[NesPlayer] Fetched ${uint8Array.length} bytes`);
-
-          // Convert to binary string (jsnes format)
-          let binary = '';
-          for (let i = 0; i < uint8Array.length; i++) {
-            binary += String.fromCharCode(uint8Array[i]);
-          }
-
-          console.log(`[NesPlayer] Converted to ${binary.length} character string`);
-          console.log('[NesPlayer] First 16 chars:', binary.substring(0, 16));
-
-          return binary;
-        };
-
-        let data: string;
-        let loadMethod = '';
-
-        // Choose loading method based on URL type
-        if (romPath.startsWith('blob:')) {
-          data = await loadFromBlobUrl();
-          loadMethod = 'blob URL';
-        } else {
-          // Try loadBinary first for regular URLs
-          try {
-            data = await loadWithLoadBinary();
-            loadMethod = 'loadBinary';
-          } catch (binaryError) {
-            console.warn('[NesPlayer] loadBinary failed, trying direct fetch:', binaryError);
-            data = await loadWithFetch();
-            loadMethod = 'direct fetch';
-          }
+        // Validate that we have ROM data
+        if (!romPath || typeof romPath !== 'string') {
+          throw new Error('No ROM data provided');
         }
 
+        console.log(`[NesPlayer] ROM data length: ${romPath.length} characters`);
+
         // Validate ROM header
-        if (!validateNesHeader(data)) {
+        if (!validateNesHeader(romPath)) {
           throw new Error('Not a valid NES ROM file');
         }
 
-        console.log(`[NesPlayer] ROM loaded successfully via ${loadMethod}`);
-        setRomData(data);
-        setIsLoading(false);
+        console.log('[NesPlayer] ROM validation passed, ready to play');
+        setIsReady(true);
 
       } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to load ROM';
-        console.error('[NesPlayer] ROM loading error:', errorMessage);
+        const errorMessage = err instanceof Error ? err.message : 'Failed to process ROM data';
+        console.error('[NesPlayer] ROM processing error:', errorMessage);
         setError(errorMessage);
-        setIsLoading(false);
       }
     };
 
-    loadRom();
+    processRom();
   }, [romPath]);
 
   const handlePlayPause = () => {
@@ -224,20 +109,6 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     console.log(`[NesPlayer] Audio ${isMuted ? 'unmuted' : 'muted'}`);
   };
 
-  if (isLoading) {
-    return (
-      <div className={`flex items-center justify-center ${className}`}>
-        <Card className="w-full max-w-4xl">
-          <CardContent className="p-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading {title}...</p>
-            <p className="text-xs text-muted-foreground mt-2">ROM path: {romPath}</p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   if (error) {
     return (
       <div className={`flex items-center justify-center ${className}`}>
@@ -246,7 +117,6 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
             <div className="text-destructive text-6xl mb-4">⚠️</div>
             <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Game</h3>
             <p className="text-muted-foreground mb-4">{error}</p>
-            <p className="text-xs text-muted-foreground mb-4">ROM path: {romPath}</p>
             <Button onClick={() => window.location.reload()} variant="outline">
               Try Again
             </Button>
@@ -256,12 +126,13 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     );
   }
 
-  if (!romData) {
+  if (!isReady) {
     return (
       <div className={`flex items-center justify-center ${className}`}>
         <Card className="w-full max-w-4xl">
           <CardContent className="p-8 text-center">
-            <p className="text-muted-foreground">No ROM data available</p>
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+            <p className="text-muted-foreground">Processing {title}...</p>
           </CardContent>
         </Card>
       </div>
@@ -286,7 +157,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
           >
             <Emulator
               key={emulatorKey}
-              romData={romData}
+              romData={romPath}
               paused={isPaused}
             />
           </div>

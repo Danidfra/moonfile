@@ -105,8 +105,13 @@ export default function GamePage() {
         console.log('[GamePage] Decoding base64 ROM from event content');
 
         // Decode ROM from event content
-        const romBytes = decodeBase64ToBytes(event.content);
-        console.log('[GamePage] ROM decoded, size:', romBytes.length, 'bytes');
+        let romBytes: Uint8Array;
+        try {
+          romBytes = decodeBase64ToBytes(event.content);
+          console.log('[GamePage] ROM decoded, size:', romBytes.length, 'bytes');
+        } catch (decodeError) {
+          throw new Error(`Failed to decode base64 ROM: ${decodeError instanceof Error ? decodeError.message : 'Invalid base64 data'}`);
+        }
 
         // Validate ROM format
         validateNESRom(romBytes);
@@ -145,11 +150,13 @@ export default function GamePage() {
 
         setRomInfo(info);
 
-        // Create ROM blob and URL for the emulator
-        const romBlob = new Blob([romBytes], { type: 'application/octet-stream' });
-        const romUrl = URL.createObjectURL(romBlob);
-        setRomPath(romUrl);
+        // Convert ROM bytes to binary string for jsnes
+        let romBinaryString = '';
+        for (let i = 0; i < romBytes.length; i++) {
+          romBinaryString += String.fromCharCode(romBytes[i]);
+        }
 
+        setRomPath(romBinaryString);
         setStatus('ready');
         console.log('[GamePage] Game ready to play');
 
@@ -162,11 +169,9 @@ export default function GamePage() {
 
     loadGameData();
 
-    // Cleanup blob URL on unmount
+    // Cleanup - no blob URLs to revoke anymore
     return () => {
-      if (romPath && romPath.startsWith('blob:')) {
-        URL.revokeObjectURL(romPath);
-      }
+      // No cleanup needed for binary strings
     };
   }, [id, nostr]);
 
@@ -175,9 +180,6 @@ export default function GamePage() {
    */
   const handleRetry = () => {
     // Clean up current state
-    if (romPath && romPath.startsWith('blob:')) {
-      URL.revokeObjectURL(romPath);
-    }
     setRomPath(null);
     setRomInfo(null);
     setError(null);
@@ -296,7 +298,7 @@ export default function GamePage() {
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
           <div className="lg:col-span-3">
-            <NesPlayer 
+            <NesPlayer
               romPath={romPath}
               title={gameMeta.title}
               className="w-full"
