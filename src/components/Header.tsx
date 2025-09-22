@@ -42,6 +42,12 @@ export function Header() {
           >
             Contact
           </Link>
+          <Link
+            to="/test"
+            className="text-sm font-medium text-gray-300 hover:text-purple-400 transition-colors hover:scale-105"
+          >
+            Test
+          </Link>
         </nav>
 
         {/* Right side */}
