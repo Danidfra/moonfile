@@ -1,6 +1,6 @@
 /**
  * NES Player
- * 
+ *
  * Manages the game loop, rendering frames to canvas, handling pause/resume and cleanup.
  */
 
@@ -37,7 +37,7 @@ export class NesPlayer {
     };
 
     document.addEventListener('visibilitychange', this.visibilityHandler);
-    
+
     console.log('[NesPlayer] Player initialized successfully');
   }
 
@@ -47,7 +47,25 @@ export class NesPlayer {
   private blit(): void {
     try {
       const { width, height, format } = this.core.getFrameSpec();
-      const src = this.core.getFrameBuffer();
+
+      // Get frame buffer with validation
+      let src: Uint8Array;
+      try {
+        src = this.core.getFrameBuffer();
+      } catch (error) {
+        console.error('[NesPlayer] Failed to get frame buffer:', error);
+        return; // Skip this frame
+      }
+
+      // Validate frame buffer
+      if (!src || !(src instanceof Uint8Array)) {
+        console.error('[NesPlayer] Invalid frame buffer:', {
+          type: typeof src,
+          isUint8Array: src instanceof Uint8Array,
+          value: src
+        });
+        return; // Skip this frame
+      }
 
       // Calculate expected buffer size based on format
       const expectedSize = this.calculateExpectedBufferSize(width, height, format);
@@ -57,9 +75,15 @@ export class NesPlayer {
           format,
           expected: expectedSize,
           actual: src.length,
-          dimensions: `${width}x${height}`
+          dimensions: `${width}x${height}`,
+          ratio: src.length / expectedSize
         });
-        return; // Skip this frame
+
+        // Don't skip the frame - try to render what we have
+        if (src.length === 0) {
+          console.error('[NesPlayer] Frame buffer is empty, skipping frame');
+          return;
+        }
       }
 
       // Create or recreate ImageData if dimensions changed
@@ -138,8 +162,8 @@ export class NesPlayer {
    * Convert indexed color data to RGBA using palette
    */
   private convertIndexedToRGBA(
-    src: Uint8Array, 
-    dst: Uint8ClampedArray, 
+    src: Uint8Array,
+    dst: Uint8ClampedArray,
     palette: Uint8Array | Uint32Array
   ): void {
     const isUint32Palette = palette instanceof Uint32Array;
@@ -188,10 +212,10 @@ export class NesPlayer {
       try {
         // Advance emulator by one frame
         this.core.frame();
-        
+
         // Render frame to canvas
         this.blit();
-        
+
         // Schedule next frame
         this.rafId = requestAnimationFrame(gameLoop);
       } catch (error) {

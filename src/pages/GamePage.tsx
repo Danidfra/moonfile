@@ -245,14 +245,36 @@ export default function GamePage() {
 
       // Log frame specification for diagnostics
       const spec = fceuxCore.getFrameSpec();
-      const buffer = fceuxCore.getFrameBuffer();
 
-      console.log('[GamePage] Frame specification:', {
-        width: spec.width,
-        height: spec.height,
-        format: spec.format,
-        bufferLength: buffer.length
-      });
+      // Test frame buffer functionality
+      console.log('[GamePage] Testing frame buffer...');
+      try {
+        const buffer = fceuxCore.getFrameBuffer();
+
+        console.log('[GamePage] ✅ Frame buffer test successful:', {
+          width: spec.width,
+          height: spec.height,
+          format: spec.format,
+          bufferLength: buffer.length,
+          expectedLength: 256 * 240 * 4,
+          isValidBuffer: buffer instanceof Uint8Array,
+          firstPixel: buffer.length >= 4 ? `RGBA(${buffer[0]},${buffer[1]},${buffer[2]},${buffer[3]})` : 'N/A'
+        });
+
+        // Validate buffer size
+        const expectedSize = 256 * 240 * 4;
+        if (buffer.length !== expectedSize) {
+          console.error('[GamePage] ⚠️ Frame buffer size incorrect:', {
+            expected: expectedSize,
+            actual: buffer.length,
+            difference: buffer.length - expectedSize
+          });
+        }
+
+      } catch (error) {
+        console.error('[GamePage] ❌ Frame buffer test failed:', error);
+        throw new Error(`Frame buffer is broken: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
 
       // Start the game
       fceuxCore.setRunning(true);

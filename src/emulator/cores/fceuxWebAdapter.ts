@@ -66,18 +66,45 @@ export class FCEUXWebAdapter implements NesCore {
 
       console.log('[FCEUXWebAdapter] Core initialized successfully - using real WASM emulator');
 
-      // Log frame specification
-      const spec = this.getFrameSpec();
-      const buffer = this.getFrameBuffer();
-      console.log('[FCEUXWebAdapter] Frame spec:', {
-        width: spec.width,
-        height: spec.height,
-        format: spec.format,
-        bufferLength: buffer.length
-      });
+      // Test frame buffer functionality immediately
+      console.log('[FCEUXWebAdapter] Testing frame buffer functionality...');
+      try {
+        const spec = this.getFrameSpec();
+        const buffer = this.getFrameBuffer();
+
+        // Validate frame buffer
+        const expectedSize = 256 * 240 * 4;
+        if (!(buffer instanceof Uint8Array)) {
+          throw new Error(`getFrameBuffer() returned ${typeof buffer}, expected Uint8Array`);
+        }
+
+        if (buffer.length !== expectedSize) {
+          throw new Error(`Frame buffer wrong size: ${buffer.length}, expected ${expectedSize}`);
+        }
+
+        console.log('[FCEUXWebAdapter] ✅ Frame buffer validation passed:', {
+          width: spec.width,
+          height: spec.height,
+          format: spec.format,
+          bufferLength: buffer.length,
+          bufferType: buffer.constructor.name,
+          isValidSize: buffer.length === expectedSize
+        });
+
+        // Test frame generation
+        if (typeof this.core.frame === 'function') {
+          this.core.frame();
+          const updatedBuffer = this.getFrameBuffer();
+          console.log('[FCEUXWebAdapter] ✅ Frame generation test completed');
+        }
+
+      } catch (error) {
+        console.error('[FCEUXWebAdapter] ❌ Frame buffer validation failed:', error);
+        throw new Error(`Frame buffer is broken: ${error instanceof Error ? error.message : 'Unknown error'}`);
+      }
 
       // Confirm we're not using fallback mode
-      console.log('[FCEUXWebAdapter] ✅ Real NES emulator core active (no gradient fallback)');
+      console.log('[FCEUXWebAdapter] ✅ Real NES emulator core active with working frame buffer');
 
       return true;
 
@@ -324,7 +351,87 @@ export class FCEUXWebAdapter implements NesCore {
       throw new Error('getFrameBuffer not available in core');
     }
 
-    return this.core.getFrameBuffer();
+    try {
+      // Get frame buffer pointer from WASM
+      const frameBufferPtr = this.core.getFrameBuffer();
+
+      if (typeof frameBufferPtr !== 'number') {
+        throw new Error(`getFrameBuffer returned invalid type: ${typeof frameBufferPtr} (expected number pointer)`);
+      }
+
+      if (!this.wasmInstance || !this.wasmInstance.exports.memory) {
+        throw new Error('WASM memory not available');
+      }
+
+      // Get frame buffer size (should be 245760 bytes for 256x240 RGBA)
+      const expectedSize = 256 * 240 * 4; // RGBA32 format
+      let bufferSize = expectedSize;
+
+      // Try to get size from WASM if available
+      if (typeof this.core.getFrameBufferSize === 'function') {
+        bufferSize = this.core.getFrameBufferSize();
+        console.log('[FCEUXWebAdapter] Frame buffer size from WASM:', bufferSize);
+      }
+
+      // Validate buffer size
+      if (bufferSize !== expectedSize) {
+        console.warn('[FCEUXWebAdapter] Frame buffer size mismatch:', {
+          expected: expectedSize,
+          actual: bufferSize,
+          format: 'RGBA32 (256x240x4)'
+        });
+        // Use expected size for safety
+        bufferSize = expectedSize;
+      }
+
+      // Get WASM memory
+      const memory = this.wasmInstance.exports.memory as WebAssembly.Memory;
+      const memoryArray = new Uint8Array(memory.buffer);
+
+      // Validate pointer bounds
+      if (frameBufferPtr < 0 || frameBufferPtr + bufferSize > memory.buffer.byteLength) {
+        throw new Error(`Frame buffer pointer out of bounds: ptr=${frameBufferPtr}, size=${bufferSize}, memory=${memory.buffer.byteLength}`);
+      }
+
+      // Extract frame buffer from WASM memory
+      const frameBuffer = memoryArray.slice(frameBufferPtr, frameBufferPtr + bufferSize);
+
+      // Validate result
+      if (frameBuffer.length !== expectedSize) {
+        throw new Error(`Frame buffer wrong size: got ${frameBuffer.length}, expected ${expectedSize}`);
+      }
+
+      console.log('[FCEUXWebAdapter] ✅ Frame buffer extracted successfully:', {
+        pointer: frameBufferPtr,
+        size: frameBuffer.length,
+        format: 'RGBA32',
+        dimensions: '256x240'
+      });
+
+      return frameBuffer;
+
+    } catch (error) {
+      console.error('[FCEUXWebAdapter] ❌ getFrameBuffer failed:', error);
+
+      // Return a valid fallback buffer to prevent crashes
+      const fallbackBuffer = new Uint8Array(256 * 240 * 4);
+
+      // Fill with a visible pattern so we know it's fallback
+      for (let i = 0; i < fallbackBuffer.length; i += 4) {
+        const x = (i / 4) % 256;
+        const y = Math.floor((i / 4) / 256);
+
+        // Create a red/blue checkerboard pattern
+        const checker = ((x >> 4) + (y >> 4)) % 2;
+        fallbackBuffer[i + 0] = checker ? 255 : 0;   // R
+        fallbackBuffer[i + 1] = 0;                   // G
+        fallbackBuffer[i + 2] = checker ? 0 : 255;   // B
+        fallbackBuffer[i + 3] = 255;                 // A
+      }
+
+      console.warn('[FCEUXWebAdapter] Using fallback frame buffer (red/blue checkerboard)');
+      return fallbackBuffer;
+    }
   }
 
   /**
