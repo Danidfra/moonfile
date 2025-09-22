@@ -72,7 +72,34 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
 
         console.log(`[NesPlayer] Loading ROM from: ${romPath}`);
 
-        // Method 1: Try using loadBinary helper first (for regular file paths)
+        // Method 1: Handle blob URLs directly (for Nostr-based games)
+        const loadFromBlobUrl = async (): Promise<string> => {
+          console.log('[NesPlayer] Loading from blob URL...');
+
+          // Fetch the blob from the blob URL
+          const response = await fetch(romPath);
+          if (!response.ok) {
+            throw new Error(`Failed to fetch blob: ${response.statusText}`);
+          }
+
+          const arrayBuffer = await response.arrayBuffer();
+          const uint8Array = new Uint8Array(arrayBuffer);
+
+          console.log(`[NesPlayer] Blob loaded: ${uint8Array.length} bytes`);
+
+          // Convert to binary string (jsnes format)
+          let binary = '';
+          for (let i = 0; i < uint8Array.length; i++) {
+            binary += String.fromCharCode(uint8Array[i]);
+          }
+
+          console.log(`[NesPlayer] Converted blob to ${binary.length} character string`);
+          console.log('[NesPlayer] First 16 chars:', binary.substring(0, 16));
+
+          return binary;
+        };
+
+        // Method 2: Try using loadBinary helper first (for regular file paths)
         const loadWithLoadBinary = (): Promise<string> => {
           return new Promise((resolve, reject) => {
             // Skip loadBinary for blob URLs since it doesn't support them
@@ -107,7 +134,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
           });
         };
 
-        // Method 2: Fallback to direct fetch
+        // Method 3: Fallback to direct fetch for regular URLs
         const loadWithFetch = async (): Promise<string> => {
           console.log('[NesPlayer] Attempting load with direct fetch...');
 
@@ -145,14 +172,20 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
         let data: string;
         let loadMethod = '';
 
-        // Try loadBinary first
-        try {
-          data = await loadWithLoadBinary();
-          loadMethod = 'loadBinary';
-        } catch (binaryError) {
-          console.warn('[NesPlayer] loadBinary failed, trying direct fetch:', binaryError);
-          data = await loadWithFetch();
-          loadMethod = 'direct fetch';
+        // Choose loading method based on URL type
+        if (romPath.startsWith('blob:')) {
+          data = await loadFromBlobUrl();
+          loadMethod = 'blob URL';
+        } else {
+          // Try loadBinary first for regular URLs
+          try {
+            data = await loadWithLoadBinary();
+            loadMethod = 'loadBinary';
+          } catch (binaryError) {
+            console.warn('[NesPlayer] loadBinary failed, trying direct fetch:', binaryError);
+            data = await loadWithFetch();
+            loadMethod = 'direct fetch';
+          }
         }
 
         // Validate ROM header
