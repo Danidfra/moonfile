@@ -17,6 +17,7 @@ export default class Screen extends Component<ScreenProps> {
   private buf!: ArrayBuffer;
   private buf8!: Uint8ClampedArray;
   private buf32!: Uint32Array;
+  private fullscreenCleanup: (() => void) | null = null;
 
   render() {
     return (
@@ -35,6 +36,25 @@ export default class Screen extends Component<ScreenProps> {
 
   componentDidMount() {
     this.initCanvas();
+
+    // Handle fullscreen changes
+    const handleFullscreenChange = () => {
+      // Trigger resize after a small delay to ensure dimensions are updated
+      setTimeout(() => this.fitInParent(), 100);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    // Store cleanup function
+    this.fullscreenCleanup = () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
   }
 
   componentDidUpdate() {
@@ -84,23 +104,38 @@ export default class Screen extends Component<ScreenProps> {
     const parentWidth = parent.clientWidth;
     const parentHeight = parent.clientHeight;
 
-    // Scale factor for better sizing (1.5x scale)
-    const scaleFactor = 1.5;
+    // Scale factor for better sizing (2x scale for 512x480 pixels)
+    const scaleFactor = 2;
     const scaledWidth = SCREEN_WIDTH * scaleFactor;
     const scaledHeight = SCREEN_HEIGHT * scaleFactor;
 
-    // Calculate maximum size that fits within the parent while maintaining aspect ratio
-    let targetWidth = scaledWidth;
-    let targetHeight = scaledHeight;
+    // Check if we're in fullscreen mode
+    const isFullscreen = !!document.fullscreenElement;
 
-    // If scaled size is too big for parent, scale it down
+    let targetWidth, targetHeight;
+
+    if (isFullscreen) {
+      // In fullscreen, use a larger scale factor for better gameplay experience
+      const fullscreenScale = Math.min(
+        (parentWidth - 40) / SCREEN_WIDTH,  // Leave some padding
+        (parentHeight - 40) / SCREEN_HEIGHT  // Leave some padding
+      );
+      targetWidth = Math.round(SCREEN_WIDTH * fullscreenScale);
+      targetHeight = Math.round(SCREEN_HEIGHT * fullscreenScale);
+    } else {
+      // Normal mode - use 2x scale but ensure it fits
+      targetWidth = scaledWidth;
+      targetHeight = scaledHeight;
+
+      // If scaled size is too big for parent, scale it down
     if (targetWidth > parentWidth || targetHeight > parentHeight) {
-      const widthScale = parentWidth / scaledWidth;
-      const heightScale = parentHeight / scaledHeight;
-      const minScale = Math.min(widthScale, heightScale);
+        const widthScale = parentWidth / scaledWidth;
+        const heightScale = parentHeight / scaledHeight;
+        const minScale = Math.min(widthScale, heightScale);
 
-      targetWidth = Math.round(scaledWidth * minScale);
-      targetHeight = Math.round(scaledHeight * minScale);
+        targetWidth = Math.round(scaledWidth * minScale);
+        targetHeight = Math.round(scaledHeight * minScale);
+      }
     }
 
     // Center the canvas in the parent
@@ -109,6 +144,13 @@ export default class Screen extends Component<ScreenProps> {
     this.canvas.style.margin = 'auto';
     this.canvas.style.display = 'block';
   };
+
+  componentWillUnmount() {
+    // Cleanup fullscreen event listeners
+    if (this.fullscreenCleanup) {
+      this.fullscreenCleanup();
+    }
+  }
 
   screenshot(): HTMLImageElement {
     const img = new Image();

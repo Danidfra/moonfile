@@ -8,7 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Play, Pause, RotateCcw, Volume2, VolumeX } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
 import Emulator from '@/emulator/Emulator';
 
 interface NesPlayerProps {
@@ -21,8 +21,11 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emulatorKey, setEmulatorKey] = useState(0); // For forcing re-mount
+
+  const emulatorContainerRef = React.useRef<HTMLDivElement>(null);
 
   // Validate NES ROM header
   const validateNesHeader = (data: string): boolean => {
@@ -93,6 +96,70 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     processRom();
   }, [romPath]);
 
+  // Handle fullscreen change events
+  useEffect(() => {
+    const handleFullscreenChange = () => {
+      setIsFullscreen(!!document.fullscreenElement);
+    };
+
+    document.addEventListener('fullscreenchange', handleFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', handleFullscreenChange);
+    document.addEventListener('mozfullscreenchange', handleFullscreenChange);
+    document.addEventListener('MSFullscreenChange', handleFullscreenChange);
+
+    return () => {
+      document.removeEventListener('fullscreenchange', handleFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', handleFullscreenChange);
+      document.removeEventListener('MSFullscreenChange', handleFullscreenChange);
+    };
+  }, []);
+
+  // Handle keyboard shortcut for fullscreen
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'f' || e.key === 'F') {
+        e.preventDefault();
+        toggleFullscreen();
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []);
+
+  // Toggle fullscreen function
+  const toggleFullscreen = () => {
+    if (!emulatorContainerRef.current) return;
+
+    if (!document.fullscreenElement) {
+      const elem = emulatorContainerRef.current;
+      // Try standard fullscreen API first
+      if (elem?.requestFullscreen) {
+        elem.requestFullscreen();
+      } else if ((elem as any).webkitRequestFullscreen) {
+        (elem as any).webkitRequestFullscreen();
+      } else if ((elem as any).mozRequestFullScreen) {
+        (elem as any).mozRequestFullScreen();
+      } else if ((elem as any).msRequestFullscreen) {
+        (elem as any).msRequestFullscreen();
+      }
+    } else {
+      // Try standard exit fullscreen API first
+      if (document.exitFullscreen) {
+        document.exitFullscreen();
+      } else if ((document as any).webkitExitFullscreen) {
+        (document as any).webkitExitFullscreen();
+      } else if ((document as any).mozCancelFullScreen) {
+        (document as any).mozCancelFullScreen();
+      } else if ((document as any).msExitFullscreen) {
+        (document as any).msExitFullscreen();
+      }
+    }
+  };
+
   const handlePlayPause = () => {
     setIsPaused(!isPaused);
   };
@@ -140,7 +207,10 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   }
 
   return (
-    <div className={`flex flex-col items-center space-y-4 ${className}`}>
+    <div
+      ref={emulatorContainerRef}
+      className={`flex flex-col items-center space-y-4 ${className}`}
+    >
       {/* Game Title */}
       <Card className="w-full max-w-4xl">
         <CardHeader className="pb-2">
@@ -153,7 +223,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
         <CardContent className="p-4">
           <div
             className="relative bg-black rounded-lg overflow-hidden flex items-center justify-center"
-            style={{ minHeight: '360px' }}
+            style={{ minHeight: '480px' }}
           >
             <Emulator
               key={emulatorKey}
@@ -193,6 +263,15 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
               size="lg"
             >
               {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </Button>
+
+            <Button
+              onClick={toggleFullscreen}
+              variant="ghost"
+              size="lg"
+              title="Toggle fullscreen (F)"
+            >
+              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
             </Button>
 
             <div className="flex items-center gap-2 text-sm text-muted-foreground">
