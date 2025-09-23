@@ -58,16 +58,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [isJoining, setIsJoining] = useState(false);
   const [connectionTimeout, setConnectionTimeout] = useState<NodeJS.Timeout | null>(null);
   const [hasConnectionTimedOut, setHasConnectionTimedOut] = useState(false);
+  const [processedEvents, setProcessedEvents] = useState<Set<string>>(new Set());
+  const [processedPeerSignals, setProcessedPeerSignals] = useState<Set<string>>(new Set());
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
 
   // Parse room event from Nostr event
-  const parseRoomEvent = useCallback((event: NostrEvent): RoomState => {
+  const parseRoomEvent = useCallback((event: NostrEvent, currentHostPubkey?: string): RoomState => {
     const dTag = event.tags.find(t => t[0] === 'd')?.[1];
     const gameTag = event.tags.find(t => t[0] === 'game')?.[1];
     const playersTag = event.tags.find(t => t[0] === 'players')?.[1];
-    const hostTag = event.tags.find(t => t[0] === 'host')?.[1];
+    const hostTag = event.tags.find(t => t[0] === 'host')?.[1] || currentHostPubkey;
     const statusTag = event.tags.find(t => t[0] === 'status')?.[1];
     const signalTag = event.tags.find(t => t[0] === 'signal')?.[1];
     const connectedCountTag = event.tags.find(t => t[0] === 'connected_count')?.[1];
@@ -163,12 +165,21 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         const latestEvent = await fetchLatestRoomEvent();
 
         if (latestEvent) {
+          // Skip if we've already processed this event
+          if (processedEvents.has(latestEvent.id)) {
+            console.log('[MultiplayerRoom] Skipping already processed event:', latestEvent.id);
+            return;
+          }
+
           try {
-            const newRoomState = parseRoomEvent(latestEvent);
+            const newRoomState = parseRoomEvent(latestEvent, roomState.hostPubkey);
             setRoomState(prev => ({
               ...newRoomState,
               shareableLink: prev.shareableLink // Preserve shareable link
             }));
+
+            // Mark event as processed
+            setProcessedEvents(prev => new Set([...prev, latestEvent.id]));
 
             // Check for host signal if we're not the host
             if (user && latestEvent.pubkey !== user.pubkey && !isHost) {
@@ -189,9 +200,28 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             // Process answer signals if we're the host
             if (user && isHost && latestEvent.pubkey !== user.pubkey) {
               const playerSignalTag = latestEvent.tags.find(t => t[0] === 'player' && t[1] === latestEvent.pubkey)?.[2];
-              if (playerSignalTag && webRTCConnection) {
+
+              // Only process if we haven't seen a signal from this peer yet
+              if (playerSignalTag && webRTCConnection && !processedPeerSignals.has(latestEvent.pubkey)) {
                 console.log('[MultiplayerRoom] Processing answer signal from guest:', latestEvent.pubkey);
-                handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
+
+                // Check if connection can accept remote description
+                if (webRTCConnection.signalingState !== 'stable' &&
+                    webRTCConnection.signalingState !== 'closed') {
+                  handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
+                  // Mark peer as processed
+                  setProcessedPeerSignals(prev => new Set([...prev, latestEvent.pubkey]));
+                } else {
+                  console.warn('[MultiplayerRoom] Skipping answer signal - connection in state:', webRTCConnection.signalingState);
+                }
+
+                // Check if connection can accept remote description
+                if (webRTCConnection.signalingState !== 'stable' &&
+                    webRTCConnection.signalingState !== 'closed') {
+                  handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
+                } else {
+                  console.warn('[MultiplayerRoom] Skipping answer signal - connection in state:', webRTCConnection.signalingState);
+                }
               }
             }
           } catch (error) {
@@ -369,14 +399,28 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     try {
       console.log('[MultiplayerRoom] Handling remote signal from:', fromPubkey);
       console.log('[MultiplayerRoom] Signal data preview:', signal.substring(0, 100) + '...');
+      console.log('[MultiplayerRoom] Current connection signaling state:', webRTCConnection.signalingState);
 
       const signalData = JSON.parse(signal);
       console.log('[MultiplayerRoom] Parsed signal type:', signalData.type);
 
       if (signalData.type === 'answer') {
         console.log('[MultiplayerRoom] Processing answer signal (host side)');
+
+        // Check if we can safely set remote description
+        if (webRTCConnection.signalingState === 'stable') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - connection already stable');
+          return;
+        }
+
+        if (webRTCConnection.signalingState === 'closed') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - connection closed');
+          return;
+        }
+
+        console.log('[MultiplayerRoom] Setting remote description for answer');
         await webRTCConnection.setRemoteDescription(signalData);
-        console.log('[MultiplayerRoom] Remote description set successfully');
+        console.log('[MultiplayerRoom] Remote description set successfully, new state:', webRTCConnection.signalingState);
 
         // Only publish status update if this is a new player connection and the player count actually changed
         const isPlayerAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === fromPubkey);
@@ -439,7 +483,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Room exists, check if we're the host or joining as player
       console.log('[MultiplayerRoom] Room exists, checking role...');
       const roomEvent = existingEvents[0];
-      const roomData = parseRoomEvent(roomEvent);
+      const roomData = parseRoomEvent(roomEvent, roomState.hostPubkey);
 
       const shareableLink = `${window.location.origin}/multiplayer/${gameId}/${roomId}`;
 
@@ -734,7 +778,21 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Process the host's offer
       const hostOffer = JSON.parse(roomState.pendingHostSignal);
       console.log('[MultiplayerRoom] Setting remote description from host offer');
+      console.log('[MultiplayerRoom] Guest connection signaling state:', pc.signalingState);
+
+      // Check if connection can accept remote description
+      if (pc.signalingState === 'stable') {
+        console.warn('[MultiplayerRoom] Cannot set remote offer - connection already stable');
+        throw new Error('Connection already established');
+      }
+
+      if (pc.signalingState === 'closed') {
+        console.warn('[MultiplayerRoom] Cannot set remote offer - connection closed');
+        throw new Error('Connection is closed');
+      }
+
       await pc.setRemoteDescription(hostOffer);
+      console.log('[MultiplayerRoom] Remote description set, new state:', pc.signalingState);
 
       // Create answer
       console.log('[MultiplayerRoom] Creating answer for host');
@@ -807,13 +865,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     setDataChannel(null);
     setLocalSignal(null);
 
-    // Reset room state
+    // Reset room state but preserve hostPubkey
     setRoomState(prev => ({
       ...prev,
       status: 'waiting',
       error: undefined,
-      isWebRTCConnected: false
+      isWebRTCConnected: false,
+      hostPubkey: prev.hostPubkey // Ensure hostPubkey is preserved
     }));
+
+    // Reset processed events to allow reprocessing
+    setProcessedEvents(new Set());
+    setProcessedPeerSignals(new Set());
 
     // Retry join if we're a guest with pending signal
     if (!isHost && roomState.pendingHostSignal) {
