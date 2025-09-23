@@ -139,23 +139,23 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
       // Try standard fullscreen API first
       if (elem?.requestFullscreen) {
         elem.requestFullscreen();
-      } else if ((elem as any).webkitRequestFullscreen) {
-        (elem as any).webkitRequestFullscreen();
-      } else if ((elem as any).mozRequestFullScreen) {
-        (elem as any).mozRequestFullScreen();
-      } else if ((elem as any).msRequestFullscreen) {
-        (elem as any).msRequestFullscreen();
+      } else if ((elem as unknown as Record<string, unknown>).webkitRequestFullscreen) {
+        (elem as unknown as Record<string, () => void>).webkitRequestFullscreen();
+      } else if ((elem as unknown as Record<string, unknown>).mozRequestFullScreen) {
+        (elem as unknown as Record<string, () => void>).mozRequestFullScreen();
+      } else if ((elem as unknown as Record<string, unknown>).msRequestFullscreen) {
+        (elem as unknown as Record<string, () => void>).msRequestFullscreen();
       }
     } else {
       // Try standard exit fullscreen API first
       if (document.exitFullscreen) {
         document.exitFullscreen();
-      } else if ((document as any).webkitExitFullscreen) {
-        (document as any).webkitExitFullscreen();
-      } else if ((document as any).mozCancelFullScreen) {
-        (document as any).mozCancelFullScreen();
-      } else if ((document as any).msExitFullscreen) {
-        (document as any).msExitFullscreen();
+      } else if ((document as unknown as Record<string, () => void>).webkitExitFullscreen) {
+        (document as unknown as Record<string, () => void>).webkitExitFullscreen();
+      } else if ((document as unknown as Record<string, () => void>).mozCancelFullScreen) {
+        (document as unknown as Record<string, () => void>).mozCancelFullScreen();
+      } else if ((document as unknown as Record<string, () => void>).msExitFullscreen) {
+        (document as unknown as Record<string, () => void>).msExitFullscreen();
       }
     }
   };

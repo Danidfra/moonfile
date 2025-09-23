@@ -24,10 +24,15 @@ interface GamepadControllerOptions {
   onButtonUp: (playerId: number, buttonId: number) => void;
 }
 
+interface GamepadState {
+  buttons: Array<{ pressed: boolean }>;
+  axes: number[];
+}
+
 export default class GamepadController {
   private onButtonDown: (playerId: number, buttonId: number) => void;
   private onButtonUp: (playerId: number, buttonId: number) => void;
-  private gamepadState: any[];
+  private gamepadState: unknown[];
   private buttonCallback: ((info: ButtonInfo) => void) | null;
   private gamepadConfig?: GamepadConfig;
 
@@ -196,13 +201,13 @@ export default class GamepadController {
     try {
       localStorage.setItem("gamepadConfig", JSON.stringify(gamepadConfig));
       this.gamepadConfig = gamepadConfig;
-    } catch (e) {
+    } catch {
       console.log("Failed to set gamepadConfig in localStorage");
     }
   };
 
   startPolling = (): { stop: () => void } => {
-    if (!(navigator.getGamepads || (navigator as any).webkitGetGamepads)) {
+    if (!(navigator.getGamepads || (navigator as unknown as Record<string, unknown>).webkitGetGamepads)) {
       return { stop: () => {} };
     }
 

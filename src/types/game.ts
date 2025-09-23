@@ -22,7 +22,7 @@ export type Game31996 = {
   sha256?: string;
   assets: GameAsset;
   contentBase64?: string; // event.content
-  event: any;             // raw event (optional, debugging)
+  event?: NostrEvent;     // raw event (optional, debugging)
 };
 
 export type NostrEvent = {

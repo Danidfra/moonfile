@@ -5,7 +5,6 @@ import { FilterSection, GameFilters } from "@/components/games/FilterSection";
 import { GameCardNostr } from "@/components/games/GameCardNostr";
 import { GamesEmptyState } from "@/components/games/GamesEmptyState";
 import { useNostrGames } from "@/hooks/useNostrGames";
-import type { Game31996 } from "@/types/game";
 
 const Games = () => {
   useSeoMeta({

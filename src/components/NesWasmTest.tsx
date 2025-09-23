@@ -190,7 +190,7 @@ export const NesWasmTest: React.FC = () => {
         const romBuffer = await romResponse.arrayBuffer();
         return new Uint8Array(romBuffer);
       }
-    } catch (_error) {
+    } catch (error) {
       console.log('Could not load test ROM from /roms/test-rom.nes, trying base64...');
     }
 

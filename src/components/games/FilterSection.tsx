@@ -19,7 +19,6 @@ import {
   Filter,
   X,
   ChevronDown,
-  Star,
   Search,
   Gamepad2,
   Users,
@@ -92,7 +91,7 @@ export function FilterSection({ onFiltersChange }: FilterSectionProps) {
 
   const [isExpanded, setIsExpanded] = useState(false);
 
-  const updateFilter = (key: keyof GameFilters, value: any) => {
+  const updateFilter = (key: keyof GameFilters, value: string | string[] | number) => {
     const newFilters = { ...filters, [key]: value };
     setFilters(newFilters);
     onFiltersChange(newFilters);

@@ -5,8 +5,8 @@
  */
 
 export interface WasmImports {
-  env?: Record<string, any>;
-  [namespace: string]: Record<string, any> | undefined;
+  env?: Record<string, unknown>;
+  [namespace: string]: Record<string, unknown> | undefined;
 }
 
 export interface WasmValidationResult {
@@ -205,6 +205,6 @@ export function createDefaultImports(memory?: WebAssembly.Memory): WasmImports {
       console_log: (ptr: number) => {
         console.log('[WASM Console]', ptr);
       }
-    }
+    } as Record<string, unknown>
   };
 }

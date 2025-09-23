@@ -1,5 +1,4 @@
 import { Link } from "react-router-dom";
-import { Button } from "@/components/ui/button";
 import { LoginArea } from "@/components/auth/LoginArea";
 
 export function Header() {

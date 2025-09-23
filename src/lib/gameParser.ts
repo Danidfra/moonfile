@@ -30,10 +30,13 @@ export function parseGame(e: NostrEvent): Game31996 | null {
   for (const t of e.tags) {
     if (t[0] === "image") {
       if (t.length === 2) {
+        // Simple format: ["image", "url"]
         assets.cover ??= t[1];
       } else if (t[1] === "cover" && t[2]) {
+        // Typed format: ["image", "cover", "url"]
         assets.cover = t[2];
       } else if (t[1] === "screenshot" && t[2]) {
+        // Screenshot format: ["image", "screenshot", "url"]
         assets.screenshots.push(t[2]);
       }
     } else if (t[0] === "icon" && t[1]) {
@@ -49,13 +52,13 @@ export function parseGame(e: NostrEvent): Game31996 | null {
     summary: firstTagValue(e.tags, "summary"),
     genres: multiTagValues(e.tags, "genre"),
     modes: multiTagValues(e.tags, "mode"),
-    status: firstTagValue(e.tags, "status") as any,
+    status: firstTagValue(e.tags, "status") as "alpha" | "beta" | "released" | "prototype" | string | undefined,
     version: firstTagValue(e.tags, "ver"),
     credits: firstTagValue(e.tags, "credits"),
     platforms: multiTagValues(e.tags, "platforms"),
     mime: firstTagValue(e.tags, "mime"),
-    encoding: firstTagValue(e.tags, "encoding") as any,
-    compression: firstTagValue(e.tags, "compression") as any,
+    encoding: firstTagValue(e.tags, "encoding") as "base64" | string | undefined,
+    compression: firstTagValue(e.tags, "compression") as "none" | "gzip" | string | undefined,
     sizeBytes: size ? Number(size) : undefined,
     sha256: firstTagValue(e.tags, "sha256"),
     assets,

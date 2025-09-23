@@ -2,7 +2,7 @@ import { useSeoMeta } from '@unhead/react';
 import { Header } from "@/components/Header";
 import { Button } from "@/components/ui/button";
 import { Link } from "react-router-dom";
-import { Gamepad2, Users, Zap } from "lucide-react";
+import { Users, Zap } from "lucide-react";
 
 const About = () => {
   useSeoMeta({

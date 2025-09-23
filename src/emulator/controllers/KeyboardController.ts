@@ -29,7 +29,7 @@ type KeyboardControllerOptions = {
 export default class KeyboardController {
   private onButtonDown: (player: number, button: number) => void;
   private onButtonUp: (player: number, button: number) => void;
-  private keys: any = KEYS;
+  private keys: Record<number, [number, number, string]> = KEYS;
 
   constructor(options: KeyboardControllerOptions) {
     this.onButtonDown = options.onButtonDown;
@@ -49,7 +49,7 @@ export default class KeyboardController {
     this.keys = KEYS;
   };
 
-  setKeys = (newKeys: any): void => {
+  setKeys = (newKeys: Record<number, [number, number, string]>): void => {
     try {
       localStorage.setItem("keys", JSON.stringify(newKeys));
       this.keys = newKeys;

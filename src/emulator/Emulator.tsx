@@ -7,6 +7,39 @@ import KeyboardController from "./controllers/KeyboardController";
 import Screen from "./video/Screen";
 import Speakers from "./audio/Speakers";
 
+interface ScreenRef {
+  setBuffer: (buffer: Uint32Array) => void;
+  writeBuffer: () => void;
+  fitInParent: () => void;
+}
+
+interface _SpeakersRef {
+  writeSample: (left: number, right: number) => void;
+  getSampleRate: () => number;
+  start: () => void;
+  stop: () => void;
+  buffer: unknown;
+}
+
+interface FrameTimerRef {
+  start: () => void;
+  stop: () => void;
+  generateFrame: () => void;
+}
+
+interface GamepadControllerRef {
+  loadGamepadConfig: () => void;
+  startPolling: () => { stop: () => void };
+  disableIfGamepadEnabled: (callback: (playerId: number, buttonId: number) => void) => (playerId: number, buttonId: number) => void;
+}
+
+interface KeyboardControllerRef {
+  loadKeys: () => void;
+  handleKeyDown: (e: KeyboardEvent) => void;
+  handleKeyUp: (e: KeyboardEvent) => void;
+  handleKeyPress: (e: KeyboardEvent) => void;
+}
+
 interface EmulatorProps {
   paused?: boolean;
   romData: string;
@@ -14,19 +47,19 @@ interface EmulatorProps {
 }
 
 class Emulator extends Component<EmulatorProps> {
-  screen: any;
-  speakers: any;
+  screen: ScreenRef | null;
+  speakers: unknown | null;
   nes: NES;
-  frameTimer: any;
-  gamepadController: any;
-  keyboardController: any;
-  gamepadPolling: any;
-  fpsInterval: NodeJS.Timeout;
+  frameTimer: FrameTimerRef | null;
+  gamepadController: GamepadControllerRef | null;
+  keyboardController: KeyboardControllerRef | null;
+  gamepadPolling: { stop: () => void } | null;
+  fpsInterval: NodeJS.Timeout | null;
 
   render() {
     return (
       <Screen
-        ref={(screen: any) => {
+        ref={(screen: Screen) => {
           this.screen = screen;
         }}
         onGenerateFrame={() => {
@@ -51,27 +84,31 @@ class Emulator extends Component<EmulatorProps> {
         if (this.props.paused) return;
 
         console.log("Buffer underrun, running another frame to try and catch up");
-        this.frameTimer.generateFrame();
-
-        if (this.speakers.buffer.size() < desiredSize) {
-          console.log("Still buffer underrun, running a second frame");
+        if (this.frameTimer) {
           this.frameTimer.generateFrame();
+        }
+
+        if (this.speakers && (this.speakers as any).buffer.size() < desiredSize) {
+          console.log("Still buffer underrun, running a second frame");
+          if (this.frameTimer) {
+            this.frameTimer.generateFrame();
+          }
         }
       },
     });
 
     this.nes = new NES({
-      onFrame: this.screen.setBuffer,
+      onFrame: this.screen ? this.screen.setBuffer : () => {},
       onStatusUpdate: console.log,
-      onAudioSample: this.speakers.writeSample,
-      sampleRate: this.speakers.getSampleRate(),
+      onAudioSample: this.speakers ? this.speakers.writeSample : () => {},
+      sampleRate: this.speakers ? this.speakers.getSampleRate() : 44100,
     });
 
-    (window as any)["nes"] = this.nes;
+    (window as unknown as Record<string, unknown>)["nes"] = this.nes;
 
     this.frameTimer = new FrameTimer({
       onGenerateFrame: this.nes.frame,
-      onWriteFrame: this.screen.writeBuffer,
+      onWriteFrame: this.screen ? this.screen.writeBuffer : () => {},
     });
 
     this.gamepadController = new GamepadController({
@@ -82,8 +119,8 @@ class Emulator extends Component<EmulatorProps> {
     this.gamepadPolling = this.gamepadController.startPolling();
 
     this.keyboardController = new KeyboardController({
-      onButtonDown: this.gamepadController.disableIfGamepadEnabled(this.nes.buttonDown),
-      onButtonUp: this.gamepadController.disableIfGamepadEnabled(this.nes.buttonUp),
+      onButtonDown: this.gamepadController ? this.gamepadController.disableIfGamepadEnabled(this.nes.buttonDown) : this.nes.buttonDown,
+      onButtonUp: this.gamepadController ? this.gamepadController.disableIfGamepadEnabled(this.nes.buttonUp) : this.nes.buttonUp,
     });
     this.keyboardController.loadKeys();
 
@@ -98,11 +135,15 @@ class Emulator extends Component<EmulatorProps> {
   componentWillUnmount() {
     this.stop();
 
-    document.removeEventListener("keydown", this.keyboardController.handleKeyDown);
-    document.removeEventListener("keyup", this.keyboardController.handleKeyUp);
-    document.removeEventListener("keypress", this.keyboardController.handleKeyPress);
+    if (this.keyboardController) {
+      document.removeEventListener("keydown", this.keyboardController.handleKeyDown);
+      document.removeEventListener("keyup", this.keyboardController.handleKeyUp);
+      document.removeEventListener("keypress", this.keyboardController.handleKeyPress);
+    }
 
-    this.gamepadPolling.stop();
+    if (this.gamepadPolling) {
+      this.gamepadPolling.stop();
+    }
     (window as any)["nes"] = undefined;
   }
 
@@ -118,30 +159,43 @@ class Emulator extends Component<EmulatorProps> {
     if (this.props.muted !== prevProps.muted) {
       if (this.speakers) {
         if (this.props.muted) {
-          this.speakers.stop();
+          (this.speakers as any).stop();
         } else if (!this.props.paused) {
-          this.speakers.start();
+          (this.speakers as any).start();
         }
       }
     }
   }
 
   start = () => {
-    this.frameTimer.start();
-    this.speakers.start();
+    if (this.frameTimer) {
+      this.frameTimer.start();
+    }
+    if (this.speakers) {
+      (this.speakers as any).start();
+    }
     this.fpsInterval = setInterval(() => {
       console.log(`FPS: ${this.nes.getFPS()}`);
     }, 1000);
   };
 
   stop = () => {
-    this.frameTimer.stop();
-    this.speakers.stop();
-    clearInterval(this.fpsInterval);
+    if (this.frameTimer) {
+      this.frameTimer.stop();
+    }
+    if (this.speakers) {
+      (this.speakers as any).stop();
+    }
+    if (this.fpsInterval) {
+      clearInterval(this.fpsInterval);
+      this.fpsInterval = null;
+    }
   };
 
   fitInParent() {
-    this.screen.fitInParent();
+    if (this.screen) {
+      this.screen.fitInParent();
+    }
   }
 }
 

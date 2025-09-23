@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNostr } from "@nostrify/react";
 import type { Game31996, NostrEvent } from "@/types/game";
 import { mergeByD } from "@/lib/gameParser";
@@ -9,7 +9,7 @@ export function useNostrGames() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchGames = async () => {
+  const fetchGames = useCallback(async () => {
     if (!nostr) return;
 
     try {
@@ -33,13 +33,13 @@ export function useNostrGames() {
     } finally {
       setLoading(false);
     }
-  };
+  }, [nostr]);
 
   useEffect(() => {
     if (nostr) {
       fetchGames();
     }
-  }, [nostr]);
+  }, [nostr, fetchGames]);
 
   return {
     games,

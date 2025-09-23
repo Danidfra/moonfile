@@ -1,23 +1,30 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="description" content="Test WebAssembly logging functionality">
+    <meta property="og:type" content="website">
+    <meta property="og:title" content="WASM Logging Test">
+    <meta property="og:description" content="Test WebAssembly logging functionality">
+    <link rel="manifest" href="/manifest.webmanifest">
     <title>WASM Logging Test</title>
 </head>
 <body>
     <h1>WebAssembly Loading Test</h1>
     <p>Check the browser console for detailed logging information.</p>
-    
+
     <script type="module">
         // Import the nes-interface module
         import { initNESCore } from './src/emulator/cores/nes-interface.js';
-        
+
         console.log('[Test] Starting WebAssembly loading test...');
-        
+
         // Test the WASM loading with detailed logging
         async function testWASMLoading() {
             try {
                 console.log('[Test] Attempting to load WASM module...');
-                
+
                 // Create minimal imports for testing
                 const imports = {
                     env: {
@@ -27,18 +34,18 @@
                         }
                     }
                 };
-                
+
                 // This will trigger all the logging we added
                 const result = await initNESCore('/wasm/fceux.wasm', imports);
-                
+
                 console.log('[Test] WASM loaded successfully:', result);
-                
+
             } catch (error) {
                 console.error('[Test] WASM loading failed:', error);
                 console.log('[Test] This is expected if the WASM file is not available or CSP blocks it');
             }
         }
-        
+
         // Run the test
         testWASMLoading();
     </script>
