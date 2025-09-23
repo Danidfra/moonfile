@@ -27,6 +27,8 @@ interface RoomState {
   shareableLink?: string;
   isWebRTCConnected?: boolean;
   chatMessages?: ChatMessage[];
+  pendingHostSignal?: string;
+  canJoinGame?: boolean;
 }
 
 export function useMultiplayerRoom(roomId: string, gameId: string) {
@@ -42,6 +44,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     latestEvent: null,
     isWebRTCConnected: false,
     chatMessages: [],
+    pendingHostSignal: undefined,
+    canJoinGame: false,
   });
 
   const [webRTCConnection, setWebRTCConnection] = useState<RTCPeerConnection | null>(null);
@@ -49,6 +53,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [isHost, setIsHost] = useState(false);
   const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null);
   const [onEmulatorStart, setOnEmulatorStart] = useState<(() => void) | null>(null);
+  const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>('new');
+  const [isJoining, setIsJoining] = useState(false);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
@@ -161,12 +167,28 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
               shareableLink: prev.shareableLink // Preserve shareable link
             }));
 
-            // Only handle remote signal if this is from a different user and we're not the host
-            if (user && latestEvent.pubkey !== user.pubkey && !localSignal && !isHost) {
+            // Check for host signal if we're not the host
+            if (user && latestEvent.pubkey !== user.pubkey && !isHost) {
               const signalTag = latestEvent.tags.find(t => t[0] === 'signal')?.[1];
-              if (signalTag) {
-                console.log('[MultiplayerRoom] Processing remote signal from:', latestEvent.pubkey);
-                handleRemoteSignal(signalTag, latestEvent.pubkey);
+              const hostTag = latestEvent.tags.find(t => t[0] === 'host')?.[1];
+
+              // If this is a signal from the host and we haven't joined yet
+              if (signalTag && hostTag && latestEvent.pubkey === hostTag && !localSignal) {
+                console.log('[MultiplayerRoom] Host signal detected, enabling Join Game button');
+                setRoomState(prev => ({
+                  ...prev,
+                  pendingHostSignal: signalTag,
+                  canJoinGame: true
+                }));
+              }
+            }
+
+            // Process answer signals if we're the host
+            if (user && isHost && latestEvent.pubkey !== user.pubkey) {
+              const playerSignalTag = latestEvent.tags.find(t => t[0] === 'player' && t[1] === latestEvent.pubkey)?.[2];
+              if (playerSignalTag && webRTCConnection) {
+                console.log('[MultiplayerRoom] Processing answer signal from guest:', latestEvent.pubkey);
+                handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
               }
             }
           } catch (error) {
@@ -209,6 +231,20 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         { urls: 'stun:stun1.l.google.com:19302' }
       ]
     });
+
+    // Add connection state logging
+    pc.onconnectionstatechange = () => {
+      console.log('[MultiplayerRoom] Host connection state changed:', pc.connectionState);
+      setConnectionState(pc.connectionState);
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('[MultiplayerRoom] Host ICE connection state changed:', pc.iceConnectionState);
+    };
+
+    pc.onicegatheringstatechange = () => {
+      console.log('[MultiplayerRoom] Host ICE gathering state changed:', pc.iceGatheringState);
+    };
 
     // Create data channels for different purposes
     const gameDataChannel = pc.createDataChannel('game-data');
@@ -291,16 +327,22 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       return;
     }
 
-    if (!webRTCConnection) return;
+    if (!webRTCConnection) {
+      console.warn('[MultiplayerRoom] No WebRTC connection available for signal handling');
+      return;
+    }
 
     try {
       console.log('[MultiplayerRoom] Handling remote signal from:', fromPubkey);
+      console.log('[MultiplayerRoom] Signal data preview:', signal.substring(0, 100) + '...');
 
       const signalData = JSON.parse(signal);
+      console.log('[MultiplayerRoom] Parsed signal type:', signalData.type);
 
       if (signalData.type === 'answer') {
+        console.log('[MultiplayerRoom] Processing answer signal (host side)');
         await webRTCConnection.setRemoteDescription(signalData);
-        console.log('[MultiplayerRoom] Remote description set');
+        console.log('[MultiplayerRoom] Remote description set successfully');
 
         // Only publish status update if this is a new player connection and the player count actually changed
         const isPlayerAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === fromPubkey);
@@ -336,86 +378,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             });
           }
         }
-      } else if (signalData.type === 'offer') {
-        // Handle incoming offer (non-host)
-        const pc = new RTCPeerConnection({
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
-          ]
-        });
-
-        pc.ondatachannel = (event) => {
-          const receivedChannel = event.channel;
-          console.log('[MultiplayerRoom] Received data channel (guest):', receivedChannel.label);
-
-          if (receivedChannel.label === 'chat') {
-            receivedChannel.onopen = () => {
-              console.log('[MultiplayerRoom] Chat data channel opened (guest)');
-              setDataChannel(receivedChannel);
-              setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
-            };
-
-            receivedChannel.onmessage = (event) => {
-              try {
-                const chatMessage: ChatMessage = JSON.parse(event.data);
-                console.log('[MultiplayerRoom] Received chat message (guest):', chatMessage);
-
-                setRoomState(prev => ({
-                  ...prev,
-                  chatMessages: [...(prev.chatMessages || []), chatMessage]
-                }));
-              } catch (error) {
-                console.error('[MultiplayerRoom] Error parsing chat message (guest):', error);
-              }
-            };
-          } else if (receivedChannel.label === 'game-data') {
-            receivedChannel.onopen = () => {
-              console.log('[MultiplayerRoom] Game data channel opened (guest)');
-            };
-
-            receivedChannel.onmessage = (event) => {
-              try {
-                const data = JSON.parse(event.data);
-                console.log('[MultiplayerRoom] Received game state (guest):', data);
-                // Handle game state updates from host (video stream, game data)
-              } catch (error) {
-                console.error('[MultiplayerRoom] Error parsing game data message (guest):', error);
-              }
-            };
-          }
-        };
-
-        await pc.setRemoteDescription(signalData);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-
-        setWebRTCConnection(pc);
-        setLocalSignal(JSON.stringify(answer));
-
-        // Only publish if this player is not already connected and we actually have a new connection
-        const isPlayerAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === user?.pubkey);
-        const newPlayerCount = roomState.connectedPlayers.length + 1;
-
-        if (!isPlayerAlreadyConnected && newPlayerCount !== roomState.connectedPlayers.length) {
-          // Publish answer with connected player info
-          await publishEvent({
-            kind: 31997,
-            content: '',
-            tags: [
-              ['d', roomId],
-              ['game', gameId],
-              ['players', roomState.requiredPlayers.toString()],
-              ['host', roomState.hostPubkey],
-              ['status', 'active'],
-              ['connected', user?.pubkey || ''],
-              ['player', user?.pubkey || '', JSON.stringify(answer)],
-              ['connected_count', newPlayerCount.toString()]
-            ]
-          });
-        }
-
-        console.log('[MultiplayerRoom] Answer published');
+      } else {
+        console.warn('[MultiplayerRoom] Unknown signal type:', signalData.type);
       }
     } catch (error) {
       console.error('[MultiplayerRoom] Error handling remote signal:', error);
@@ -623,6 +587,142 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     setOnEmulatorStart(() => callback);
   }, []);
 
+  // Join game (guest only) - manually process the host's signal
+  const joinGame = useCallback(async () => {
+    if (!user || isHost || !roomState.pendingHostSignal) {
+      console.error('[MultiplayerRoom] Cannot join game: invalid state');
+      return;
+    }
+
+    setIsJoining(true);
+    console.log('[MultiplayerRoom] Guest joining game with host signal');
+
+    try {
+      // Create new peer connection for guest
+      const pc = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
+
+      // Add connection state logging
+      pc.onconnectionstatechange = () => {
+        console.log('[MultiplayerRoom] Guest connection state changed:', pc.connectionState);
+        setConnectionState(pc.connectionState);
+      };
+
+      pc.oniceconnectionstatechange = () => {
+        console.log('[MultiplayerRoom] Guest ICE connection state changed:', pc.iceConnectionState);
+      };
+
+      pc.onicegatheringstatechange = () => {
+        console.log('[MultiplayerRoom] Guest ICE gathering state changed:', pc.iceGatheringState);
+      };
+
+      // Handle incoming data channels from host
+      pc.ondatachannel = (event) => {
+        const receivedChannel = event.channel;
+        console.log('[MultiplayerRoom] Received data channel (guest):', receivedChannel.label);
+
+        if (receivedChannel.label === 'chat') {
+          receivedChannel.onopen = () => {
+            console.log('[MultiplayerRoom] Chat data channel opened (guest)');
+            setDataChannel(receivedChannel);
+            setRoomState(prev => ({
+              ...prev,
+              isWebRTCConnected: true,
+              canJoinGame: false
+            }));
+          };
+
+          receivedChannel.onmessage = (event) => {
+            try {
+              const chatMessage: ChatMessage = JSON.parse(event.data);
+              console.log('[MultiplayerRoom] Received chat message (guest):', chatMessage);
+
+              setRoomState(prev => ({
+                ...prev,
+                chatMessages: [...(prev.chatMessages || []), chatMessage]
+              }));
+            } catch (error) {
+              console.error('[MultiplayerRoom] Error parsing chat message (guest):', error);
+            }
+          };
+        } else if (receivedChannel.label === 'game-data') {
+          receivedChannel.onopen = () => {
+            console.log('[MultiplayerRoom] Game data channel opened (guest)');
+          };
+
+          receivedChannel.onmessage = (event) => {
+            try {
+              const data = JSON.parse(event.data);
+              console.log('[MultiplayerRoom] Received game state (guest):', data);
+              // Handle game state updates from host
+            } catch (error) {
+              console.error('[MultiplayerRoom] Error parsing game data message (guest):', error);
+            }
+          };
+        }
+      };
+
+      // Process the host's offer
+      const hostOffer = JSON.parse(roomState.pendingHostSignal);
+      console.log('[MultiplayerRoom] Setting remote description from host offer');
+      await pc.setRemoteDescription(hostOffer);
+
+      // Create answer
+      console.log('[MultiplayerRoom] Creating answer for host');
+      const answer = await pc.createAnswer();
+      await pc.setLocalDescription(answer);
+
+      // Wait for ICE gathering to complete
+      await new Promise<void>((resolve) => {
+        const checkState = () => {
+          if (pc.iceGatheringState === 'complete') {
+            console.log('[MultiplayerRoom] ICE gathering complete for guest');
+            resolve();
+          } else {
+            setTimeout(checkState, 100);
+          }
+        };
+        checkState();
+      });
+
+      setWebRTCConnection(pc);
+      const answerJson = JSON.stringify(pc.localDescription);
+      setLocalSignal(answerJson);
+
+      // Publish answer as new room event
+      console.log('[MultiplayerRoom] Publishing answer signal to Nostr');
+      await publishEvent({
+        kind: 31997,
+        content: '',
+        tags: [
+          ['d', roomId],
+          ['game', gameId],
+          ['players', roomState.requiredPlayers.toString()],
+          ['host', roomState.hostPubkey],
+          ['status', 'active'],
+          ['connected', user.pubkey],
+          ['player', user.pubkey, answerJson],
+          ['connected_count', (roomState.connectedPlayers.length + 1).toString()]
+        ]
+      });
+
+      console.log('[MultiplayerRoom] Join game process completed successfully');
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error joining game:', error);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to join game'
+      }));
+    } finally {
+      setIsJoining(false);
+    }
+  }, [user, isHost, roomState.pendingHostSignal, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers.length, roomId, gameId, publishEvent]);
+
   // Track room initialization to prevent multiple calls
   const roomInitializationRef = useRef<boolean>(false);
 
@@ -667,6 +767,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     sendGameInput,
     sendGameState,
     sendChatMessage,
-    setEmulatorStartCallback
+    setEmulatorStartCallback,
+    joinGame,
+    isJoining,
+    connectionState
   };
 }

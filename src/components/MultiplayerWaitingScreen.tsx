@@ -20,6 +20,10 @@ interface MultiplayerWaitingScreenProps {
   onStartGame?: () => void;
   error?: string;
   shareableLink?: string;
+  canJoinGame?: boolean;
+  onJoinGame?: () => void;
+  isJoining?: boolean;
+  connectionState?: string;
   className?: string;
 }
 
@@ -32,6 +36,10 @@ export default function MultiplayerWaitingScreen({
   onStartGame,
   error,
   shareableLink,
+  canJoinGame = false,
+  onJoinGame,
+  isJoining = false,
+  connectionState,
   className = ""
 }: MultiplayerWaitingScreenProps) {
   const [copied, setCopied] = useState(false);
@@ -203,7 +211,7 @@ export default function MultiplayerWaitingScreen({
             </div>
           </div>
 
-          {/* Action Button */}
+          {/* Action Buttons */}
           {canStartGame && onStartGame && (
             <Button
               onClick={onStartGame}
@@ -215,10 +223,53 @@ export default function MultiplayerWaitingScreen({
             </Button>
           )}
 
-          {status === 'full' && !isHost && (
+          {/* Join Game button for non-host users */}
+          {!isHost && canJoinGame && onJoinGame && (
+            <div className="space-y-3">
+              <Button
+                onClick={onJoinGame}
+                disabled={isJoining}
+                className="w-full bg-green-600 hover:bg-green-700"
+                size="lg"
+              >
+                {isJoining ? (
+                  <>
+                    <Loader2 className="w-5 h-5 mr-2 animate-spin" />
+                    Joining Game...
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-5 h-5 mr-2" />
+                    Join Game
+                  </>
+                )}
+              </Button>
+              <div className="text-center">
+                <p className="text-xs text-gray-400">
+                  Host is ready! Click to join the multiplayer session.
+                </p>
+                {connectionState && (
+                  <p className="text-xs text-blue-400 mt-1">
+                    Connection: {connectionState}
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {status === 'full' && !isHost && !canJoinGame && (
             <div className="text-center">
               <p className="text-sm text-gray-400">
                 Waiting for host to start the game...
+              </p>
+            </div>
+          )}
+
+          {/* Connection status for debugging */}
+          {connectionState && connectionState !== 'new' && (
+            <div className="text-center">
+              <p className="text-xs text-blue-400">
+                WebRTC Status: {connectionState}
               </p>
             </div>
           )}

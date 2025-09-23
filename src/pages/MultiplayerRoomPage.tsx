@@ -57,7 +57,10 @@ export default function MultiplayerRoomPage() {
     startGame,
     isHost,
     sendChatMessage,
-    setEmulatorStartCallback
+    setEmulatorStartCallback,
+    joinGame,
+    isJoining,
+    connectionState
   } = useMultiplayerRoom(roomId || '', gameId || '');
 
   // Game state
@@ -343,6 +346,10 @@ export default function MultiplayerRoomPage() {
                 onStartGame={startGame}
                 error={roomState.error}
                 shareableLink={roomState.shareableLink}
+                canJoinGame={roomState.canJoinGame}
+                onJoinGame={joinGame}
+                isJoining={isJoining}
+                connectionState={connectionState}
               />
             ) : (
               /* Show emulator or stream view based on role */
