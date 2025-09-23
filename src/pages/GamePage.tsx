@@ -16,6 +16,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
 import NesPlayer from '@/components/NesPlayer';
+import GameInteractionCard from '@/components/GameInteractionCard';
 
 import type { NostrEvent } from '@nostrify/nostrify';
 
@@ -308,6 +309,9 @@ export default function GamePage() {
           {/* Side panel */}
           <div className="lg:col-span-1">
             <div className="space-y-6">
+              {/* Game Interaction Card */}
+              <GameInteractionCard />
+
               {/* Game info */}
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-4 space-y-4">
