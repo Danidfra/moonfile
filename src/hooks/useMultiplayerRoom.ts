@@ -141,20 +141,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
         if (latestEvent) {
           try {
-            // Skip processing if this is our own event
-            if (user && latestEvent.pubkey === user.pubkey) {
-              console.log('[MultiplayerRoom] Skipping processing of own event');
-              return;
-            }
-
             const newRoomState = parseRoomEvent(latestEvent);
-            setRoomState(newRoomState);
+            setRoomState(prev => ({
+              ...newRoomState,
+              shareableLink: prev.shareableLink // Preserve shareable link
+            }));
 
-            // Only handle remote signal if:
-            // 1. The event is from a different user (not our own) - already checked above
-            // 2. We haven't already processed a signal
-            // 3. We're not the host (hosts don't respond to signals)
-            if (!localSignal && !isHost) {
+            // Only handle remote signal if this is from a different user and we're not the host
+            if (user && latestEvent.pubkey !== user.pubkey && !localSignal && !isHost) {
               const signalTag = latestEvent.tags.find(t => t[0] === 'signal')?.[1];
               if (signalTag) {
                 console.log('[MultiplayerRoom] Processing remote signal from:', latestEvent.pubkey);
@@ -375,25 +369,38 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }], { signal: AbortSignal.timeout(5000) });
 
     if (existingEvents && existingEvents.length > 0) {
-      // Room exists, join as player
-      console.log('[MultiplayerRoom] Room exists, joining as player');
+      // Room exists, check if we're the host or joining as player
+      console.log('[MultiplayerRoom] Room exists, checking role...');
       const roomEvent = existingEvents[0];
       const roomData = parseRoomEvent(roomEvent);
 
-      if (roomData.connectedPlayers.length >= roomData.requiredPlayers) {
-        throw new Error('Room is full');
-      }
-
-      setIsHost(false);
-      // Set the shareable link for joining players too
       const shareableLink = `${window.location.origin}/multiplayer/${gameId}/${roomId}`;
-      setRoomState(prev => ({
-        ...prev,
-        shareableLink
-      }));
 
-      // Wait for host signal and respond with answer
-      // This will be handled in the subscription when we receive the offer
+      // Check if current user is the host
+      if (roomData.hostPubkey === user.pubkey) {
+        console.log('[MultiplayerRoom] Current user is the host of existing room');
+        setIsHost(true);
+        setRoomState(prev => ({
+          ...roomData,
+          shareableLink
+        }));
+      } else {
+        // Joining as a guest player
+        console.log('[MultiplayerRoom] Joining as guest player');
+
+        if (roomData.connectedPlayers.length >= roomData.requiredPlayers) {
+          throw new Error('Room is full');
+        }
+
+        setIsHost(false);
+        setRoomState(prev => ({
+          ...roomData,
+          shareableLink
+        }));
+
+        // Wait for host signal and respond with answer
+        // This will be handled in the subscription when we receive the offer
+      }
     } else {
       // Create new room as host - check if already published
       if (alreadyPublishedRef.current) {
@@ -444,12 +451,17 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ]
       });
 
-      // Update state with shareable link
+      // Update state with shareable link and include host as connected player
       setRoomState(prev => ({
         ...prev,
         requiredPlayers: playerCount,
         hostPubkey: user.pubkey,
-        shareableLink
+        shareableLink,
+        connectedPlayers: [{
+          pubkey: user.pubkey,
+          signal: offer
+        }],
+        status: 'waiting'
       }));
 
       console.log('[MultiplayerRoom] Room created successfully');
