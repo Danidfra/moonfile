@@ -55,6 +55,9 @@ export default function MultiplayerChatPanel({
   const [message, setMessage] = useState('');
   const [isMinimized, setIsMinimized] = useState(false);
 
+  console.log('[ChatPanel] isWebRTCConnected:', isWebRTCConnected);
+  console.log('[ChatPanel] connectedPlayers:', connectedPlayers);
+
   const handleSendMessage = () => {
     if (message.trim() && isWebRTCConnected) {
       onSendMessage(message.trim());

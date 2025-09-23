@@ -268,6 +268,19 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         setHasConnectionTimedOut(false);
         setIsConnectionEstablished(true);
         console.log('[MultiplayerRoom] Host connection established successfully');
+
+        // Set isWebRTCConnected only when the actual peer-to-peer connection is fully established
+        setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
+        console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established');
+
+        // Start emulator when connection is fully established (host only)
+        if (isHost && onEmulatorStart) {
+          console.log('[MultiplayerRoom] WebRTC connection fully established, starting emulator on host');
+          // Small delay to ensure everything is ready
+          setTimeout(() => {
+            onEmulatorStart();
+          }, 100);
+        }
       }
     };
 
@@ -330,26 +343,16 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     // Handle chat data channel
     chatDataChannel.onopen = () => {
-      console.log('[MultiplayerRoom] Chat data channel opened');
+      console.log('[MultiplayerRoom] 📡 Chat data channel opened locally (host)');
+      console.log('[MultiplayerRoom] ⏳ Waiting for peer-to-peer connection to be fully established...');
       setDataChannel(chatDataChannel);
 
-      // Clear timeout and set connection as established
-      if (connectionTimeout) {
-        clearTimeout(connectionTimeout);
-        setConnectionTimeout(null);
-      }
-      setHasConnectionTimedOut(false);
-      setIsConnectionEstablished(true);
-
-      // Update connection status and trigger emulator start for host
-      setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
+      // Note: isWebRTCConnected will be set in onconnectionstatechange when connectionState === 'connected'
+      // This ensures we only mark as connected when actual peer-to-peer connection is established
 
       if (isHost && onEmulatorStart) {
-        console.log('[MultiplayerRoom] WebRTC connected, starting emulator on host');
-        // Small delay to ensure everything is ready
-        setTimeout(() => {
-          onEmulatorStart();
-        }, 100);
+        console.log('[MultiplayerRoom] Chat data channel opened, emulator will start when connection is fully established');
+        // We don't start emulator here - wait for actual connection to be established
       }
     };
 
@@ -734,6 +737,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           setHasConnectionTimedOut(false);
           setIsConnectionEstablished(true);
           console.log('[MultiplayerRoom] Guest connection established successfully');
+
+          // Set isWebRTCConnected only when the actual peer-to-peer connection is fully established
+          setRoomState(prev => ({
+            ...prev,
+            isWebRTCConnected: true,
+            canJoinGame: false // Disable join game button once connected
+          }));
+          console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
         }
       };
 
@@ -781,24 +792,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
         if (receivedChannel.label === 'chat') {
           receivedChannel.onopen = () => {
-            console.log('[MultiplayerRoom] Chat data channel opened (guest)');
+            console.log('[MultiplayerRoom] 📡 Chat data channel opened locally (guest)');
+            console.log('[MultiplayerRoom] ⏳ Waiting for peer-to-peer connection to be fully established...');
             setDataChannel(receivedChannel);
 
-            // Clear timeout and mark connection as established
-            if (connectionTimeout) {
-              clearTimeout(connectionTimeout);
-              setConnectionTimeout(null);
-            }
-            setHasConnectionTimedOut(false);
-            setIsConnectionEstablished(true);
+            // Note: isWebRTCConnected will be set in onconnectionstatechange when connectionState === 'connected'
+            // This ensures we only mark as connected when actual peer-to-peer connection is established
 
-            setRoomState(prev => ({
-              ...prev,
-              isWebRTCConnected: true,
-              canJoinGame: false
-            }));
-
-            console.log('[MultiplayerRoom] Guest connection fully established');
+            console.log('[MultiplayerRoom] Guest chat data channel opened, waiting for full connection establishment');
           };
 
           receivedChannel.onmessage = (event) => {
