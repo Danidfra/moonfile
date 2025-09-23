@@ -35,7 +35,7 @@ const GamesPage = () => {
       console.log('[GamesPage] Found', events.length, 'game events');
 
       // Parse events into game metadata using the same parser as other pages
-      const games = events.map(parseGameMetadata).filter(Boolean);
+      const games = events.map(parseGameMetadata).filter((game): game is Game31996 => game !== null);
 
       console.log('[GamesPage] Parsed', games.length, 'valid games');
 

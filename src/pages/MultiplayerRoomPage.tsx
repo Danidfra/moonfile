@@ -11,6 +11,8 @@ import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
 import NesPlayer from '@/components/NesPlayer';
 import MultiplayerChatPanel from '@/components/MultiplayerChatPanel';
+import MultiplayerWaitingScreen from '@/components/MultiplayerWaitingScreen';
+import { useMultiplayerRoom } from '@/hooks/useMultiplayerRoom';
 
 import type { NostrEvent } from '@nostrify/nostrify';
 
@@ -48,6 +50,9 @@ export default function MultiplayerRoomPage() {
   const { gameId, roomId } = useParams<{ gameId: string; roomId: string }>();
   const navigate = useNavigate();
   const { nostr } = useNostr();
+
+  // Multiplayer room state
+  const { roomState, startGame, isHost } = useMultiplayerRoom(roomId || '', gameId || '');
 
   // Game state
   const [status, setStatus] = useState<PlayerState>('loading');
@@ -308,83 +313,98 @@ export default function MultiplayerRoomPage() {
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
           <div className="lg:col-span-3">
-            <NesPlayer
-              romPath={romPath}
-              title={gameMeta.title}
-              className="w-full"
-            />
+            {/* Show waiting screen if game hasn't started yet */}
+            {roomState.status === 'waiting' || roomState.status === 'connecting' || roomState.status === 'ready' ? (
+              <MultiplayerWaitingScreen
+                status={roomState.status}
+                players={roomState.players}
+                requiredPlayers={roomState.requiredPlayers}
+                isHost={isHost}
+                onStartGame={startGame}
+                error={roomState.error}
+              />
+            ) : (
+              /* Show emulator when game is playing */
+              <NesPlayer
+                romPath={romPath}
+                title={gameMeta.title}
+                className="w-full"
+              />
+            )}
 
-            {/* Game Info Card below emulator */}
-            <div className="mt-8">
-              <Card className="border-gray-800 bg-gray-900">
-                <CardHeader>
-                  <CardTitle className="text-white">Game Info</CardTitle>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {gameMeta.assets?.cover && (
-                    <div className="aspect-video rounded-lg overflow-hidden">
-                      <img
-                        src={gameMeta.assets.cover}
-                        alt={gameMeta.title}
-                        className="w-full h-full object-cover"
-                      />
+            {/* Game Info Card below emulator (only show when game is playing) */}
+            {roomState.status === 'playing' && (
+              <div className="mt-8">
+                <Card className="border-gray-800 bg-gray-900">
+                  <CardHeader>
+                    <CardTitle className="text-white">Game Info</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    {gameMeta.assets?.cover && (
+                      <div className="aspect-video rounded-lg overflow-hidden">
+                        <img
+                          src={gameMeta.assets.cover}
+                          alt={gameMeta.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+
+                    <div className="space-y-3 text-sm">
+                      {gameMeta.genres?.length > 0 && (
+                        <div>
+                          <span className="text-gray-500">Genre:</span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {gameMeta.genres.slice(0, 3).map((genre: string) => (
+                              <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                                {genre}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {gameMeta.platforms?.length > 0 && (
+                        <div>
+                          <span className="text-gray-500">Platform:</span>
+                          <div className="flex flex-wrap gap-1 mt-1">
+                            {gameMeta.platforms.slice(0, 2).map((platform: string) => (
+                              <span key={platform} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                                {platform}
+                              </span>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {romInfo && (
+                        <div className="pt-3 border-t border-gray-800">
+                          <span className="text-gray-500">ROM Info:</span>
+                          <div className="text-xs text-gray-400 mt-1 space-y-1">
+                            <div>PRG Banks: {romInfo.header.prgBanks}</div>
+                            <div>CHR Banks: {romInfo.header.chrBanks}</div>
+                            <div>Mapper: {romInfo.header.mapper}</div>
+                            <div>Size: {Math.round(romInfo.size / 1024)}KB</div>
+                            <div>SHA256: {romInfo.sha256.substring(0, 8)}...</div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="pt-4 border-t border-gray-800 mt-4">
+                        <Link
+                          to="https://soapbox.pub/mkstack"
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                        >
+                          Vibed with MKStack
+                        </Link>
+                      </div>
                     </div>
-                  )}
-
-                  <div className="space-y-3 text-sm">
-                    {gameMeta.genres?.length > 0 && (
-                      <div>
-                        <span className="text-gray-500">Genre:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {gameMeta.genres.slice(0, 3).map((genre: string) => (
-                            <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
-                              {genre}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {gameMeta.platforms?.length > 0 && (
-                      <div>
-                        <span className="text-gray-500">Platform:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {gameMeta.platforms.slice(0, 2).map((platform: string) => (
-                            <span key={platform} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
-                              {platform}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {romInfo && (
-                      <div className="pt-3 border-t border-gray-800">
-                        <span className="text-gray-500">ROM Info:</span>
-                        <div className="text-xs text-gray-400 mt-1 space-y-1">
-                          <div>PRG Banks: {romInfo.header.prgBanks}</div>
-                          <div>CHR Banks: {romInfo.header.chrBanks}</div>
-                          <div>Mapper: {romInfo.header.mapper}</div>
-                          <div>Size: {Math.round(romInfo.size / 1024)}KB</div>
-                          <div>SHA256: {romInfo.sha256.substring(0, 8)}...</div>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="pt-4 border-t border-gray-800 mt-4">
-                      <Link
-                        to="https://soapbox.pub/mkstack"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
-                      >
-                        Vibed with MKStack
-                      </Link>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            </div>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
           </div>
 
           {/* Side panel - Multiplayer Chat */}

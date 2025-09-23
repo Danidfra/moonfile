@@ -5,10 +5,10 @@ import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
-import { 
-  MessageCircle, 
-  Users, 
-  Send, 
+import {
+  MessageCircle,
+  Users,
+  Send,
   ChevronDown,
   ChevronUp,
   Minimize2,
@@ -35,10 +35,10 @@ interface MultiplayerChatPanelProps {
   className?: string;
 }
 
-export default function MultiplayerChatPanel({ 
-  gameTitle, 
-  roomId, 
-  className = "" 
+export default function MultiplayerChatPanel({
+  gameTitle,
+  roomId,
+  className = ""
 }: MultiplayerChatPanelProps) {
   const [message, setMessage] = useState('');
   const [isMinimized, setIsMinimized] = useState(false);
@@ -46,20 +46,13 @@ export default function MultiplayerChatPanel({
   // Mock connected users
   const connectedUsers: ConnectedUser[] = [
     { id: '1', username: 'GameMaster', status: 'online' },
-    { id: '2', username: 'SpeedRunner', status: 'playing' },
-    { id: '3', username: 'RetroKing', status: 'online' },
-    { id: '4', username: 'CasualGamer', status: 'away' },
-    { id: '5', username: 'ProPlayer', status: 'online' },
+    { id: '2', username: 'SpeedRunner', status: 'online' },
   ];
 
   // Mock chat messages
   const chatMessages: ChatMessage[] = [
     { id: '1', user: 'System', message: 'Welcome to the multiplayer room!', time: 'Just now', isSystem: true },
-    { id: '2', user: 'GameMaster', message: 'Hey everyone! Ready for some multiplayer action?', time: '1m ago' },
-    { id: '3', user: 'SpeedRunner', message: 'Let\'s do this! I\'m warmed up and ready', time: '45s ago' },
-    { id: '4', user: 'RetroKing', message: 'Anyone up for a cooperative run?', time: '30s ago' },
-    { id: '5', user: 'CasualGamer', message: 'I\'ll join, but go easy on me 😅', time: '15s ago' },
-    { id: '6', user: 'ProPlayer', message: 'Let\'s set some high scores together!', time: 'Just now' },
+    { id: '2', user: 'SpeedRunner', message: 'Let\'s do this! I\'m warmed up and ready', time: '45s ago' },
   ];
 
   const handleSendMessage = () => {
@@ -99,9 +92,9 @@ export default function MultiplayerChatPanel({
                 {connectedUsers.length} online
               </Badge>
             </div>
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setIsMinimized(false)}
               className="text-gray-400 hover:text-white"
             >
@@ -128,9 +121,9 @@ export default function MultiplayerChatPanel({
               <Users className="w-3 h-3 mr-1" />
               {connectedUsers.length} online
             </Badge>
-            <Button 
-              variant="ghost" 
-              size="sm" 
+            <Button
+              variant="ghost"
+              size="sm"
               onClick={() => setIsMinimized(true)}
               className="text-gray-400 hover:text-white"
             >
@@ -200,8 +193,8 @@ export default function MultiplayerChatPanel({
               }
             }}
           />
-          <Button 
-            size="sm" 
+          <Button
+            size="sm"
             className="bg-purple-600 hover:bg-purple-700"
             disabled={!message.trim()}
             onClick={handleSendMessage}
