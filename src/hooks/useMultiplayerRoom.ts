@@ -37,6 +37,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [isHost, setIsHost] = useState(false);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
+  const alreadyPublishedRef = useRef<boolean>(false);
 
   // Parse room event from Nostr event
   const parseRoomEvent = useCallback((event: NostrEvent): RoomState => {
@@ -46,7 +47,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     const hostTag = event.tags.find(t => t[0] === 'host')?.[1];
     const statusTag = event.tags.find(t => t[0] === 'status')?.[1];
     const signalTag = event.tags.find(t => t[0] === 'signal')?.[1];
-    const connectedTag = event.tags.find(t => t[0] === 'connected')?.[1];
     const connectedCountTag = event.tags.find(t => t[0] === 'connected_count')?.[1];
 
     if (!dTag || !gameTag || !playersTag || !hostTag) {
@@ -58,37 +58,37 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       throw new Error('Invalid players count');
     }
 
-    // Parse connected players
+    // Parse connected players, ensuring no duplicates
     const connectedPlayers: ConnectedPlayer[] = [];
+    const seenPubkeys = new Set<string>();
 
-    // Add host
-    connectedPlayers.push({
-      pubkey: hostTag,
-      signal: signalTag
-    });
-
-    // Add connected players from tags
-    if (connectedTag) {
-      // Find player signal for this connected player
-      const playerSignal = event.tags.find(t => t[0] === 'player' && t[1] === connectedTag)?.[2];
+    // Always add host first with their signal
+    if (!seenPubkeys.has(hostTag)) {
       connectedPlayers.push({
-        pubkey: connectedTag,
-        signal: playerSignal
+        pubkey: hostTag,
+        signal: signalTag
       });
+      seenPubkeys.add(hostTag);
     }
 
-    // Also check for any other connected players
-    const otherConnected = event.tags
-      .filter(t => t[0] === 'connected' && t[1] && t[1] !== hostTag && t[1] !== connectedTag)
-      .map(t => {
-        const playerSignal = event.tags.find(tag => tag[0] === 'player' && tag[1] === t[1])?.[2];
-        return {
-          pubkey: t[1],
-          signal: playerSignal
-        };
-      });
+    // Add connected players from tags (excluding host)
+    const connectedTags = event.tags
+      .filter(t => t[0] === 'connected' && t[1] && t[1] !== hostTag)
+      .map(t => t[1]);
 
-    connectedPlayers.push(...otherConnected);
+    // Remove duplicates from connectedTags
+    const uniqueConnectedTags = [...new Set(connectedTags)];
+
+    for (const connectedPubkey of uniqueConnectedTags) {
+      if (!seenPubkeys.has(connectedPubkey)) {
+        const playerSignal = event.tags.find(t => t[0] === 'player' && t[1] === connectedPubkey)?.[2];
+        connectedPlayers.push({
+          pubkey: connectedPubkey,
+          signal: playerSignal
+        });
+        seenPubkeys.add(connectedPubkey);
+      }
+    }
 
     const connectedCount = connectedCountTag ? parseInt(connectedCountTag, 10) : connectedPlayers.length;
 
@@ -141,13 +141,23 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
         if (latestEvent) {
           try {
+            // Skip processing if this is our own event
+            if (user && latestEvent.pubkey === user.pubkey) {
+              console.log('[MultiplayerRoom] Skipping processing of own event');
+              return;
+            }
+
             const newRoomState = parseRoomEvent(latestEvent);
             setRoomState(newRoomState);
 
-            // If we have a signal from another player and we're not the host, handle it
-            if (user && latestEvent.pubkey !== user.pubkey && !isHost) {
+            // Only handle remote signal if:
+            // 1. The event is from a different user (not our own) - already checked above
+            // 2. We haven't already processed a signal
+            // 3. We're not the host (hosts don't respond to signals)
+            if (!localSignal && !isHost) {
               const signalTag = latestEvent.tags.find(t => t[0] === 'signal')?.[1];
-              if (signalTag && !localSignal) {
+              if (signalTag) {
+                console.log('[MultiplayerRoom] Processing remote signal from:', latestEvent.pubkey);
                 handleRemoteSignal(signalTag, latestEvent.pubkey);
               }
             }
@@ -237,6 +247,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
   // Handle remote signal (answer from peer)
   const handleRemoteSignal = useCallback(async (signal: string, fromPubkey: string) => {
+    // Skip processing if the sender is the current user
+    if (user && fromPubkey === user.pubkey) {
+      console.log('[MultiplayerRoom] Skipping processing of own signal');
+      return;
+    }
+
     if (!webRTCConnection) return;
 
     try {
@@ -248,33 +264,39 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         await webRTCConnection.setRemoteDescription(signalData);
         console.log('[MultiplayerRoom] Remote description set');
 
-        // Update room state to active when connection is established
-        if (roomState.connectedPlayers.length >= roomState.requiredPlayers) {
-          await publishEvent({
-            kind: 31997,
-            content: '',
-            tags: [
-              ['d', roomId],
-              ['game', gameId],
-              ['players', roomState.requiredPlayers.toString()],
-              ['host', roomState.hostPubkey],
-              ['status', 'full'],
-              ['connected_count', roomState.connectedPlayers.length.toString()]
-            ]
-          });
-        } else {
-          await publishEvent({
-            kind: 31997,
-            content: '',
-            tags: [
-              ['d', roomId],
-              ['game', gameId],
-              ['players', roomState.requiredPlayers.toString()],
-              ['host', roomState.hostPubkey],
-              ['status', 'active'],
-              ['connected_count', roomState.connectedPlayers.length.toString()]
-            ]
-          });
+        // Only publish status update if this is a new player connection and the player count actually changed
+        const isPlayerAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === fromPubkey);
+        const newPlayerCount = roomState.connectedPlayers.length + 1;
+
+        if (!isPlayerAlreadyConnected && newPlayerCount !== roomState.connectedPlayers.length) {
+          // Update room state to active when connection is established
+          if (newPlayerCount >= roomState.requiredPlayers) {
+            await publishEvent({
+              kind: 31997,
+              content: '',
+              tags: [
+                ['d', roomId],
+                ['game', gameId],
+                ['players', roomState.requiredPlayers.toString()],
+                ['host', roomState.hostPubkey],
+                ['status', 'full'],
+                ['connected_count', newPlayerCount.toString()]
+              ]
+            });
+          } else {
+            await publishEvent({
+              kind: 31997,
+              content: '',
+              tags: [
+                ['d', roomId],
+                ['game', gameId],
+                ['players', roomState.requiredPlayers.toString()],
+                ['host', roomState.hostPubkey],
+                ['status', 'active'],
+                ['connected_count', newPlayerCount.toString()]
+              ]
+            });
+          }
         }
       } else if (signalData.type === 'offer') {
         // Handle incoming offer (non-host)
@@ -308,28 +330,34 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         setWebRTCConnection(pc);
         setLocalSignal(JSON.stringify(answer));
 
-        // Publish answer with connected player info
-        await publishEvent({
-          kind: 31997,
-          content: '',
-          tags: [
-            ['d', roomId],
-            ['game', gameId],
-            ['players', roomState.requiredPlayers.toString()],
-            ['host', roomState.hostPubkey],
-            ['status', 'active'],
-            ['connected', user?.pubkey || ''],
-            ['player', user?.pubkey || '', JSON.stringify(answer)],
-            ['connected_count', (roomState.connectedPlayers.length + 1).toString()]
-          ]
-        });
+        // Only publish if this player is not already connected and we actually have a new connection
+        const isPlayerAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === user?.pubkey);
+        const newPlayerCount = roomState.connectedPlayers.length + 1;
+
+        if (!isPlayerAlreadyConnected && newPlayerCount !== roomState.connectedPlayers.length) {
+          // Publish answer with connected player info
+          await publishEvent({
+            kind: 31997,
+            content: '',
+            tags: [
+              ['d', roomId],
+              ['game', gameId],
+              ['players', roomState.requiredPlayers.toString()],
+              ['host', roomState.hostPubkey],
+              ['status', 'active'],
+              ['connected', user?.pubkey || ''],
+              ['player', user?.pubkey || '', JSON.stringify(answer)],
+              ['connected_count', newPlayerCount.toString()]
+            ]
+          });
+        }
 
         console.log('[MultiplayerRoom] Answer published');
       }
     } catch (error) {
       console.error('[MultiplayerRoom] Error handling remote signal:', error);
     }
-  }, [webRTCConnection, roomId, gameId, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers.length, user, publishEvent]);
+  }, [webRTCConnection, roomId, gameId, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers, user, publishEvent]);
 
   // Join or create room
   const joinOrCreateRoom = useCallback(async () => {
@@ -357,10 +385,22 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }
 
       setIsHost(false);
+      // Set the shareable link for joining players too
+      const shareableLink = `${window.location.origin}/multiplayer/${gameId}/${roomId}`;
+      setRoomState(prev => ({
+        ...prev,
+        shareableLink
+      }));
+
       // Wait for host signal and respond with answer
       // This will be handled in the subscription when we receive the offer
     } else {
-      // Create new room as host
+      // Create new room as host - check if already published
+      if (alreadyPublishedRef.current) {
+        console.log('[MultiplayerRoom] Room already published, skipping creation');
+        return;
+      }
+
       console.log('[MultiplayerRoom] Creating new room as host');
 
       // First, get game metadata to determine number of players
@@ -387,6 +427,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       // Generate shareable link
       const shareableLink = `${window.location.origin}/multiplayer/${gameId}/${roomId}`;
+
+      // Mark as published before publishing to prevent race conditions
+      alreadyPublishedRef.current = true;
 
       await publishEvent({
         kind: 31997,
@@ -468,10 +511,17 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [webRTCConnection, isHost]);
 
+  // Track room initialization to prevent multiple calls
+  const roomInitializationRef = useRef<boolean>(false);
+
   // Initialize room on mount
   useEffect(() => {
-    if (roomId && gameId) {
+    if (roomId && gameId && !roomInitializationRef.current) {
+      console.log('[MultiplayerRoom] Initializing room for the first time');
+      roomInitializationRef.current = true;
+
       subscribeToRoom();
+
       joinOrCreateRoom().catch(error => {
         console.error('[MultiplayerRoom] Error joining/creating room:', error);
         setRoomState(prev => ({
@@ -488,6 +538,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }
       if (webRTCConnection) {
         webRTCConnection.close();
+      }
+      // Reset initialization flag when room changes
+      if (roomId || gameId) {
+        roomInitializationRef.current = false;
       }
     };
   }, [roomId, gameId, subscribeToRoom, joinOrCreateRoom]);

@@ -176,25 +176,18 @@ export default function MultiplayerWaitingScreen({
             </div>
 
             <div className="space-y-2">
-              {/* Host */}
-              <PlayerCard
-                pubkey={hostPubkey}
-                isHost={true}
-                connected={true}
-              />
-
-              {/* Connected Players */}
+              {/* Show all connected players (host is already included in connectedPlayers) */}
               {connectedPlayers.map((player, index) => (
                 <PlayerCard
                   key={player.pubkey}
                   pubkey={player.pubkey}
-                  isHost={false}
+                  isHost={player.pubkey === hostPubkey}
                   connected={true}
                 />
               ))}
 
               {/* Empty slots */}
-              {Array.from({ length: requiredPlayers - connectedPlayers.length - 1 }).map((_, index) => (
+              {Array.from({ length: requiredPlayers - connectedPlayers.length }).map((_, index) => (
                 <div key={`empty-${index}`} className="flex items-center gap-3 p-3 border border-dashed border-gray-700 rounded-lg bg-gray-800/50">
                   <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
                     <span className="text-xs text-gray-500">?</span>
