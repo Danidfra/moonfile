@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -57,6 +57,13 @@ export default function MultiplayerChatPanel({
 
   console.log('[ChatPanel] isWebRTCConnected:', isWebRTCConnected);
   console.log('[ChatPanel] connectedPlayers:', connectedPlayers);
+
+  // Add debug useEffect to track prop changes
+  useEffect(() => {
+    console.log('[ChatPanel] Updated isWebRTCConnected:', isWebRTCConnected);
+    console.log('[ChatPanel] Updated connectedPlayers:', connectedPlayers);
+    console.log('[ChatPanel] Updated chatMessages:', chatMessages);
+  }, [isWebRTCConnected, connectedPlayers, chatMessages]);
 
   const handleSendMessage = () => {
     if (message.trim() && isWebRTCConnected) {

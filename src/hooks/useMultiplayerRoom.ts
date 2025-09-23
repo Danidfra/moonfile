@@ -124,8 +124,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       requiredPlayers,
       connectedPlayers,
       latestEvent: event,
+      isWebRTCConnected: roomState.isWebRTCConnected, // Preserve existing WebRTC connection state
+      chatMessages: roomState.chatMessages, // Preserve existing chat messages
+      shareableLink: roomState.shareableLink, // Preserve shareable link
+      pendingHostSignal: roomState.pendingHostSignal, // Preserve pending host signal
+      canJoinGame: roomState.canJoinGame, // Preserve can join game state
+      error: roomState.error, // Preserve error state
     };
-  }, []);
+  }, [roomState.isWebRTCConnected, roomState.chatMessages, roomState.shareableLink, roomState.pendingHostSignal, roomState.canJoinGame, roomState.error]);
 
   // Subscribe to room updates - get latest event
   const fetchLatestRoomEvent = useCallback(async () => {
@@ -176,7 +182,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             const newRoomState = parseRoomEvent(latestEvent, roomState.hostPubkey);
             setRoomState(prev => ({
               ...newRoomState,
-              shareableLink: prev.shareableLink // Preserve shareable link
+              // Preserve all existing state properties that shouldn't be overwritten
+              shareableLink: prev.shareableLink,
+              isWebRTCConnected: prev.isWebRTCConnected, // Preserve WebRTC connection state
+              chatMessages: prev.chatMessages, // Preserve chat messages
+              pendingHostSignal: prev.pendingHostSignal, // Preserve pending host signal
+              canJoinGame: prev.canJoinGame, // Preserve can join game state
+              error: prev.error, // Preserve error state
             }));
 
             // Mark event as processed
@@ -206,8 +218,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
               if (playerSignalTag && webRTCConnection && !processedPeerSignals.has(latestEvent.pubkey)) {
                 console.log('[MultiplayerRoom] Processing answer signal from guest:', latestEvent.pubkey);
 
-                // Process the answer signal through the handler
-                handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
+                // Process the answer signal through the handler with event context
+                handleRemoteSignalWithEvent(playerSignalTag, latestEvent.pubkey, latestEvent);
 
                 // Mark peer as processed to prevent duplicate processing
                 setProcessedPeerSignals(prev => new Set([...prev, latestEvent.pubkey]));
@@ -448,9 +460,16 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         const newPlayerCount = roomState.connectedPlayers.length + 1;
 
         if (!isPlayerAlreadyConnected && newPlayerCount !== roomState.connectedPlayers.length) {
-          // Ensure host tag is present and valid before publishing
-          if (!roomState.hostPubkey || !roomState.requiredPlayers) {
-            console.error('[MultiplayerRoom] Cannot publish event: missing required host info');
+          // Ensure host tag is present and valid before publishing - fallback to current user if missing
+          const hostTag = roomState.hostPubkey || user?.pubkey;
+
+          if (!hostTag || !roomState.requiredPlayers) {
+            console.error('[MultiplayerRoom] Cannot publish event: missing required host info', {
+              hostTag,
+              roomStateHostPubkey: roomState.hostPubkey,
+              userPubkey: user?.pubkey,
+              requiredPlayers: roomState.requiredPlayers
+            });
             return;
           }
 
@@ -469,7 +488,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                 ['d', roomId],
                 ['game', gameId],
                 ['players', roomState.requiredPlayers.toString()],
-                ['host', roomState.hostPubkey], // Ensure host tag is always included
+                ['host', hostTag], // Use fallback host tag
                 ['status', 'full'],
                 ['connected_count', newPlayerCount.toString()]
               ]
@@ -482,7 +501,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                 ['d', roomId],
                 ['game', gameId],
                 ['players', roomState.requiredPlayers.toString()],
-                ['host', roomState.hostPubkey], // Ensure host tag is always included
+                ['host', hostTag], // Use fallback host tag
                 ['status', 'active'],
                 ['connected_count', newPlayerCount.toString()]
               ]
@@ -526,7 +545,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         setIsHost(true);
         setRoomState(prev => ({
           ...roomData,
-          shareableLink
+          shareableLink,
+          // Preserve existing state properties
+          isWebRTCConnected: prev.isWebRTCConnected,
+          chatMessages: prev.chatMessages,
+          pendingHostSignal: prev.pendingHostSignal,
+          canJoinGame: prev.canJoinGame,
+          error: prev.error,
         }));
       } else {
         // Joining as a guest player
@@ -539,7 +564,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         setIsHost(false);
         setRoomState(prev => ({
           ...roomData,
-          shareableLink
+          shareableLink,
+          // Preserve existing state properties
+          isWebRTCConnected: prev.isWebRTCConnected,
+          chatMessages: prev.chatMessages,
+          pendingHostSignal: prev.pendingHostSignal,
+          canJoinGame: prev.canJoinGame,
+          error: prev.error,
         }));
 
         // Wait for host signal and respond with answer
@@ -605,7 +636,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           pubkey: user.pubkey,
           signal: offer
         }],
-        status: 'waiting'
+        status: 'waiting',
+        // Preserve existing state properties
+        isWebRTCConnected: prev.isWebRTCConnected,
+        chatMessages: prev.chatMessages,
+        pendingHostSignal: prev.pendingHostSignal,
+        canJoinGame: prev.canJoinGame,
+        error: prev.error,
       }));
 
       console.log('[MultiplayerRoom] Room created successfully');
@@ -890,10 +927,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       const answerJson = JSON.stringify(pc.localDescription);
       setLocalSignal(answerJson);
 
-      // Validate required fields before publishing
-      if (!roomState.hostPubkey || !roomState.requiredPlayers || !roomId || !gameId) {
+      // Validate required fields before publishing - fallback to current user if hostPubkey is missing
+      const hostTag = roomState.hostPubkey || user?.pubkey;
+
+      if (!hostTag || !roomState.requiredPlayers || !roomId || !gameId) {
         console.error('[MultiplayerRoom] Cannot publish answer event: missing required fields', {
           hostPubkey: roomState.hostPubkey,
+          fallbackHostTag: hostTag,
+          userPubkey: user?.pubkey,
           requiredPlayers: roomState.requiredPlayers,
           roomId,
           gameId
@@ -923,7 +964,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           ['d', roomId],
           ['game', gameId],
           ['players', roomState.requiredPlayers.toString()],
-          ['host', roomState.hostPubkey], // Always include host tag
+          ['host', hostTag], // Use fallback host tag
           ['status', 'active'],
           ['connected', user.pubkey],
           ['player', user.pubkey, answerJson],
@@ -955,6 +996,115 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       setIsJoining(false);
     }
   }, [user, isHost, roomState.pendingHostSignal, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers.length, roomId, gameId, publishEvent]);
+
+  // Handle remote signal with event context (for accessing event.tags)
+  const handleRemoteSignalWithEvent = useCallback(async (signal: string, fromPubkey: string, event: NostrEvent) => {
+    // Skip processing if the sender is the current user
+    if (user && fromPubkey === user.pubkey) {
+      console.log('[MultiplayerRoom] Skipping processing of own signal');
+      return;
+    }
+
+    if (!webRTCConnection) {
+      console.warn('[MultiplayerRoom] No WebRTC connection available for signal handling');
+      return;
+    }
+
+    try {
+      console.log('[MultiplayerRoom] Handling remote signal from:', fromPubkey);
+      console.log('[MultiplayerRoom] Signal data preview:', signal.substring(0, 100) + '...');
+      console.log('[MultiplayerRoom] Current connection signaling state:', webRTCConnection.signalingState);
+
+      const signalData = JSON.parse(signal);
+      console.log('[MultiplayerRoom] Parsed signal type:', signalData.type);
+
+      if (signalData.type === 'answer') {
+        console.log('[MultiplayerRoom] Processing answer signal (host side)');
+        console.log('[MultiplayerRoom] Host connection signaling state:', webRTCConnection.signalingState);
+
+        // Check if we can safely set remote description
+        // For answer processing, we expect to be in 'have-local-offer' state
+        if (webRTCConnection.signalingState === 'closed') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - connection closed');
+          return;
+        }
+
+        // Check if already processed this answer
+        if (webRTCConnection.signalingState === 'stable') {
+          console.log('[MultiplayerRoom] Connection already stable, answer already processed');
+          return;
+        }
+
+        // Only accept answers when we have a local offer (the correct state)
+        if (webRTCConnection.signalingState !== 'have-local-offer') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - expected have-local-offer state, got:', webRTCConnection.signalingState);
+          return;
+        }
+
+        console.log('[MultiplayerRoom] Setting remote description for answer');
+        await webRTCConnection.setRemoteDescription(signalData);
+        console.log('[MultiplayerRoom] Remote description set successfully, new state:', webRTCConnection.signalingState);
+
+        // Only publish status update if this is a new player connection and the player count actually changed
+        const isPlayerAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === fromPubkey);
+        const newPlayerCount = roomState.connectedPlayers.length + 1;
+
+        if (!isPlayerAlreadyConnected && newPlayerCount !== roomState.connectedPlayers.length) {
+          // Ensure host tag is present and valid before publishing - fallback to current user if missing
+          const hostTag = roomState.hostPubkey || user?.pubkey;
+
+          if (!hostTag || !roomState.requiredPlayers) {
+            console.error('[MultiplayerRoom] Cannot publish event: missing required host info', {
+              hostTag,
+              roomStateHostPubkey: roomState.hostPubkey,
+              userPubkey: user?.pubkey,
+              requiredPlayers: roomState.requiredPlayers
+            });
+            return;
+          }
+
+          // Prevent publishing events if connection is already established
+          if (isConnectionEstablished) {
+            console.log('[MultiplayerRoom] Skipping event publication - connection already established');
+            return;
+          }
+
+          // Update room state to active when connection is established
+          if (newPlayerCount >= roomState.requiredPlayers) {
+            await publishEvent({
+              kind: 31997,
+              content: '',
+              tags: [
+                ['d', roomId],
+                ['game', gameId],
+                ['players', roomState.requiredPlayers.toString()],
+                ['host', hostTag], // Use fallback host tag
+                ['status', 'full'],
+                ['connected_count', newPlayerCount.toString()]
+              ]
+            });
+          } else {
+            await publishEvent({
+              kind: 31997,
+              content: '',
+              tags: [
+                ['d', roomId],
+                ['game', gameId],
+                ['players', roomState.requiredPlayers.toString()],
+                ['host', hostTag], // Use fallback host tag
+                ['status', 'active'],
+                ['connected_count', newPlayerCount.toString()]
+              ]
+            });
+          }
+        }
+      } else {
+        console.warn('[MultiplayerRoom] Unknown signal type:', signalData.type);
+      }
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error handling remote signal:', error);
+    }
+  }, [webRTCConnection, roomId, gameId, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers, user, publishEvent, isConnectionEstablished]);
 
   // Retry connection after timeout or failure
   const retryConnection = useCallback(() => {
