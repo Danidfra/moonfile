@@ -4,5 +4,7 @@
   image-rendering: crisp-edges;
   background: black;
   display: block;
-  margin: 0 auto;
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
 }

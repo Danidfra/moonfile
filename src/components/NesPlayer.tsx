@@ -104,9 +104,9 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   };
 
   const handleMuteToggle = () => {
-    setIsMuted(!isMuted);
-    // Note: Audio muting would need to be implemented in Emulator component
-    console.log(`[NesPlayer] Audio ${isMuted ? 'unmuted' : 'muted'}`);
+    const newMutedState = !isMuted;
+    setIsMuted(newMutedState);
+    console.log(`[NesPlayer] Audio ${newMutedState ? 'muted' : 'unmuted'}`);
   };
 
   if (error) {
@@ -152,13 +152,14 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
       <Card className="w-full max-w-4xl bg-black border-2">
         <CardContent className="p-4">
           <div
-            className="relative bg-black rounded-lg overflow-hidden"
-            style={{ aspectRatio: '256/240' }}
+            className="relative bg-black rounded-lg overflow-hidden flex items-center justify-center"
+            style={{ minHeight: '360px' }}
           >
             <Emulator
               key={emulatorKey}
               romData={romPath}
               paused={isPaused}
+              muted={isMuted}
             />
           </div>
         </CardContent>

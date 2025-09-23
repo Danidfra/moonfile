@@ -83,16 +83,31 @@ export default class Screen extends Component<ScreenProps> {
     const parent = this.canvas.parentElement;
     const parentWidth = parent.clientWidth;
     const parentHeight = parent.clientHeight;
-    const parentRatio = parentWidth / parentHeight;
-    const desiredRatio = SCREEN_WIDTH / SCREEN_HEIGHT;
 
-    if (desiredRatio < parentRatio) {
-      this.canvas.style.width = `${Math.round(parentHeight * desiredRatio)}px`;
-      this.canvas.style.height = `${parentHeight}px`;
-    } else {
-      this.canvas.style.width = `${parentWidth}px`;
-      this.canvas.style.height = `${Math.round(parentWidth / desiredRatio)}px`;
+    // Scale factor for better sizing (1.5x scale)
+    const scaleFactor = 1.5;
+    const scaledWidth = SCREEN_WIDTH * scaleFactor;
+    const scaledHeight = SCREEN_HEIGHT * scaleFactor;
+
+    // Calculate maximum size that fits within the parent while maintaining aspect ratio
+    let targetWidth = scaledWidth;
+    let targetHeight = scaledHeight;
+
+    // If scaled size is too big for parent, scale it down
+    if (targetWidth > parentWidth || targetHeight > parentHeight) {
+      const widthScale = parentWidth / scaledWidth;
+      const heightScale = parentHeight / scaledHeight;
+      const minScale = Math.min(widthScale, heightScale);
+
+      targetWidth = Math.round(scaledWidth * minScale);
+      targetHeight = Math.round(scaledHeight * minScale);
     }
+
+    // Center the canvas in the parent
+    this.canvas.style.width = `${targetWidth}px`;
+    this.canvas.style.height = `${targetHeight}px`;
+    this.canvas.style.margin = 'auto';
+    this.canvas.style.display = 'block';
   };
 
   screenshot(): HTMLImageElement {

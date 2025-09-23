@@ -10,6 +10,7 @@ import Speakers from "./audio/Speakers";
 interface EmulatorProps {
   paused?: boolean;
   romData: string;
+  muted?: boolean;
 }
 
 class Emulator extends Component<EmulatorProps> {
@@ -111,6 +112,16 @@ class Emulator extends Component<EmulatorProps> {
         this.stop();
       } else {
         this.start();
+      }
+    }
+
+    if (this.props.muted !== prevProps.muted) {
+      if (this.speakers) {
+        if (this.props.muted) {
+          this.speakers.stop();
+        } else if (!this.props.paused) {
+          this.speakers.start();
+        }
       }
     }
   }
