@@ -206,23 +206,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
               if (playerSignalTag && webRTCConnection && !processedPeerSignals.has(latestEvent.pubkey)) {
                 console.log('[MultiplayerRoom] Processing answer signal from guest:', latestEvent.pubkey);
 
-                // Check if connection can accept remote description
-                if (webRTCConnection.signalingState !== 'stable' &&
-                    webRTCConnection.signalingState !== 'closed') {
-                  handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
-                  // Mark peer as processed
-                  setProcessedPeerSignals(prev => new Set([...prev, latestEvent.pubkey]));
-                } else {
-                  console.warn('[MultiplayerRoom] Skipping answer signal - connection in state:', webRTCConnection.signalingState);
-                }
+                // Process the answer signal through the handler
+                handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
 
-                // Check if connection can accept remote description
-                if (webRTCConnection.signalingState !== 'stable' &&
-                    webRTCConnection.signalingState !== 'closed') {
-                  handleRemoteSignal(playerSignalTag, latestEvent.pubkey);
-                } else {
-                  console.warn('[MultiplayerRoom] Skipping answer signal - connection in state:', webRTCConnection.signalingState);
-                }
+                // Mark peer as processed to prevent duplicate processing
+                setProcessedPeerSignals(prev => new Set([...prev, latestEvent.pubkey]));
               }
             }
           } catch (error) {
@@ -279,6 +267,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         }
         setHasConnectionTimedOut(false);
         setIsConnectionEstablished(true);
+        console.log('[MultiplayerRoom] Host connection established successfully');
       }
     };
 
@@ -294,7 +283,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         }
         setHasConnectionTimedOut(false);
         setIsConnectionEstablished(true);
+        console.log('[MultiplayerRoom] Host ICE connection established successfully');
       }
+    };
+
+    // Add signaling state change tracking for debugging
+    pc.onsignalingstatechange = () => {
+      console.log('[MultiplayerRoom] Host signaling state changed:', pc.signalingState);
     };
 
     pc.onicegatheringstatechange = () => {
@@ -351,7 +346,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       if (isHost && onEmulatorStart) {
         console.log('[MultiplayerRoom] WebRTC connected, starting emulator on host');
-        onEmulatorStart();
+        // Small delay to ensure everything is ready
+        setTimeout(() => {
+          onEmulatorStart();
+        }, 100);
       }
     };
 
@@ -417,27 +415,24 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       if (signalData.type === 'answer') {
         console.log('[MultiplayerRoom] Processing answer signal (host side)');
+        console.log('[MultiplayerRoom] Host connection signaling state:', webRTCConnection.signalingState);
 
         // Check if we can safely set remote description
-        if (webRTCConnection.signalingState === 'stable') {
-          console.warn('[MultiplayerRoom] Cannot set remote answer - connection already stable');
-          return;
-        }
-
+        // For answer processing, we expect to be in 'have-local-offer' state
         if (webRTCConnection.signalingState === 'closed') {
           console.warn('[MultiplayerRoom] Cannot set remote answer - connection closed');
           return;
         }
 
-        // Also check for have-remote-offer state to prevent redundant calls
-        if (webRTCConnection.signalingState === 'have-remote-offer') {
-          console.warn('[MultiplayerRoom] Cannot set remote answer - already have remote offer');
+        // Check if already processed this answer
+        if (webRTCConnection.signalingState === 'stable') {
+          console.log('[MultiplayerRoom] Connection already stable, answer already processed');
           return;
         }
 
-        // Check for have-local-offer state (guest side)
-        if (webRTCConnection.signalingState === 'have-local-offer') {
-          console.warn('[MultiplayerRoom] Cannot set remote answer - already have local offer');
+        // Only accept answers when we have a local offer (the correct state)
+        if (webRTCConnection.signalingState !== 'have-local-offer') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - expected have-local-offer state, got:', webRTCConnection.signalingState);
           return;
         }
 
@@ -707,6 +702,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       return;
     }
 
+    // Prevent multiple join attempts
+    if (isJoining || isConnectionEstablished) {
+      console.log('[MultiplayerRoom] Already joining or connection established, skipping duplicate attempt');
+      return;
+    }
+
     setIsJoining(true);
     console.log('[MultiplayerRoom] Guest joining game with host signal');
 
@@ -731,6 +732,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             setConnectionTimeout(null);
           }
           setHasConnectionTimedOut(false);
+          setIsConnectionEstablished(true);
+          console.log('[MultiplayerRoom] Guest connection established successfully');
         }
       };
 
@@ -745,7 +748,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             setConnectionTimeout(null);
           }
           setHasConnectionTimedOut(false);
+          setIsConnectionEstablished(true);
+          console.log('[MultiplayerRoom] Guest ICE connection established successfully');
         }
+      };
+
+      // Add signaling state change tracking for debugging
+      pc.onsignalingstatechange = () => {
+        console.log('[MultiplayerRoom] Guest signaling state changed:', pc.signalingState);
       };
 
       pc.onicegatheringstatechange = () => {
@@ -787,6 +797,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
               isWebRTCConnected: true,
               canJoinGame: false
             }));
+
+            console.log('[MultiplayerRoom] Guest connection fully established');
           };
 
           receivedChannel.onmessage = (event) => {
@@ -825,11 +837,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       console.log('[MultiplayerRoom] Guest connection signaling state:', pc.signalingState);
 
       // Check if connection can accept remote description
-      if (pc.signalingState === 'stable') {
-        console.warn('[MultiplayerRoom] Cannot set remote offer - connection already stable');
-        throw new Error('Connection already established');
-      }
-
+      // Note: 'stable' state is actually the correct state for setting a remote offer
+      // It means the connection is ready and hasn't started negotiating yet
       if (pc.signalingState === 'closed') {
         console.warn('[MultiplayerRoom] Cannot set remote offer - connection closed');
         throw new Error('Connection is closed');
@@ -845,6 +854,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       if (pc.signalingState === 'have-local-offer') {
         console.warn('[MultiplayerRoom] Cannot set remote offer - already have local offer');
         throw new Error('Local offer already created');
+      }
+
+      // 'stable' is actually the correct state for setting remote offer
+      // 'new' is also acceptable
+      const validStates = ['stable', 'new'] as const;
+      if (!validStates.includes(pc.signalingState as any)) {
+        console.warn('[MultiplayerRoom] Cannot set remote offer - connection in unexpected state:', pc.signalingState);
+        throw new Error(`Connection in unexpected state: ${pc.signalingState}`);
       }
 
       await pc.setRemoteDescription(hostOffer);
@@ -889,6 +906,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         return;
       }
 
+      // Guard against duplicate publication
+      const isAlreadyConnected = roomState.connectedPlayers.some(p => p.pubkey === user.pubkey);
+      if (isAlreadyConnected) {
+        console.log('[MultiplayerRoom] Player already connected, skipping duplicate publication');
+        return;
+      }
+
       // Publish answer as new room event
       console.log('[MultiplayerRoom] Publishing answer signal to Nostr');
       await publishEvent({
@@ -909,10 +933,22 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       console.log('[MultiplayerRoom] Join game process completed successfully');
     } catch (error) {
       console.error('[MultiplayerRoom] Error joining game:', error);
+      const errorMessage = error instanceof Error ? error.message : 'Failed to join game';
+
+      // Provide more specific error messages for common issues
+      let userFriendlyError = errorMessage;
+      if (errorMessage.includes('Connection already established')) {
+        userFriendlyError = 'Connection already established. The game should start shortly.';
+      } else if (errorMessage.includes('stable')) {
+        userFriendlyError = 'Connection negotiation in progress. Please wait...';
+      } else if (errorMessage.includes('closed')) {
+        userFriendlyError = 'Connection closed. Please try again.';
+      }
+
       setRoomState(prev => ({
         ...prev,
         status: 'error',
-        error: error instanceof Error ? error.message : 'Failed to join game'
+        error: userFriendlyError
       }));
     } finally {
       setIsJoining(false);

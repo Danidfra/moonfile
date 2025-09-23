@@ -13,7 +13,7 @@ interface ConnectedPlayer {
 }
 
 interface MultiplayerWaitingScreenProps {
-  status: 'waiting' | 'active' | 'full' | 'error';
+  status: 'waiting' | 'active' | 'full' | 'error' | 'playing';
   connectedPlayers: ConnectedPlayer[];
   requiredPlayers: number;
   hostPubkey: string;
@@ -158,6 +158,18 @@ export default function MultiplayerWaitingScreen({
                 </div>
                 <p className="text-sm text-gray-400">
                   Ready to start the game
+                </p>
+              </div>
+            )}
+
+            {status === 'playing' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-center gap-2 text-green-400">
+                  <Play className="w-5 h-5" />
+                  <span className="font-medium">Game in progress!</span>
+                </div>
+                <p className="text-sm text-gray-400">
+                  The game has started and is running
                 </p>
               </div>
             )}
