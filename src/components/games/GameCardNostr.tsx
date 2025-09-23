@@ -14,7 +14,7 @@ export function GameCardNostr({ game }: GameCardNostrProps) {
   const navigate = useNavigate();
   const [imageError, setImageError] = useState(false);
 
-  // Get cover image with fallbacks
+  // Get cover image with fallbacks -优先级: cover > icon > banner
   const coverImage = game.assets.cover || game.assets.icon || game.assets.banner;
   const hasImage = coverImage && !imageError;
 
@@ -45,10 +45,22 @@ export function GameCardNostr({ game }: GameCardNostrProps) {
     setImageError(true);
   };
 
+  // Validate image URL format
+  const isValidImageUrl = (url: string) => {
+    try {
+      new URL(url);
+      return true;
+    } catch {
+      return false;
+    }
+  };
+
+  const shouldShowImage = hasImage && isValidImageUrl(coverImage);
+
   return (
     <Card className="group overflow-hidden border-gray-800 bg-gray-900 hover:border-purple-500 transition-all duration-300 hover:scale-105 hover:shadow-lg hover:shadow-purple-500/30">
       <div className="relative aspect-video overflow-hidden bg-gray-800">
-        {hasImage ? (
+        {shouldShowImage ? (
           <img
             src={coverImage}
             alt={`${game.title} cover art`}
@@ -57,12 +69,22 @@ export function GameCardNostr({ game }: GameCardNostrProps) {
             loading="lazy"
           />
         ) : (
-          <div className="w-full h-full bg-gradient-to-br from-purple-900/30 via-gray-800/50 to-cyan-900/30 flex items-center justify-center">
-            <div className="text-center">
-              <div className="w-20 h-20 bg-gray-700/50 rounded-xl flex items-center justify-center mb-3 mx-auto backdrop-blur-sm">
-                <ImageIcon className="w-10 h-10 text-gray-500" />
+          <div className="w-full h-full bg-gradient-to-br from-purple-900/30 via-gray-800/50 to-cyan-900/30 flex items-center justify-center relative overflow-hidden">
+            {/* Animated background pattern */}
+            <div className="absolute inset-0 opacity-10">
+              <div className="w-full h-full bg-repeat"
+                   style={{
+                     backgroundImage: `url("data:image/svg+xml,%3Csvg width='40' height='40' viewBox='0 0 40 40' xmlns='http://www.w3.org/2000/svg'%3E%3Cg fill='%239C92AC' fill-opacity='0.4'%3E%3Cpath d='M0 40L40 0H20L0 20M40 40V20L20 40'/%3E%3C/g%3E%3C/svg%3E")`,
+                     backgroundSize: '40px 40px'
+                   }} />
+            </div>
+
+            <div className="text-center relative z-10">
+              <div className="w-20 h-20 bg-gray-700/50 rounded-xl flex items-center justify-center mb-3 mx-auto backdrop-blur-sm border border-gray-600/30 shadow-lg">
+                <ImageIcon className="w-10 h-10 text-gray-400" />
               </div>
-              <p className="text-gray-500 text-sm font-medium">No Cover Image</p>
+              <p className="text-gray-400 text-sm font-medium mb-1">No Cover Image</p>
+              <p className="text-gray-500 text-xs">Game image not available</p>
             </div>
           </div>
         )}

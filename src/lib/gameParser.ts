@@ -33,11 +33,16 @@ export function parseGame(e: NostrEvent): Game31996 | null {
         // Simple format: ["image", "url"]
         assets.cover ??= t[1];
       } else if (t[1] === "cover" && t[2]) {
-        // Typed format: ["image", "cover", "url"]
+        // Typed format: ["image", "cover", "url"] - overrides simple format
         assets.cover = t[2];
       } else if (t[1] === "screenshot" && t[2]) {
         // Screenshot format: ["image", "screenshot", "url"]
         assets.screenshots.push(t[2]);
+      }
+      // Handle other potential image types gracefully
+      else if (t[1] && !t[2]) {
+        // Handle case where there might be a type but no URL (fallback to simple format)
+        assets.cover ??= t[1];
       }
     } else if (t[0] === "icon" && t[1]) {
       assets.icon = t[1];
