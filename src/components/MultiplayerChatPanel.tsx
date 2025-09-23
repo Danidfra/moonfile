@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 import {
   MessageCircle,
   Users,
@@ -214,8 +215,10 @@ interface ConnectedPlayerItemProps {
 
 function ConnectedPlayerItem({ pubkey, isHost }: ConnectedPlayerItemProps) {
   const { data: author } = useAuthor(pubkey);
+  const { user } = useCurrentUser();
   const displayName = author?.metadata?.name || `${pubkey.substring(0, 8)}...`;
   const avatar = author?.metadata?.picture;
+  const isCurrentUser = user?.pubkey === pubkey;
 
   return (
     <div className="flex items-center gap-2">
@@ -230,6 +233,11 @@ function ConnectedPlayerItem({ pubkey, isHost }: ConnectedPlayerItemProps) {
       </Avatar>
       <div className="flex items-center gap-2 flex-1 min-w-0">
         <span className="text-sm text-gray-300 truncate">{displayName}</span>
+        {isCurrentUser && (
+          <Badge variant="outline" className="text-xs border-blue-600 text-blue-400 flex-shrink-0">
+            You
+          </Badge>
+        )}
         {isHost && (
           <Crown className="w-3 h-3 text-yellow-400 flex-shrink-0" />
         )}

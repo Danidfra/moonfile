@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useNostr } from '@nostrify/react';
 import { Button } from '@/components/ui/button';
@@ -60,7 +60,10 @@ export default function MultiplayerRoomPage() {
     setEmulatorStartCallback,
     joinGame,
     isJoining,
-    connectionState
+    connectionState,
+    iceConnectionState,
+    hasConnectionTimedOut,
+    retryConnection
   } = useMultiplayerRoom(roomId || '', gameId || '');
 
   // Game state
@@ -70,6 +73,7 @@ export default function MultiplayerRoomPage() {
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romPath, setRomPath] = useState<string | null>(null);
   const [shouldStartEmulator, setShouldStartEmulator] = useState(false);
+  const gameAreaRef = useRef<HTMLDivElement>(null);
 
   /**
    * Fetch game event and prepare ROM
@@ -100,9 +104,15 @@ export default function MultiplayerRoomPage() {
         console.log('[MultiplayerRoomPage] Event fetched successfully, id:', event.id);
 
         // Parse game metadata from event
-        const meta = parseGameMetadata(event);
-        setGameMeta(meta);
-        console.log('[MultiplayerRoomPage] Game metadata parsed:', meta);
+        let meta: GameMetadata;
+        try {
+          meta = parseGameMetadata(event);
+          setGameMeta(meta);
+          console.log('[MultiplayerRoomPage] Game metadata parsed:', meta);
+        } catch (parseError) {
+          console.error('[MultiplayerRoomPage] Error parsing game metadata:', parseError);
+          throw new Error(`Failed to parse game metadata: ${parseError instanceof Error ? parseError.message : 'Invalid event format'}`);
+        }
 
         // Check encoding tag
         const encodingTag = event.tags.find(tag => tag[0] === 'encoding');
@@ -198,6 +208,19 @@ export default function MultiplayerRoomPage() {
   }, [isHost, setEmulatorStartCallback]);
 
   /**
+   * Auto-scroll to game area when all players are connected
+   */
+  useEffect(() => {
+    if (roomState.connectedPlayers.length >= roomState.requiredPlayers && gameAreaRef.current) {
+      console.log('[MultiplayerRoomPage] All players connected, scrolling to game area');
+      gameAreaRef.current.scrollIntoView({
+        behavior: 'smooth',
+        block: 'start'
+      });
+    }
+  }, [roomState.connectedPlayers.length, roomState.requiredPlayers]);
+
+  /**
    * Retry loading the game
    */
   const handleRetry = () => {
@@ -214,6 +237,14 @@ export default function MultiplayerRoomPage() {
    * Navigate back to games list
    */
   const handleBack = () => {
+    navigate('/games');
+  };
+
+  /**
+   * Leave the current room and go back to games
+   */
+  const handleLeaveRoom = () => {
+    console.log('[MultiplayerRoomPage] User leaving room');
     navigate('/games');
   };
 
@@ -334,7 +365,7 @@ export default function MultiplayerRoomPage() {
       <div className="container mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
-          <div className="lg:col-span-3">
+          <div ref={gameAreaRef} className="lg:col-span-3">
             {/* Show waiting screen if WebRTC is not connected yet */}
             {!roomState.isWebRTCConnected || roomState.status === 'error' ? (
               <MultiplayerWaitingScreen
@@ -350,6 +381,10 @@ export default function MultiplayerRoomPage() {
                 onJoinGame={joinGame}
                 isJoining={isJoining}
                 connectionState={connectionState}
+                iceConnectionState={iceConnectionState}
+                hasConnectionTimedOut={hasConnectionTimedOut}
+                onRetryConnection={retryConnection}
+                onLeaveRoom={handleLeaveRoom}
               />
             ) : (
               /* Show emulator or stream view based on role */

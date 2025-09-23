@@ -1,10 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
-import { Users, Wifi, WifiOff, Crown, Loader2, Play, Copy, Share, ExternalLink } from 'lucide-react';
+import { Users, Wifi, WifiOff, Crown, Loader2, Play, Copy, Share, ExternalLink, RefreshCw, ArrowLeft } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
 
 interface ConnectedPlayer {
   pubkey: string;
@@ -24,6 +25,10 @@ interface MultiplayerWaitingScreenProps {
   onJoinGame?: () => void;
   isJoining?: boolean;
   connectionState?: string;
+  iceConnectionState?: string;
+  hasConnectionTimedOut?: boolean;
+  onRetryConnection?: () => void;
+  onLeaveRoom?: () => void;
   className?: string;
 }
 
@@ -40,12 +45,47 @@ export default function MultiplayerWaitingScreen({
   onJoinGame,
   isJoining = false,
   connectionState,
+  iceConnectionState,
+  hasConnectionTimedOut = false,
+  onRetryConnection,
+  onLeaveRoom,
   className = ""
 }: MultiplayerWaitingScreenProps) {
   const [copied, setCopied] = useState(false);
+  const joinButtonRef = useRef<HTMLButtonElement>(null);
+  const startButtonRef = useRef<HTMLButtonElement>(null);
 
   const allPlayersConnected = connectedPlayers.length >= requiredPlayers;
   const canStartGame = status === 'full' && isHost;
+
+  // Handle Enter key for Join Game button
+  useEffect(() => {
+    const handleKeyPress = (event: KeyboardEvent) => {
+      if (event.key === 'Enter') {
+        if (!isHost && canJoinGame && onJoinGame && !isJoining) {
+          event.preventDefault();
+          onJoinGame();
+        } else if (canStartGame && onStartGame) {
+          event.preventDefault();
+          onStartGame();
+        }
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyPress);
+    return () => {
+      document.removeEventListener('keydown', handleKeyPress);
+    };
+  }, [isHost, canJoinGame, onJoinGame, isJoining, canStartGame, onStartGame]);
+
+  // Auto-focus on action buttons when they become available
+  useEffect(() => {
+    if (canJoinGame && joinButtonRef.current) {
+      joinButtonRef.current.focus();
+    } else if (canStartGame && startButtonRef.current) {
+      startButtonRef.current.focus();
+    }
+  }, [canJoinGame, canStartGame]);
 
   const copyInviteLink = async () => {
     if (shareableLink) {
@@ -126,9 +166,16 @@ export default function MultiplayerWaitingScreen({
               <div className="space-y-2">
                 <div className="flex items-center justify-center gap-2 text-red-400">
                   <WifiOff className="w-5 h-5" />
-                  <span className="font-medium">Connection Error</span>
+                  <span className="font-medium">
+                    {hasConnectionTimedOut ? 'Connection Timeout' : 'Connection Error'}
+                  </span>
                 </div>
-                <p className="text-sm text-red-400">{error}</p>
+                <p className="text-sm text-red-400 text-center">{error}</p>
+                {(iceConnectionState && iceConnectionState !== 'new') && (
+                  <p className="text-xs text-gray-500 text-center">
+                    ICE State: {iceConnectionState}
+                  </p>
+                )}
               </div>
             )}
           </div>
@@ -214,6 +261,7 @@ export default function MultiplayerWaitingScreen({
           {/* Action Buttons */}
           {canStartGame && onStartGame && (
             <Button
+              ref={startButtonRef}
               onClick={onStartGame}
               className="w-full"
               size="lg"
@@ -227,6 +275,7 @@ export default function MultiplayerWaitingScreen({
           {!isHost && canJoinGame && onJoinGame && (
             <div className="space-y-3">
               <Button
+                ref={joinButtonRef}
                 onClick={onJoinGame}
                 disabled={isJoining}
                 className="w-full bg-green-600 hover:bg-green-700"
@@ -265,11 +314,41 @@ export default function MultiplayerWaitingScreen({
             </div>
           )}
 
+          {/* Error Recovery Actions */}
+          {status === 'error' && (
+            <div className="space-y-2">
+              {onRetryConnection && (
+                <Button
+                  onClick={onRetryConnection}
+                  className="w-full bg-blue-600 hover:bg-blue-700"
+                  size="lg"
+                >
+                  <RefreshCw className="w-5 h-5 mr-2" />
+                  Retry Connection
+                </Button>
+              )}
+              {onLeaveRoom && (
+                <Button
+                  onClick={onLeaveRoom}
+                  variant="outline"
+                  className="w-full"
+                  size="lg"
+                >
+                  <ArrowLeft className="w-5 h-5 mr-2" />
+                  Leave Room
+                </Button>
+              )}
+            </div>
+          )}
+
           {/* Connection status for debugging */}
-          {connectionState && connectionState !== 'new' && (
+          {connectionState && connectionState !== 'new' && status !== 'error' && (
             <div className="text-center">
               <p className="text-xs text-blue-400">
-                WebRTC Status: {connectionState}
+                WebRTC: {connectionState}
+                {iceConnectionState && iceConnectionState !== 'new' && (
+                  <span className="ml-2">ICE: {iceConnectionState}</span>
+                )}
               </p>
             </div>
           )}
@@ -287,8 +366,10 @@ interface PlayerCardProps {
 
 function PlayerCard({ pubkey, isHost, connected }: PlayerCardProps) {
   const { data: author } = useAuthor(pubkey);
+  const { user } = useCurrentUser();
   const displayName = author?.metadata?.name || pubkey.substring(0, 8);
   const avatar = author?.metadata?.picture;
+  const isCurrentUser = user?.pubkey === pubkey;
 
   return (
     <div className="flex items-center gap-3 p-3 border border-gray-700 rounded-lg bg-gray-800">
@@ -316,6 +397,11 @@ function PlayerCard({ pubkey, isHost, connected }: PlayerCardProps) {
           <span className="text-sm text-white font-medium truncate">
             {displayName}
           </span>
+          {isCurrentUser && (
+            <Badge variant="outline" className="text-xs border-blue-600 text-blue-400">
+              You
+            </Badge>
+          )}
           {isHost && (
             <Badge variant="outline" className="text-xs border-yellow-600 text-yellow-400">
               Host

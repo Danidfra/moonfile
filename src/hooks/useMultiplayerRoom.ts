@@ -54,7 +54,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null);
   const [onEmulatorStart, setOnEmulatorStart] = useState<(() => void) | null>(null);
   const [connectionState, setConnectionState] = useState<RTCPeerConnectionState>('new');
+  const [iceConnectionState, setIceConnectionState] = useState<RTCIceConnectionState>('new');
   const [isJoining, setIsJoining] = useState(false);
+  const [connectionTimeout, setConnectionTimeout] = useState<NodeJS.Timeout | null>(null);
+  const [hasConnectionTimedOut, setHasConnectionTimedOut] = useState(false);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
@@ -232,19 +235,50 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       ]
     });
 
-    // Add connection state logging
+    // Add connection state logging and timeout handling
     pc.onconnectionstatechange = () => {
       console.log('[MultiplayerRoom] Host connection state changed:', pc.connectionState);
       setConnectionState(pc.connectionState);
+
+      // Clear timeout on successful connection
+      if (pc.connectionState === 'connected') {
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          setConnectionTimeout(null);
+        }
+        setHasConnectionTimedOut(false);
+      }
     };
 
     pc.oniceconnectionstatechange = () => {
       console.log('[MultiplayerRoom] Host ICE connection state changed:', pc.iceConnectionState);
+      setIceConnectionState(pc.iceConnectionState);
+
+      // Clear timeout on successful ICE connection
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          setConnectionTimeout(null);
+        }
+        setHasConnectionTimedOut(false);
+      }
     };
 
     pc.onicegatheringstatechange = () => {
       console.log('[MultiplayerRoom] Host ICE gathering state changed:', pc.iceGatheringState);
     };
+
+    // Set connection timeout (10 seconds)
+    const timeout = setTimeout(() => {
+      console.warn('[MultiplayerRoom] Host connection timeout after 10 seconds');
+      setHasConnectionTimedOut(true);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: 'Connection timeout - WebRTC connection failed to establish within 10 seconds'
+      }));
+    }, 10000);
+    setConnectionTimeout(timeout);
 
     // Create data channels for different purposes
     const gameDataChannel = pc.createDataChannel('game-data');
@@ -606,19 +640,50 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ]
       });
 
-      // Add connection state logging
+      // Add connection state logging and timeout handling
       pc.onconnectionstatechange = () => {
         console.log('[MultiplayerRoom] Guest connection state changed:', pc.connectionState);
         setConnectionState(pc.connectionState);
+
+        // Clear timeout on successful connection
+        if (pc.connectionState === 'connected') {
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            setConnectionTimeout(null);
+          }
+          setHasConnectionTimedOut(false);
+        }
       };
 
       pc.oniceconnectionstatechange = () => {
         console.log('[MultiplayerRoom] Guest ICE connection state changed:', pc.iceConnectionState);
+        setIceConnectionState(pc.iceConnectionState);
+
+        // Clear timeout on successful ICE connection
+        if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+          if (connectionTimeout) {
+            clearTimeout(connectionTimeout);
+            setConnectionTimeout(null);
+          }
+          setHasConnectionTimedOut(false);
+        }
       };
 
       pc.onicegatheringstatechange = () => {
         console.log('[MultiplayerRoom] Guest ICE gathering state changed:', pc.iceGatheringState);
       };
+
+      // Set connection timeout (10 seconds)
+      const timeout = setTimeout(() => {
+        console.warn('[MultiplayerRoom] Guest connection timeout after 10 seconds');
+        setHasConnectionTimedOut(true);
+        setRoomState(prev => ({
+          ...prev,
+          status: 'error',
+          error: 'Connection timeout - WebRTC connection failed to establish within 10 seconds'
+        }));
+      }, 10000);
+      setConnectionTimeout(timeout);
 
       // Handle incoming data channels from host
       pc.ondatachannel = (event) => {
@@ -723,6 +788,41 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [user, isHost, roomState.pendingHostSignal, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers.length, roomId, gameId, publishEvent]);
 
+  // Retry connection after timeout or failure
+  const retryConnection = useCallback(() => {
+    console.log('[MultiplayerRoom] Retrying connection...');
+
+    // Clear timeout state
+    setHasConnectionTimedOut(false);
+    setConnectionState('new');
+    setIceConnectionState('new');
+
+    // Close existing connection if any
+    if (webRTCConnection) {
+      webRTCConnection.close();
+      setWebRTCConnection(null);
+    }
+
+    // Clear data channel
+    setDataChannel(null);
+    setLocalSignal(null);
+
+    // Reset room state
+    setRoomState(prev => ({
+      ...prev,
+      status: 'waiting',
+      error: undefined,
+      isWebRTCConnected: false
+    }));
+
+    // Retry join if we're a guest with pending signal
+    if (!isHost && roomState.pendingHostSignal) {
+      setTimeout(() => {
+        joinGame();
+      }, 1000); // Small delay before retry
+    }
+  }, [webRTCConnection, isHost, roomState.pendingHostSignal, joinGame]);
+
   // Track room initialization to prevent multiple calls
   const roomInitializationRef = useRef<boolean>(false);
 
@@ -751,6 +851,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       if (webRTCConnection) {
         webRTCConnection.close();
       }
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+      }
       // Reset initialization flag when room changes
       if (roomId || gameId) {
         roomInitializationRef.current = false;
@@ -770,6 +873,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     setEmulatorStartCallback,
     joinGame,
     isJoining,
-    connectionState
+    connectionState,
+    iceConnectionState,
+    hasConnectionTimedOut,
+    retryConnection
   };
 }
