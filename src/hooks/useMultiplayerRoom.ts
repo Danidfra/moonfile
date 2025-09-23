@@ -60,6 +60,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [hasConnectionTimedOut, setHasConnectionTimedOut] = useState(false);
   const [processedEvents, setProcessedEvents] = useState<Set<string>>(new Set());
   const [processedPeerSignals, setProcessedPeerSignals] = useState<Set<string>>(new Set());
+  const [isConnectionEstablished, setIsConnectionEstablished] = useState(false);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
@@ -277,6 +278,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           setConnectionTimeout(null);
         }
         setHasConnectionTimedOut(false);
+        setIsConnectionEstablished(true);
       }
     };
 
@@ -291,6 +293,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           setConnectionTimeout(null);
         }
         setHasConnectionTimedOut(false);
+        setIsConnectionEstablished(true);
       }
     };
 
@@ -334,6 +337,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     chatDataChannel.onopen = () => {
       console.log('[MultiplayerRoom] Chat data channel opened');
       setDataChannel(chatDataChannel);
+
+      // Clear timeout and set connection as established
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+        setConnectionTimeout(null);
+      }
+      setHasConnectionTimedOut(false);
+      setIsConnectionEstablished(true);
 
       // Update connection status and trigger emulator start for host
       setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
@@ -418,6 +429,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           return;
         }
 
+        // Also check for have-remote-offer state to prevent redundant calls
+        if (webRTCConnection.signalingState === 'have-remote-offer') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - already have remote offer');
+          return;
+        }
+
+        // Check for have-local-offer state (guest side)
+        if (webRTCConnection.signalingState === 'have-local-offer') {
+          console.warn('[MultiplayerRoom] Cannot set remote answer - already have local offer');
+          return;
+        }
+
         console.log('[MultiplayerRoom] Setting remote description for answer');
         await webRTCConnection.setRemoteDescription(signalData);
         console.log('[MultiplayerRoom] Remote description set successfully, new state:', webRTCConnection.signalingState);
@@ -427,6 +450,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         const newPlayerCount = roomState.connectedPlayers.length + 1;
 
         if (!isPlayerAlreadyConnected && newPlayerCount !== roomState.connectedPlayers.length) {
+          // Ensure host tag is present and valid before publishing
+          if (!roomState.hostPubkey || !roomState.requiredPlayers) {
+            console.error('[MultiplayerRoom] Cannot publish event: missing required host info');
+            return;
+          }
+
+          // Prevent publishing events if connection is already established
+          if (isConnectionEstablished) {
+            console.log('[MultiplayerRoom] Skipping event publication - connection already established');
+            return;
+          }
+
           // Update room state to active when connection is established
           if (newPlayerCount >= roomState.requiredPlayers) {
             await publishEvent({
@@ -436,7 +471,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                 ['d', roomId],
                 ['game', gameId],
                 ['players', roomState.requiredPlayers.toString()],
-                ['host', roomState.hostPubkey],
+                ['host', roomState.hostPubkey], // Ensure host tag is always included
                 ['status', 'full'],
                 ['connected_count', newPlayerCount.toString()]
               ]
@@ -449,7 +484,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                 ['d', roomId],
                 ['game', gameId],
                 ['players', roomState.requiredPlayers.toString()],
-                ['host', roomState.hostPubkey],
+                ['host', roomState.hostPubkey], // Ensure host tag is always included
                 ['status', 'active'],
                 ['connected_count', newPlayerCount.toString()]
               ]
@@ -738,6 +773,15 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           receivedChannel.onopen = () => {
             console.log('[MultiplayerRoom] Chat data channel opened (guest)');
             setDataChannel(receivedChannel);
+
+            // Clear timeout and mark connection as established
+            if (connectionTimeout) {
+              clearTimeout(connectionTimeout);
+              setConnectionTimeout(null);
+            }
+            setHasConnectionTimedOut(false);
+            setIsConnectionEstablished(true);
+
             setRoomState(prev => ({
               ...prev,
               isWebRTCConnected: true,
@@ -791,6 +835,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         throw new Error('Connection is closed');
       }
 
+      // Check for have-remote-offer state (already processed)
+      if (pc.signalingState === 'have-remote-offer') {
+        console.warn('[MultiplayerRoom] Cannot set remote offer - already have remote offer');
+        throw new Error('Remote offer already processed');
+      }
+
+      // Check for have-local-offer state (already created answer)
+      if (pc.signalingState === 'have-local-offer') {
+        console.warn('[MultiplayerRoom] Cannot set remote offer - already have local offer');
+        throw new Error('Local offer already created');
+      }
+
       await pc.setRemoteDescription(hostOffer);
       console.log('[MultiplayerRoom] Remote description set, new state:', pc.signalingState);
 
@@ -816,6 +872,23 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       const answerJson = JSON.stringify(pc.localDescription);
       setLocalSignal(answerJson);
 
+      // Validate required fields before publishing
+      if (!roomState.hostPubkey || !roomState.requiredPlayers || !roomId || !gameId) {
+        console.error('[MultiplayerRoom] Cannot publish answer event: missing required fields', {
+          hostPubkey: roomState.hostPubkey,
+          requiredPlayers: roomState.requiredPlayers,
+          roomId,
+          gameId
+        });
+        throw new Error('Missing required fields for room event');
+      }
+
+      // Prevent publishing events if connection is already established
+      if (isConnectionEstablished) {
+        console.log('[MultiplayerRoom] Skipping answer publication - connection already established');
+        return;
+      }
+
       // Publish answer as new room event
       console.log('[MultiplayerRoom] Publishing answer signal to Nostr');
       await publishEvent({
@@ -825,7 +898,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           ['d', roomId],
           ['game', gameId],
           ['players', roomState.requiredPlayers.toString()],
-          ['host', roomState.hostPubkey],
+          ['host', roomState.hostPubkey], // Always include host tag
           ['status', 'active'],
           ['connected', user.pubkey],
           ['player', user.pubkey, answerJson],
