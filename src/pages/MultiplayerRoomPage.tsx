@@ -414,6 +414,8 @@ export default function MultiplayerRoomPage() {
             <MultiplayerChatPanel
               gameTitle={gameMeta.title}
               roomId={roomId}
+              connectedPlayers={roomState.connectedPlayers}
+              hostPubkey={roomState.hostPubkey}
             />
           </div>
         </div>

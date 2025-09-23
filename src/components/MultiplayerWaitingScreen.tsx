@@ -52,7 +52,7 @@ export default function MultiplayerWaitingScreen({
   };
 
   const shareInviteLink = async () => {
-    if (shareableLink && typeof navigator !== 'undefined' && navigator.share) {
+    if (shareableLink && typeof navigator !== 'undefined' && 'share' in navigator) {
       try {
         await navigator.share({
           title: 'Join my multiplayer game!',
@@ -145,7 +145,7 @@ export default function MultiplayerWaitingScreen({
                     <Copy className="w-4 h-4 mr-2" />
                     {copied ? 'Copied!' : 'Copy Link'}
                   </Button>
-                  {navigator.share && (
+                  {typeof navigator !== 'undefined' && 'share' in navigator && (
                     <Button
                       onClick={shareInviteLink}
                       variant="outline"
