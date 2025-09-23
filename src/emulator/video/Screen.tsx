@@ -104,8 +104,8 @@ export default class Screen extends Component<ScreenProps> {
     const parentWidth = parent.clientWidth;
     const parentHeight = parent.clientHeight;
 
-    // Scale factor for better sizing (2x scale for 512x480 pixels)
-    const scaleFactor = 2;
+    // Scale factor for better sizing (2.5x scale for 640x600 pixels on desktop)
+    const scaleFactor = 2.5;
     const scaledWidth = SCREEN_WIDTH * scaleFactor;
     const scaledHeight = SCREEN_HEIGHT * scaleFactor;
 
@@ -115,15 +115,15 @@ export default class Screen extends Component<ScreenProps> {
     let targetWidth, targetHeight;
 
     if (isFullscreen) {
-      // In fullscreen, use a larger scale factor for better gameplay experience
+      // In fullscreen, use maximum available space for immersive experience
       const fullscreenScale = Math.min(
-        (parentWidth - 40) / SCREEN_WIDTH,  // Leave some padding
-        (parentHeight - 40) / SCREEN_HEIGHT  // Leave some padding
+        (parentWidth - 80) / SCREEN_WIDTH,   // Leave more padding for clean look
+        (parentHeight - 80) / SCREEN_HEIGHT  // Leave more padding for clean look
       );
       targetWidth = Math.round(SCREEN_WIDTH * fullscreenScale);
       targetHeight = Math.round(SCREEN_HEIGHT * fullscreenScale);
     } else {
-      // Normal mode - use 2x scale but ensure it fits
+      // Normal mode - use 2.5x scale but ensure it fits
       targetWidth = scaledWidth;
       targetHeight = scaledHeight;
 

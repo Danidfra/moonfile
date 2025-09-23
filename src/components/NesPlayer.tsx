@@ -209,21 +209,23 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   return (
     <div
       ref={emulatorContainerRef}
-      className={`flex flex-col items-center space-y-4 ${className}`}
+      className={`flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
     >
-      {/* Game Title */}
-      <Card className="w-full max-w-4xl">
-        <CardHeader className="pb-2">
-          <CardTitle className="text-center">{title}</CardTitle>
-        </CardHeader>
-      </Card>
+      {/* Game Title - Hidden in fullscreen */}
+      {!isFullscreen && (
+        <Card className="w-full max-w-4xl">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-center">{title}</CardTitle>
+          </CardHeader>
+        </Card>
+      )}
 
       {/* Game Display */}
-      <Card className="w-full max-w-4xl bg-black border-2">
-        <CardContent className="p-4">
+      <Card className={`w-full max-w-4xl bg-black border-2 ${isFullscreen ? 'fullscreen-card' : ''}`}>
+        <CardContent className={`p-4 ${isFullscreen ? 'fullscreen-content' : ''}`}>
           <div
-            className="relative bg-black rounded-lg overflow-hidden flex items-center justify-center"
-            style={{ minHeight: '480px' }}
+            className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
+            style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
             <Emulator
               key={emulatorKey}
@@ -235,73 +237,77 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
         </CardContent>
       </Card>
 
-      {/* Controls */}
-      <Card className="w-full max-w-4xl">
-        <CardContent className="p-4">
-          <div className="flex items-center justify-center gap-4">
-            <Button
-              onClick={handlePlayPause}
-              variant={isPaused ? "default" : "secondary"}
-              size="lg"
-            >
-              {isPaused ? <Play className="w-5 h-5 mr-2" /> : <Pause className="w-5 h-5 mr-2" />}
-              {isPaused ? 'Play' : 'Pause'}
-            </Button>
+      {/* Controls - Hidden in fullscreen */}
+      {!isFullscreen && (
+        <>
+          <Card className="w-full max-w-4xl">
+            <CardContent className="p-4">
+              <div className="flex items-center justify-center gap-4">
+                <Button
+                  onClick={handlePlayPause}
+                  variant={isPaused ? "default" : "secondary"}
+                  size="lg"
+                >
+                  {isPaused ? <Play className="w-5 h-5 mr-2" /> : <Pause className="w-5 h-5 mr-2" />}
+                  {isPaused ? 'Play' : 'Pause'}
+                </Button>
 
-            <Button
-              onClick={handleReset}
-              variant="outline"
-              size="lg"
-            >
-              <RotateCcw className="w-5 h-5 mr-2" />
-              Reset
-            </Button>
+                <Button
+                  onClick={handleReset}
+                  variant="outline"
+                  size="lg"
+                >
+                  <RotateCcw className="w-5 h-5 mr-2" />
+                  Reset
+                </Button>
 
-            <Button
-              onClick={handleMuteToggle}
-              variant="ghost"
-              size="lg"
-            >
-              {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-            </Button>
+                <Button
+                  onClick={handleMuteToggle}
+                  variant="ghost"
+                  size="lg"
+                >
+                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+                </Button>
 
-            <Button
-              onClick={toggleFullscreen}
-              variant="ghost"
-              size="lg"
-              title="Toggle fullscreen (F)"
-            >
-              {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-            </Button>
+                <Button
+                  onClick={toggleFullscreen}
+                  variant="ghost"
+                  size="lg"
+                  title="Toggle fullscreen (F)"
+                >
+                  {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
+                </Button>
 
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
-              <div className={`w-2 h-2 rounded-full ${
-                isPaused ? 'bg-yellow-500' : 'bg-green-500'
-              }`}></div>
-              {isPaused ? 'Paused' : 'Running'}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-
-      {/* Controls Help */}
-      <Card className="w-full max-w-4xl">
-        <CardContent className="p-4">
-          <div className="text-center space-y-2">
-            <h4 className="font-semibold text-sm">Keyboard Controls</h4>
-            <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
-              <div className="space-y-1">
-                <div><kbd className="px-2 py-1 bg-muted rounded text-xs">↑ ↓ ← →</kbd> D-Pad</div>
-                <div><kbd className="px-2 py-1 bg-muted rounded text-xs">Enter</kbd> Start</div>
+                <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                  <div className={`w-2 h-2 rounded-full ${
+                    isPaused ? 'bg-yellow-500' : 'bg-green-500'
+                  }`}></div>
+                  {isPaused ? 'Paused' : 'Running'}
+                </div>
               </div>
-              <div className="space-y-1">
-                <div><kbd className="px-2 py-1 bg-muted rounded text-xs">Shift</kbd> Select</div>
-                <div><kbd className="px-2 py-1 bg-muted rounded text-xs">Z</kbd> B Button | <kbd className="px-2 py-1 bg-muted rounded text-xs">X</kbd> A Button</div>
+            </CardContent>
+          </Card>
+
+          {/* Controls Help - Hidden in fullscreen */}
+          <Card className="w-full max-w-4xl">
+            <CardContent className="p-4">
+              <div className="text-center space-y-2">
+                <h4 className="font-semibold text-sm">Keyboard Controls</h4>
+                <div className="grid grid-cols-2 gap-4 text-xs text-muted-foreground">
+                  <div className="space-y-1">
+                    <div><kbd className="px-2 py-1 bg-muted rounded text-xs">↑ ↓ ← →</kbd> D-Pad</div>
+                    <div><kbd className="px-2 py-1 bg-muted rounded text-xs">Enter</kbd> Start</div>
+                  </div>
+                  <div className="space-y-1">
+                    <div><kbd className="px-2 py-1 bg-muted rounded text-xs">Shift</kbd> Select</div>
+                    <div><kbd className="px-2 py-1 bg-muted rounded text-xs">Z</kbd> B Button | <kbd className="px-2 py-1 bg-muted rounded text-xs">X</kbd> A Button</div>
+                  </div>
+                </div>
               </div>
-            </div>
-          </div>
-        </CardContent>
-      </Card>
+            </CardContent>
+          </Card>
+        </>
+      )}
     </div>
   );
 }
