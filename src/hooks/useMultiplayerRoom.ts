@@ -9,6 +9,14 @@ interface ConnectedPlayer {
   signal?: string;
 }
 
+interface ChatMessage {
+  id: string;
+  sender: string;
+  message: string;
+  timestamp: number;
+  senderName?: string;
+}
+
 interface RoomState {
   status: 'waiting' | 'active' | 'full' | 'error' | 'playing';
   hostPubkey: string;
@@ -17,6 +25,8 @@ interface RoomState {
   latestEvent: NostrEvent | null;
   error?: string;
   shareableLink?: string;
+  isWebRTCConnected?: boolean;
+  chatMessages?: ChatMessage[];
 }
 
 export function useMultiplayerRoom(roomId: string, gameId: string) {
@@ -30,11 +40,15 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     requiredPlayers: 2,
     connectedPlayers: [],
     latestEvent: null,
+    isWebRTCConnected: false,
+    chatMessages: [],
   });
 
   const [webRTCConnection, setWebRTCConnection] = useState<RTCPeerConnection | null>(null);
   const [localSignal, setLocalSignal] = useState<string | null>(null);
   const [isHost, setIsHost] = useState(false);
+  const [dataChannel, setDataChannel] = useState<RTCDataChannel | null>(null);
+  const [onEmulatorStart, setOnEmulatorStart] = useState<(() => void) | null>(null);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
@@ -196,21 +210,51 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       ]
     });
 
-    // Create data channel for game state and input
-    const dataChannel = pc.createDataChannel('game-data');
+    // Create data channels for different purposes
+    const gameDataChannel = pc.createDataChannel('game-data');
+    const chatDataChannel = pc.createDataChannel('chat');
 
-    dataChannel.onopen = () => {
-      console.log('[MultiplayerRoom] Data channel opened');
+    // Handle game data channel
+    gameDataChannel.onopen = () => {
+      console.log('[MultiplayerRoom] Game data channel opened');
     };
 
-    dataChannel.onmessage = (event) => {
+    gameDataChannel.onmessage = (event) => {
       try {
         const data = JSON.parse(event.data);
         console.log('[MultiplayerRoom] Received game input:', data);
         // Handle game input messages from peers (arrow keys, buttons, etc.)
         // This will be forwarded to the emulator
       } catch (error) {
-        console.error('[MultiplayerRoom] Error parsing message:', error);
+        console.error('[MultiplayerRoom] Error parsing game data message:', error);
+      }
+    };
+
+    // Handle chat data channel
+    chatDataChannel.onopen = () => {
+      console.log('[MultiplayerRoom] Chat data channel opened');
+      setDataChannel(chatDataChannel);
+
+      // Update connection status and trigger emulator start for host
+      setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
+
+      if (isHost && onEmulatorStart) {
+        console.log('[MultiplayerRoom] WebRTC connected, starting emulator on host');
+        onEmulatorStart();
+      }
+    };
+
+    chatDataChannel.onmessage = (event) => {
+      try {
+        const chatMessage: ChatMessage = JSON.parse(event.data);
+        console.log('[MultiplayerRoom] Received chat message:', chatMessage);
+
+        setRoomState(prev => ({
+          ...prev,
+          chatMessages: [...(prev.chatMessages || []), chatMessage]
+        }));
+      } catch (error) {
+        console.error('[MultiplayerRoom] Error parsing chat message:', error);
       }
     };
 
@@ -302,19 +346,44 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         });
 
         pc.ondatachannel = (event) => {
-          const dataChannel = event.channel;
-          dataChannel.onopen = () => {
-            console.log('[MultiplayerRoom] Data channel opened (peer)');
-          };
-          dataChannel.onmessage = (event) => {
-            try {
-              const data = JSON.parse(event.data);
-              console.log('[MultiplayerRoom] Received game state (peer):', data);
-              // Handle game state updates from host (video stream, game data)
-            } catch (error) {
-              console.error('[MultiplayerRoom] Error parsing message (peer):', error);
-            }
-          };
+          const receivedChannel = event.channel;
+          console.log('[MultiplayerRoom] Received data channel (guest):', receivedChannel.label);
+
+          if (receivedChannel.label === 'chat') {
+            receivedChannel.onopen = () => {
+              console.log('[MultiplayerRoom] Chat data channel opened (guest)');
+              setDataChannel(receivedChannel);
+              setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
+            };
+
+            receivedChannel.onmessage = (event) => {
+              try {
+                const chatMessage: ChatMessage = JSON.parse(event.data);
+                console.log('[MultiplayerRoom] Received chat message (guest):', chatMessage);
+
+                setRoomState(prev => ({
+                  ...prev,
+                  chatMessages: [...(prev.chatMessages || []), chatMessage]
+                }));
+              } catch (error) {
+                console.error('[MultiplayerRoom] Error parsing chat message (guest):', error);
+              }
+            };
+          } else if (receivedChannel.label === 'game-data') {
+            receivedChannel.onopen = () => {
+              console.log('[MultiplayerRoom] Game data channel opened (guest)');
+            };
+
+            receivedChannel.onmessage = (event) => {
+              try {
+                const data = JSON.parse(event.data);
+                console.log('[MultiplayerRoom] Received game state (guest):', data);
+                // Handle game state updates from host (video stream, game data)
+              } catch (error) {
+                console.error('[MultiplayerRoom] Error parsing game data message (guest):', error);
+              }
+            };
+          }
         };
 
         await pc.setRemoteDescription(signalData);
@@ -523,6 +592,37 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [webRTCConnection, isHost]);
 
+  // Send chat message via WebRTC data channel
+  const sendChatMessage = useCallback((message: string) => {
+    if (!dataChannel || !user) return;
+
+    const chatMessage: ChatMessage = {
+      id: Date.now().toString(),
+      sender: user.pubkey,
+      message,
+      timestamp: Date.now(),
+    };
+
+    try {
+      dataChannel.send(JSON.stringify(chatMessage));
+
+      // Add to local state immediately
+      setRoomState(prev => ({
+        ...prev,
+        chatMessages: [...(prev.chatMessages || []), chatMessage]
+      }));
+
+      console.log('[MultiplayerRoom] Chat message sent:', chatMessage);
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error sending chat message:', error);
+    }
+  }, [dataChannel, user]);
+
+  // Set callback for emulator start (host only)
+  const setEmulatorStartCallback = useCallback((callback: () => void) => {
+    setOnEmulatorStart(() => callback);
+  }, []);
+
   // Track room initialization to prevent multiple calls
   const roomInitializationRef = useRef<boolean>(false);
 
@@ -565,6 +665,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     webRTCConnection,
     localSignal,
     sendGameInput,
-    sendGameState
+    sendGameState,
+    sendChatMessage,
+    setEmulatorStartCallback
   };
 }

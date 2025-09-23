@@ -19,10 +19,10 @@ import {
 
 interface ChatMessage {
   id: string;
-  user: string;
+  sender: string;
   message: string;
-  time: string;
-  isSystem?: boolean;
+  timestamp: number;
+  senderName?: string;
 }
 
 interface ConnectedPlayer {
@@ -35,6 +35,9 @@ interface MultiplayerChatPanelProps {
   roomId: string;
   connectedPlayers: ConnectedPlayer[];
   hostPubkey: string;
+  chatMessages: ChatMessage[];
+  isWebRTCConnected: boolean;
+  onSendMessage: (message: string) => void;
   className?: string;
 }
 
@@ -43,20 +46,17 @@ export default function MultiplayerChatPanel({
   roomId,
   connectedPlayers,
   hostPubkey,
+  chatMessages,
+  isWebRTCConnected,
+  onSendMessage,
   className = ""
 }: MultiplayerChatPanelProps) {
   const [message, setMessage] = useState('');
   const [isMinimized, setIsMinimized] = useState(false);
 
-  // Mock chat messages
-  const chatMessages: ChatMessage[] = [
-    { id: '1', user: 'System', message: 'Welcome to the multiplayer room!', time: 'Just now', isSystem: true },
-    { id: '2', user: 'SpeedRunner', message: 'Let\'s do this! I\'m warmed up and ready', time: '45s ago' },
-  ];
-
   const handleSendMessage = () => {
-    if (message.trim()) {
-      // In a real implementation, this would send the message
+    if (message.trim() && isWebRTCConnected) {
+      onSendMessage(message.trim());
       setMessage('');
     }
   };
@@ -151,20 +151,30 @@ export default function MultiplayerChatPanel({
 
         {/* Chat Messages */}
         <div>
-          <h4 className="text-sm font-semibold text-gray-300 mb-2">Chat</h4>
+          <div className="flex items-center justify-between mb-2">
+            <h4 className="text-sm font-semibold text-gray-300">Chat</h4>
+            {!isWebRTCConnected && (
+              <span className="text-xs text-yellow-400">Connecting...</span>
+            )}
+          </div>
           <div className="space-y-3 max-h-64 overflow-y-auto">
-            {chatMessages.map((msg) => (
-              <div key={msg.id} className="space-y-1">
-                <div className="flex items-center gap-2 text-xs">
-                  <span className={`font-semibold ${msg.isSystem ? 'text-blue-400' : 'text-purple-400'}`}>
-                    {msg.user}
-                  </span>
-                  <span className="text-gray-500">{msg.time}</span>
-                </div>
-                <p className={`text-sm ${msg.isSystem ? 'text-blue-300 bg-blue-900/20' : 'text-gray-300 bg-gray-800'} rounded p-2`}>
-                  {msg.message}
-                </p>
+            {!isWebRTCConnected && (
+              <div className="text-center text-sm text-gray-500 py-4">
+                Chat will be available once WebRTC connection is established
               </div>
+            )}
+            {isWebRTCConnected && chatMessages.length === 0 && (
+              <div className="text-center text-sm text-gray-500 py-4">
+                No messages yet. Start the conversation!
+              </div>
+            )}
+            {chatMessages.map((msg) => (
+              <ChatMessageItem
+                key={msg.id}
+                message={msg}
+                connectedPlayers={connectedPlayers}
+                hostPubkey={hostPubkey}
+              />
             ))}
           </div>
         </div>
@@ -174,8 +184,9 @@ export default function MultiplayerChatPanel({
           <Input
             value={message}
             onChange={(e) => setMessage(e.target.value)}
-            placeholder="Type your message..."
+            placeholder={isWebRTCConnected ? "Type your message..." : "Waiting for connection..."}
             className="flex-1 bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+            disabled={!isWebRTCConnected}
             onKeyPress={(e) => {
               if (e.key === 'Enter') {
                 handleSendMessage();
@@ -185,7 +196,7 @@ export default function MultiplayerChatPanel({
           <Button
             size="sm"
             className="bg-purple-600 hover:bg-purple-700"
-            disabled={!message.trim()}
+            disabled={!message.trim() || !isWebRTCConnected}
             onClick={handleSendMessage}
           >
             <Send className="w-4 h-4" />
@@ -227,6 +238,45 @@ function ConnectedPlayerItem({ pubkey, isHost }: ConnectedPlayerItemProps) {
         <div className="w-2 h-2 rounded-full bg-green-500"></div>
         <span className="text-xs text-gray-500">Online</span>
       </div>
+    </div>
+  );
+}
+
+interface ChatMessageItemProps {
+  message: ChatMessage;
+  connectedPlayers: ConnectedPlayer[];
+  hostPubkey: string;
+}
+
+function ChatMessageItem({ message, connectedPlayers, hostPubkey }: ChatMessageItemProps) {
+  const { data: author } = useAuthor(message.sender);
+  const senderName = author?.metadata?.name || `${message.sender.substring(0, 8)}...`;
+  const isHost = message.sender === hostPubkey;
+
+  const formatTime = (timestamp: number) => {
+    const now = Date.now();
+    const diff = now - timestamp;
+
+    if (diff < 60000) return 'Just now';
+    if (diff < 3600000) return `${Math.floor(diff / 60000)}m ago`;
+    if (diff < 86400000) return `${Math.floor(diff / 3600000)}h ago`;
+    return new Date(timestamp).toLocaleDateString();
+  };
+
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center gap-2 text-xs">
+        <span className="font-semibold text-purple-400">
+          {senderName}
+        </span>
+        {isHost && (
+          <Crown className="w-3 h-3 text-yellow-400" />
+        )}
+        <span className="text-gray-500">{formatTime(message.timestamp)}</span>
+      </div>
+      <p className="text-sm text-gray-300 bg-gray-800 rounded p-2">
+        {message.message}
+      </p>
     </div>
   );
 }

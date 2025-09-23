@@ -52,7 +52,13 @@ export default function MultiplayerRoomPage() {
   const { nostr } = useNostr();
 
   // Multiplayer room state
-  const { roomState, startGame, isHost } = useMultiplayerRoom(roomId || '', gameId || '');
+  const {
+    roomState,
+    startGame,
+    isHost,
+    sendChatMessage,
+    setEmulatorStartCallback
+  } = useMultiplayerRoom(roomId || '', gameId || '');
 
   // Game state
   const [status, setStatus] = useState<PlayerState>('loading');
@@ -60,6 +66,7 @@ export default function MultiplayerRoomPage() {
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romPath, setRomPath] = useState<string | null>(null);
+  const [shouldStartEmulator, setShouldStartEmulator] = useState(false);
 
   /**
    * Fetch game event and prepare ROM
@@ -174,6 +181,18 @@ export default function MultiplayerRoomPage() {
       // No cleanup needed for binary strings
     };
   }, [gameId, nostr]);
+
+  /**
+   * Set up emulator start callback for host
+   */
+  useEffect(() => {
+    if (isHost) {
+      setEmulatorStartCallback(() => {
+        console.log('[MultiplayerRoomPage] WebRTC connected, starting emulator for host');
+        setShouldStartEmulator(true);
+      });
+    }
+  }, [isHost, setEmulatorStartCallback]);
 
   /**
    * Retry loading the game
@@ -313,8 +332,8 @@ export default function MultiplayerRoomPage() {
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
           <div className="lg:col-span-3">
-            {/* Show waiting screen if game hasn't started yet */}
-            {roomState.status === 'waiting' || roomState.status === 'active' || roomState.status === 'full' || roomState.status === 'error' ? (
+            {/* Show waiting screen if WebRTC is not connected yet */}
+            {!roomState.isWebRTCConnected || roomState.status === 'error' ? (
               <MultiplayerWaitingScreen
                 status={roomState.status}
                 connectedPlayers={roomState.connectedPlayers}
@@ -326,16 +345,50 @@ export default function MultiplayerRoomPage() {
                 shareableLink={roomState.shareableLink}
               />
             ) : (
-              /* Show emulator when game is playing */
-              <NesPlayer
-                romPath={romPath}
-                title={gameMeta.title}
-                className="w-full"
-              />
+              /* Show emulator or stream view based on role */
+              <div>
+                {isHost && shouldStartEmulator ? (
+                  /* Host: Show actual emulator */
+                  <NesPlayer
+                    romPath={romPath}
+                    title={gameMeta.title}
+                    className="w-full"
+                  />
+                ) : isHost && !shouldStartEmulator ? (
+                  /* Host: WebRTC connected but emulator not started yet */
+                  <Card className="border-gray-800 bg-gray-900">
+                    <CardContent className="py-12 px-8 text-center">
+                      <div className="max-w-sm mx-auto space-y-4">
+                        <div className="text-green-400 text-4xl mb-4">✅</div>
+                        <h3 className="text-lg font-semibold text-white">WebRTC Connected!</h3>
+                        <p className="text-gray-400">
+                          Emulator will start automatically when all players are ready.
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
+                ) : (
+                  /* Guest: Show stream placeholder */
+                  <Card className="border-gray-800 bg-gray-900">
+                    <CardContent className="py-12 px-8 text-center">
+                      <div className="max-w-sm mx-auto space-y-4">
+                        <div className="text-blue-400 text-4xl mb-4">📺</div>
+                        <h3 className="text-lg font-semibold text-white">Receiving Stream</h3>
+                        <p className="text-gray-400">
+                          You're connected! The host will stream the game to you.
+                        </p>
+                        <div className="aspect-video bg-gray-800 rounded-lg flex items-center justify-center">
+                          <span className="text-gray-500">Game stream will appear here</span>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                )}
+              </div>
             )}
 
-            {/* Game Info Card below emulator (only show when game is playing) */}
-            {roomState.status === 'playing' && (
+            {/* Game Info Card below emulator (only show when emulator is running) */}
+            {isHost && shouldStartEmulator && (
               <div className="mt-8">
                 <Card className="border-gray-800 bg-gray-900">
                   <CardHeader>
@@ -416,6 +469,9 @@ export default function MultiplayerRoomPage() {
               roomId={roomId}
               connectedPlayers={roomState.connectedPlayers}
               hostPubkey={roomState.hostPubkey}
+              chatMessages={roomState.chatMessages || []}
+              isWebRTCConnected={roomState.isWebRTCConnected || false}
+              onSendMessage={sendChatMessage}
             />
           </div>
         </div>
