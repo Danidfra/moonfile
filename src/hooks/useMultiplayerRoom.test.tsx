@@ -41,8 +41,9 @@ describe('useMultiplayerRoom', () => {
     );
 
     expect(result.current.roomState.status).toBe('waiting');
-    expect(result.current.roomState.players).toEqual([]);
+    expect(result.current.roomState.connectedPlayers).toEqual([]);
     expect(result.current.roomState.requiredPlayers).toBe(2);
+    expect(result.current.roomState.latestEvent).toBeNull();
   });
 
   it('should identify host correctly', () => {
@@ -65,6 +66,18 @@ describe('useMultiplayerRoom', () => {
     );
 
     expect(typeof result.current.startGame).toBe('function');
+  });
+
+  it('should have sendGameInput and sendGameState functions', () => {
+    const { result } = renderHook(
+      () => useMultiplayerRoom('test-room-id', 'test-game-id'),
+      {
+        wrapper: ({ children }) => <TestApp>{children}</TestApp>
+      }
+    );
+
+    expect(typeof result.current.sendGameInput).toBe('function');
+    expect(typeof result.current.sendGameState).toBe('function');
   });
 
   it('should initialize with null WebRTC connection and signal', () => {

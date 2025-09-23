@@ -4,16 +4,14 @@ import { TestApp } from '@/test/TestApp';
 import MultiplayerWaitingScreen from './MultiplayerWaitingScreen';
 
 describe('MultiplayerWaitingScreen', () => {
-  const mockPlayers = [
+  const mockConnectedPlayers = [
     {
       pubkey: 'host-pubkey',
-      connected: true,
-      isHost: true
+      signal: 'offer-signal'
     },
     {
       pubkey: 'player-pubkey',
-      connected: true,
-      isHost: false
+      signal: 'answer-signal'
     }
   ];
 
@@ -22,8 +20,9 @@ describe('MultiplayerWaitingScreen', () => {
       <TestApp>
         <MultiplayerWaitingScreen
           status="waiting"
-          players={mockPlayers}
+          connectedPlayers={mockConnectedPlayers}
           requiredPlayers={2}
+          hostPubkey="host-pubkey"
           isHost={true}
         />
       </TestApp>
@@ -34,13 +33,14 @@ describe('MultiplayerWaitingScreen', () => {
     expect(screen.getByText('Ready')).toBeInTheDocument();
   });
 
-  it('renders connecting state correctly', () => {
+  it('renders active state correctly', () => {
     render(
       <TestApp>
         <MultiplayerWaitingScreen
-          status="connecting"
-          players={mockPlayers}
+          status="active"
+          connectedPlayers={mockConnectedPlayers}
           requiredPlayers={2}
+          hostPubkey="host-pubkey"
           isHost={false}
         />
       </TestApp>
@@ -49,13 +49,14 @@ describe('MultiplayerWaitingScreen', () => {
     expect(screen.getByText('Connecting players...')).toBeInTheDocument();
   });
 
-  it('renders ready state correctly', () => {
+  it('renders full state correctly', () => {
     render(
       <TestApp>
         <MultiplayerWaitingScreen
-          status="ready"
-          players={mockPlayers}
+          status="full"
+          connectedPlayers={mockConnectedPlayers}
           requiredPlayers={2}
+          hostPubkey="host-pubkey"
           isHost={false}
         />
       </TestApp>
@@ -65,15 +66,35 @@ describe('MultiplayerWaitingScreen', () => {
     expect(screen.getByText('Waiting for host to start the game...')).toBeInTheDocument();
   });
 
-  it('shows start button for host when ready', () => {
+  it('shows invite link section for host', () => {
+    render(
+      <TestApp>
+        <MultiplayerWaitingScreen
+          status="waiting"
+          connectedPlayers={[mockConnectedPlayers[0]]}
+          requiredPlayers={2}
+          hostPubkey="host-pubkey"
+          isHost={true}
+          shareableLink="https://moonfile.games/multiplayer/game:tetris-2-usa-nintendo:v1.0/room_q9k3ccg0p_ms"
+        />
+      </TestApp>
+    );
+
+    expect(screen.getByText('Invite Link')).toBeInTheDocument();
+    expect(screen.getByDisplayValue('https://moonfile.games/multiplayer/game:tetris-2-usa-nintendo:v1.0/room_q9k3ccg0p_ms')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /copy link/i })).toBeInTheDocument();
+  });
+
+  it('shows start button for host when full', () => {
     const mockStartGame = vi.fn();
 
     render(
       <TestApp>
         <MultiplayerWaitingScreen
-          status="ready"
-          players={mockPlayers}
+          status="full"
+          connectedPlayers={mockConnectedPlayers}
           requiredPlayers={2}
+          hostPubkey="host-pubkey"
           isHost={true}
           onStartGame={mockStartGame}
         />
@@ -92,8 +113,9 @@ describe('MultiplayerWaitingScreen', () => {
       <TestApp>
         <MultiplayerWaitingScreen
           status="waiting"
-          players={[mockPlayers[0]]} // Only host
+          connectedPlayers={[mockConnectedPlayers[0]]} // Only host
           requiredPlayers={2}
+          hostPubkey="host-pubkey"
           isHost={true}
         />
       </TestApp>
@@ -108,8 +130,9 @@ describe('MultiplayerWaitingScreen', () => {
       <TestApp>
         <MultiplayerWaitingScreen
           status="error"
-          players={mockPlayers}
+          connectedPlayers={mockConnectedPlayers}
           requiredPlayers={2}
+          hostPubkey="host-pubkey"
           isHost={true}
           error="Connection failed"
         />

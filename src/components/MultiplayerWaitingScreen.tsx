@@ -1,38 +1,69 @@
-import React from 'react';
+import React, { useState } from 'react';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { Users, Wifi, WifiOff, Crown, Loader2, Play } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Users, Wifi, WifiOff, Crown, Loader2, Play, Copy, Share, ExternalLink } from 'lucide-react';
 import { useAuthor } from '@/hooks/useAuthor';
 
-interface PlayerInfo {
+interface ConnectedPlayer {
   pubkey: string;
-  connected: boolean;
-  isHost: boolean;
   signal?: string;
 }
 
 interface MultiplayerWaitingScreenProps {
-  status: 'waiting' | 'connecting' | 'ready' | 'error';
-  players: PlayerInfo[];
+  status: 'waiting' | 'active' | 'full' | 'error';
+  connectedPlayers: ConnectedPlayer[];
   requiredPlayers: number;
+  hostPubkey: string;
   isHost: boolean;
   onStartGame?: () => void;
   error?: string;
+  shareableLink?: string;
   className?: string;
 }
 
 export default function MultiplayerWaitingScreen({
   status,
-  players,
+  connectedPlayers,
   requiredPlayers,
+  hostPubkey,
   isHost,
   onStartGame,
   error,
+  shareableLink,
   className = ""
 }: MultiplayerWaitingScreenProps) {
-  const connectedPlayers = players.filter(p => p.connected);
+  const [copied, setCopied] = useState(false);
+
   const allPlayersConnected = connectedPlayers.length >= requiredPlayers;
+  const canStartGame = status === 'full' && isHost;
+
+  const copyInviteLink = async () => {
+    if (shareableLink) {
+      try {
+        await navigator.clipboard.writeText(shareableLink);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
+      } catch (err) {
+        console.error('Failed to copy link:', err);
+      }
+    }
+  };
+
+  const shareInviteLink = async () => {
+    if (shareableLink && typeof navigator !== 'undefined' && navigator.share) {
+      try {
+        await navigator.share({
+          title: 'Join my multiplayer game!',
+          text: 'Click this link to join the game:',
+          url: shareableLink,
+        });
+      } catch (err) {
+        console.error('Failed to share:', err);
+      }
+    }
+  };
 
   return (
     <div className={`flex flex-col items-center justify-center min-h-[400px] ${className}`}>
@@ -43,7 +74,7 @@ export default function MultiplayerWaitingScreen({
             Multiplayer Room
           </CardTitle>
         </CardHeader>
-        
+
         <CardContent className="space-y-6">
           {/* Status Message */}
           <div className="text-center">
@@ -59,7 +90,7 @@ export default function MultiplayerWaitingScreen({
               </div>
             )}
 
-            {status === 'connecting' && (
+            {status === 'active' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-center gap-2 text-yellow-400">
                   <Loader2 className="w-5 h-5 animate-spin" />
@@ -71,7 +102,7 @@ export default function MultiplayerWaitingScreen({
               </div>
             )}
 
-            {status === 'ready' && (
+            {status === 'full' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-center gap-2 text-green-400">
                   <Wifi className="w-5 h-5" />
@@ -94,6 +125,47 @@ export default function MultiplayerWaitingScreen({
             )}
           </div>
 
+          {/* Invite Link Section */}
+          {isHost && shareableLink && (
+            <div className="space-y-3">
+              <h3 className="text-sm font-medium text-gray-300">Invite Link</h3>
+              <div className="space-y-2">
+                <Input
+                  value={shareableLink}
+                  readOnly
+                  className="bg-gray-800 border-gray-700 text-gray-300 text-xs"
+                />
+                <div className="flex gap-2">
+                  <Button
+                    onClick={copyInviteLink}
+                    variant="outline"
+                    size="sm"
+                    className="flex-1"
+                  >
+                    <Copy className="w-4 h-4 mr-2" />
+                    {copied ? 'Copied!' : 'Copy Link'}
+                  </Button>
+                  {navigator.share && (
+                    <Button
+                      onClick={shareInviteLink}
+                      variant="outline"
+                      size="sm"
+                    >
+                      <Share className="w-4 h-4" />
+                    </Button>
+                  )}
+                  <Button
+                    onClick={() => window.open(shareableLink, '_blank')}
+                    variant="outline"
+                    size="sm"
+                  >
+                    <ExternalLink className="w-4 h-4" />
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
+
           {/* Players List */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
@@ -104,12 +176,25 @@ export default function MultiplayerWaitingScreen({
             </div>
 
             <div className="space-y-2">
-              {players.map((player, index) => (
-                <PlayerCard key={player.pubkey} player={player} />
+              {/* Host */}
+              <PlayerCard
+                pubkey={hostPubkey}
+                isHost={true}
+                connected={true}
+              />
+
+              {/* Connected Players */}
+              {connectedPlayers.map((player, index) => (
+                <PlayerCard
+                  key={player.pubkey}
+                  pubkey={player.pubkey}
+                  isHost={false}
+                  connected={true}
+                />
               ))}
-              
+
               {/* Empty slots */}
-              {Array.from({ length: requiredPlayers - players.length }).map((_, index) => (
+              {Array.from({ length: requiredPlayers - connectedPlayers.length - 1 }).map((_, index) => (
                 <div key={`empty-${index}`} className="flex items-center gap-3 p-3 border border-dashed border-gray-700 rounded-lg bg-gray-800/50">
                   <div className="w-8 h-8 rounded-full bg-gray-700 flex items-center justify-center">
                     <span className="text-xs text-gray-500">?</span>
@@ -126,10 +211,10 @@ export default function MultiplayerWaitingScreen({
           </div>
 
           {/* Action Button */}
-          {status === 'ready' && isHost && onStartGame && (
-            <Button 
-              onClick={onStartGame} 
-              className="w-full" 
+          {canStartGame && onStartGame && (
+            <Button
+              onClick={onStartGame}
+              className="w-full"
               size="lg"
             >
               <Play className="w-5 h-5 mr-2" />
@@ -137,7 +222,7 @@ export default function MultiplayerWaitingScreen({
             </Button>
           )}
 
-          {status === 'ready' && !isHost && (
+          {status === 'full' && !isHost && (
             <div className="text-center">
               <p className="text-sm text-gray-400">
                 Waiting for host to start the game...
@@ -151,21 +236,23 @@ export default function MultiplayerWaitingScreen({
 }
 
 interface PlayerCardProps {
-  player: PlayerInfo;
+  pubkey: string;
+  isHost: boolean;
+  connected: boolean;
 }
 
-function PlayerCard({ player }: PlayerCardProps) {
-  const { data: author } = useAuthor(player.pubkey);
-  const displayName = author?.metadata?.name || player.pubkey.substring(0, 8);
+function PlayerCard({ pubkey, isHost, connected }: PlayerCardProps) {
+  const { data: author } = useAuthor(pubkey);
+  const displayName = author?.metadata?.name || pubkey.substring(0, 8);
   const avatar = author?.metadata?.picture;
 
   return (
     <div className="flex items-center gap-3 p-3 border border-gray-700 rounded-lg bg-gray-800">
       <div className="relative">
         {avatar ? (
-          <img 
-            src={avatar} 
-            alt={displayName} 
+          <img
+            src={avatar}
+            alt={displayName}
             className="w-8 h-8 rounded-full object-cover"
           />
         ) : (
@@ -175,29 +262,29 @@ function PlayerCard({ player }: PlayerCardProps) {
             </span>
           </div>
         )}
-        {player.isHost && (
+        {isHost && (
           <Crown className="w-3 h-3 text-yellow-400 absolute -top-1 -right-1" />
         )}
       </div>
-      
+
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2">
           <span className="text-sm text-white font-medium truncate">
             {displayName}
           </span>
-          {player.isHost && (
+          {isHost && (
             <Badge variant="outline" className="text-xs border-yellow-600 text-yellow-400">
               Host
             </Badge>
           )}
         </div>
         <div className="text-xs text-gray-400">
-          {player.pubkey.substring(0, 8)}...
+          {pubkey.substring(0, 8)}...
         </div>
       </div>
-      
+
       <div className="text-xs">
-        {player.connected ? (
+        {connected ? (
           <Wifi className="w-4 h-4 text-green-400" />
         ) : (
           <WifiOff className="w-4 h-4 text-gray-600" />

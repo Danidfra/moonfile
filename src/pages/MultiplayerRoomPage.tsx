@@ -314,14 +314,16 @@ export default function MultiplayerRoomPage() {
           {/* Main game area */}
           <div className="lg:col-span-3">
             {/* Show waiting screen if game hasn't started yet */}
-            {roomState.status === 'waiting' || roomState.status === 'connecting' || roomState.status === 'ready' ? (
+            {roomState.status === 'waiting' || roomState.status === 'active' || roomState.status === 'full' || roomState.status === 'error' ? (
               <MultiplayerWaitingScreen
                 status={roomState.status}
-                players={roomState.players}
+                connectedPlayers={roomState.connectedPlayers}
                 requiredPlayers={roomState.requiredPlayers}
+                hostPubkey={roomState.hostPubkey}
                 isHost={isHost}
                 onStartGame={startGame}
                 error={roomState.error}
+                shareableLink={roomState.shareableLink}
               />
             ) : (
               /* Show emulator when game is playing */

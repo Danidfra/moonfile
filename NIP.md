@@ -1,10 +1,10 @@
 # Multiplayer Gaming Sessions
 
-**NIP Name:** Multiplayer Gaming Sessions  
-**NIP Number:** Custom Extension  
-**Status:** Draft  
-**Author:** Moonfile Team  
-**Created:** 2025-09-23  
+**NIP Name:** Multiplayer Gaming Sessions
+**NIP Number:** Custom Extension
+**Status:** Draft
+**Author:** Moonfile Team
+**Created:** 2025-09-23
 
 ## Summary
 
@@ -37,7 +37,9 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
     ["host", "npub1..."],
     ["status", "waiting"],
     ["signal", "webrtc-offer-json"],
-    ["player", "npub1...", "webrtc-answer-json"]
+    ["connected", "joining-pubkey"],
+    ["player", "joining-pubkey", "webrtc-answer-json"],
+    ["connected_count", "1"]
   ],
   "pubkey": "<host-pubkey>",
   "created_at": <timestamp>
@@ -67,10 +69,10 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
 | Status | Description |
 |--------|-------------|
 | `waiting` | Waiting for players to join |
-| `connecting` | Players are connecting via WebRTC |
-| `ready` | All players connected, ready to start |
+| `active` | Players are connecting via WebRTC |
+| `full` | All expected players connected, ready to start |
 | `playing` | Game session is active |
-| `finished` | Game session has ended |
+| `error` | Error state |
 
 ## Flow
 

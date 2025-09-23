@@ -4,29 +4,19 @@ import { useCurrentUser } from './useCurrentUser';
 import { useNostrPublish } from './useNostrPublish';
 import type { NostrEvent } from '@nostrify/nostrify';
 
-interface MultiplayerRoomEvent {
-  id: string;
+interface ConnectedPlayer {
   pubkey: string;
-  created_at: number;
-  kind: number;
-  tags: string[][];
-  content: string;
-  sig: string;
-}
-
-interface PlayerInfo {
-  pubkey: string;
-  connected: boolean;
-  isHost: boolean;
-  signal?: string; // WebRTC offer/answer
+  signal?: string;
 }
 
 interface RoomState {
-  status: 'waiting' | 'connecting' | 'ready' | 'playing' | 'error';
-  players: PlayerInfo[];
+  status: 'waiting' | 'active' | 'full' | 'error' | 'playing';
   hostPubkey: string;
   requiredPlayers: number;
+  connectedPlayers: ConnectedPlayer[];
+  latestEvent: NostrEvent | null;
   error?: string;
+  shareableLink?: string;
 }
 
 export function useMultiplayerRoom(roomId: string, gameId: string) {
@@ -36,13 +26,15 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
   const [roomState, setRoomState] = useState<RoomState>({
     status: 'waiting',
-    players: [],
     hostPubkey: '',
     requiredPlayers: 2,
+    connectedPlayers: [],
+    latestEvent: null,
   });
 
   const [webRTCConnection, setWebRTCConnection] = useState<RTCPeerConnection | null>(null);
   const [localSignal, setLocalSignal] = useState<string | null>(null);
+  const [isHost, setIsHost] = useState(false);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
 
@@ -54,6 +46,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     const hostTag = event.tags.find(t => t[0] === 'host')?.[1];
     const statusTag = event.tags.find(t => t[0] === 'status')?.[1];
     const signalTag = event.tags.find(t => t[0] === 'signal')?.[1];
+    const connectedTag = event.tags.find(t => t[0] === 'connected')?.[1];
+    const connectedCountTag = event.tags.find(t => t[0] === 'connected_count')?.[1];
 
     if (!dTag || !gameTag || !playersTag || !hostTag) {
       throw new Error('Invalid room event: missing required tags');
@@ -64,74 +58,97 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       throw new Error('Invalid players count');
     }
 
-    // Parse players from event tags
-    const players: PlayerInfo[] = [
-      {
-        pubkey: hostTag,
-        connected: true,
-        isHost: true,
-        signal: signalTag
-      }
-    ];
+    // Parse connected players
+    const connectedPlayers: ConnectedPlayer[] = [];
 
-    // Find other player signals
-    const otherPlayers = event.tags
-      .filter(t => t[0] === 'player' && t[1] && t[1] !== hostTag)
-      .map(t => ({
-        pubkey: t[1],
-        connected: true,
-        isHost: false,
-        signal: t[2]
-      }));
+    // Add host
+    connectedPlayers.push({
+      pubkey: hostTag,
+      signal: signalTag
+    });
 
-    players.push(...otherPlayers);
+    // Add connected players from tags
+    if (connectedTag) {
+      // Find player signal for this connected player
+      const playerSignal = event.tags.find(t => t[0] === 'player' && t[1] === connectedTag)?.[2];
+      connectedPlayers.push({
+        pubkey: connectedTag,
+        signal: playerSignal
+      });
+    }
+
+    // Also check for any other connected players
+    const otherConnected = event.tags
+      .filter(t => t[0] === 'connected' && t[1] && t[1] !== hostTag && t[1] !== connectedTag)
+      .map(t => {
+        const playerSignal = event.tags.find(tag => tag[0] === 'player' && tag[1] === t[1])?.[2];
+        return {
+          pubkey: t[1],
+          signal: playerSignal
+        };
+      });
+
+    connectedPlayers.push(...otherConnected);
+
+    const connectedCount = connectedCountTag ? parseInt(connectedCountTag, 10) : connectedPlayers.length;
 
     return {
-      status: statusTag === 'ready' ? 'ready' : 'waiting',
-      players,
+      status: statusTag as 'waiting' | 'active' | 'full' || 'waiting',
       hostPubkey: hostTag,
       requiredPlayers,
+      connectedPlayers,
+      latestEvent: event,
     };
   }, []);
+
+  // Subscribe to room updates - get latest event
+  const fetchLatestRoomEvent = useCallback(async () => {
+    if (!nostr || !roomId) return null;
+
+    try {
+      const events = await nostr.query([{
+        kinds: [31997],
+        '#d': [roomId],
+        limit: 10
+      }], {
+        signal: AbortSignal.timeout(5000)
+      });
+
+      // Sort by created_at to get the most recent
+      const latestEvent = events.sort((a, b) => b.created_at - a.created_at)[0];
+
+      if (latestEvent) {
+        console.log('[MultiplayerRoom] Latest room event:', latestEvent.id);
+        return latestEvent;
+      }
+
+      return null;
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error fetching latest room event:', error);
+      return null;
+    }
+  }, [nostr, roomId]);
 
   // Subscribe to room updates
   const subscribeToRoom = useCallback(async () => {
     if (!nostr || !roomId) return;
 
-    // Close existing subscription
-    if (subscriptionRef.current) {
-      subscriptionRef.current.close();
-      subscriptionRef.current = null;
-    }
-
     console.log('[MultiplayerRoom] Subscribing to room updates:', roomId);
 
-    // Use query instead of req for simpler subscription
-    const queryController = new AbortController();
-
-    const fetchRoomEvents = async () => {
+    const pollRoomState = async () => {
       try {
-        const events = await nostr.query([{
-          kinds: [31997],
-          '#d': [roomId],
-          limit: 50
-        }], {
-          signal: queryController.signal
-        });
+        const latestEvent = await fetchLatestRoomEvent();
 
-        // Process existing events
-        events.forEach((event: NostrEvent) => {
-          console.log('[MultiplayerRoom] Received room event:', event.id);
-
+        if (latestEvent) {
           try {
-            const newRoomState = parseRoomEvent(event);
+            const newRoomState = parseRoomEvent(latestEvent);
             setRoomState(newRoomState);
 
-            // If we have a signal from another player, handle it
-            if (user && event.pubkey !== user.pubkey) {
-              const signalTag = event.tags.find(t => t[0] === 'signal')?.[1];
-              if (signalTag) {
-                handleRemoteSignal(signalTag, event.pubkey);
+            // If we have a signal from another player and we're not the host, handle it
+            if (user && latestEvent.pubkey !== user.pubkey && !isHost) {
+              const signalTag = latestEvent.tags.find(t => t[0] === 'signal')?.[1];
+              if (signalTag && !localSignal) {
+                handleRemoteSignal(signalTag, latestEvent.pubkey);
               }
             }
           } catch (error) {
@@ -142,27 +159,25 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
               error: error instanceof Error ? error.message : 'Failed to parse room event'
             }));
           }
-        });
-
-        console.log('[MultiplayerRoom] Initial room events loaded');
+        }
       } catch (error) {
-        console.error('[MultiplayerRoom] Error fetching room events:', error);
+        console.error('[MultiplayerRoom] Error in room polling:', error);
       }
     };
 
-    fetchRoomEvents();
+    // Initial fetch
+    pollRoomState();
 
-    // Set up periodic polling for new events (simplified approach)
-    const interval = setInterval(fetchRoomEvents, 5000);
+    // Set up periodic polling for new events
+    const interval = setInterval(pollRoomState, 3000);
 
     subscriptionRef.current = {
       close: () => {
-        queryController.abort();
         clearInterval(interval);
       }
     };
 
-  }, [nostr, roomId, user, parseRoomEvent]);
+  }, [nostr, roomId, user, isHost, localSignal, fetchLatestRoomEvent, parseRoomEvent]);
 
   // Create WebRTC offer (host only)
   const createWebRTCOffer = useCallback(async (): Promise<string> => {
@@ -177,16 +192,22 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       ]
     });
 
-    // Create data channel for game state
-    const dataChannel = pc.createDataChannel('game-state');
+    // Create data channel for game state and input
+    const dataChannel = pc.createDataChannel('game-data');
 
     dataChannel.onopen = () => {
       console.log('[MultiplayerRoom] Data channel opened');
     };
 
     dataChannel.onmessage = (event) => {
-      console.log('[MultiplayerRoom] Received message:', event.data);
-      // Handle game input messages from peers
+      try {
+        const data = JSON.parse(event.data);
+        console.log('[MultiplayerRoom] Received game input:', data);
+        // Handle game input messages from peers (arrow keys, buttons, etc.)
+        // This will be forwarded to the emulator
+      } catch (error) {
+        console.error('[MultiplayerRoom] Error parsing message:', error);
+      }
     };
 
     setWebRTCConnection(pc);
@@ -226,6 +247,35 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       if (signalData.type === 'answer') {
         await webRTCConnection.setRemoteDescription(signalData);
         console.log('[MultiplayerRoom] Remote description set');
+
+        // Update room state to active when connection is established
+        if (roomState.connectedPlayers.length >= roomState.requiredPlayers) {
+          await publishEvent({
+            kind: 31997,
+            content: '',
+            tags: [
+              ['d', roomId],
+              ['game', gameId],
+              ['players', roomState.requiredPlayers.toString()],
+              ['host', roomState.hostPubkey],
+              ['status', 'full'],
+              ['connected_count', roomState.connectedPlayers.length.toString()]
+            ]
+          });
+        } else {
+          await publishEvent({
+            kind: 31997,
+            content: '',
+            tags: [
+              ['d', roomId],
+              ['game', gameId],
+              ['players', roomState.requiredPlayers.toString()],
+              ['host', roomState.hostPubkey],
+              ['status', 'active'],
+              ['connected_count', roomState.connectedPlayers.length.toString()]
+            ]
+          });
+        }
       } else if (signalData.type === 'offer') {
         // Handle incoming offer (non-host)
         const pc = new RTCPeerConnection({
@@ -241,7 +291,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             console.log('[MultiplayerRoom] Data channel opened (peer)');
           };
           dataChannel.onmessage = (event) => {
-            console.log('[MultiplayerRoom] Received message (peer):', event.data);
+            try {
+              const data = JSON.parse(event.data);
+              console.log('[MultiplayerRoom] Received game state (peer):', data);
+              // Handle game state updates from host (video stream, game data)
+            } catch (error) {
+              console.error('[MultiplayerRoom] Error parsing message (peer):', error);
+            }
           };
         };
 
@@ -250,8 +306,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         await pc.setLocalDescription(answer);
 
         setWebRTCConnection(pc);
+        setLocalSignal(JSON.stringify(answer));
 
-        // Publish answer
+        // Publish answer with connected player info
         await publishEvent({
           kind: 31997,
           content: '',
@@ -260,9 +317,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             ['game', gameId],
             ['players', roomState.requiredPlayers.toString()],
             ['host', roomState.hostPubkey],
-            ['status', 'connecting'],
-            ['player', user?.pubkey || ''],
-            ['signal', JSON.stringify(pc.localDescription)]
+            ['status', 'active'],
+            ['connected', user?.pubkey || ''],
+            ['player', user?.pubkey || '', JSON.stringify(answer)],
+            ['connected_count', (roomState.connectedPlayers.length + 1).toString()]
           ]
         });
 
@@ -271,7 +329,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     } catch (error) {
       console.error('[MultiplayerRoom] Error handling remote signal:', error);
     }
-  }, [webRTCConnection, roomId, gameId, roomState.requiredPlayers, roomState.hostPubkey, user, publishEvent]);
+  }, [webRTCConnection, roomId, gameId, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers.length, user, publishEvent]);
 
   // Join or create room
   const joinOrCreateRoom = useCallback(async () => {
@@ -294,17 +352,41 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       const roomEvent = existingEvents[0];
       const roomData = parseRoomEvent(roomEvent);
 
-      if (roomData.players.length >= roomData.requiredPlayers) {
+      if (roomData.connectedPlayers.length >= roomData.requiredPlayers) {
         throw new Error('Room is full');
       }
 
+      setIsHost(false);
       // Wait for host signal and respond with answer
-      // This will be handled in the subscription
+      // This will be handled in the subscription when we receive the offer
     } else {
       // Create new room as host
       console.log('[MultiplayerRoom] Creating new room as host');
 
+      // First, get game metadata to determine number of players
+      const gameEvents = await nostr?.query([{
+        kinds: [31996],
+        '#d': [gameId],
+        limit: 1
+      }], { signal: AbortSignal.timeout(5000) });
+
+      let playerCount = 2; // Default
+      if (gameEvents && gameEvents.length > 0) {
+        const gameEvent = gameEvents[0];
+        const playersTag = gameEvent.tags.find(t => t[0] === 'players')?.[1];
+        if (playersTag) {
+          const parsed = parseInt(playersTag, 10);
+          if (!isNaN(parsed) && parsed > 0) {
+            playerCount = parsed;
+          }
+        }
+      }
+
       const offer = await createWebRTCOffer();
+      setIsHost(true);
+
+      // Generate shareable link
+      const shareableLink = `${window.location.origin}/multiplayer/${gameId}/${roomId}`;
 
       await publishEvent({
         kind: 31997,
@@ -312,26 +394,38 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         tags: [
           ['d', roomId],
           ['game', gameId],
-          ['players', '2'], // Default to 2 players
+          ['players', playerCount.toString()],
           ['host', user.pubkey],
           ['status', 'waiting'],
           ['signal', offer]
         ]
       });
 
+      // Update state with shareable link
+      setRoomState(prev => ({
+        ...prev,
+        requiredPlayers: playerCount,
+        hostPubkey: user.pubkey,
+        shareableLink
+      }));
+
       console.log('[MultiplayerRoom] Room created successfully');
     }
   }, [user, roomId, gameId, nostr, parseRoomEvent, createWebRTCOffer, publishEvent]);
 
-  // Start game when all players are ready
+  // Start game when all players are ready (host only)
   const startGame = useCallback(async () => {
-    if (!user || roomState.status !== 'ready') {
-      throw new Error('Cannot start game: not ready');
+    if (!user || !isHost) {
+      throw new Error('Only host can start the game');
+    }
+
+    if (roomState.status !== 'full' && roomState.connectedPlayers.length < roomState.requiredPlayers) {
+      throw new Error('Cannot start game: not all players connected');
     }
 
     console.log('[MultiplayerRoom] Starting game...');
 
-    // Update room status to playing
+    // Update room status to full/game active
     await publishEvent({
       kind: 31997,
       content: '',
@@ -345,7 +439,34 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     });
 
     setRoomState(prev => ({ ...prev, status: 'playing' }));
-  }, [user, roomState, roomId, gameId, publishEvent]);
+  }, [user, isHost, roomState, roomId, gameId, publishEvent]);
+
+  // Send game input to host (for non-host players)
+  const sendGameInput = useCallback((input: any) => {
+    if (webRTCConnection && !isHost) {
+      // Find data channel - this is a simplified approach
+      // In a real implementation, you'd track data channels more explicitly
+      webRTCConnection.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'datachannel') {
+          // This is a placeholder - actual data channel handling would be more complex
+          console.log('[MultiplayerRoom] Sending input via WebRTC:', input);
+        }
+      });
+    }
+  }, [webRTCConnection, isHost, user]);
+
+  // Send game state to players (for host)
+  const sendGameState = useCallback((state: any) => {
+    if (webRTCConnection && isHost) {
+      // Find data channel - this is a simplified approach
+      webRTCConnection.getSenders().forEach(sender => {
+        if (sender.track && sender.track.kind === 'datachannel') {
+          // This is a placeholder - actual data channel handling would be more complex
+          console.log('[MultiplayerRoom] Sending game state via WebRTC:', state);
+        }
+      });
+    }
+  }, [webRTCConnection, isHost]);
 
   // Initialize room on mount
   useEffect(() => {
@@ -371,20 +492,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     };
   }, [roomId, gameId, subscribeToRoom, joinOrCreateRoom]);
 
-  // Update room state based on player connections
-  useEffect(() => {
-    if (roomState.players.length >= roomState.requiredPlayers &&
-        roomState.players.every(p => p.connected) &&
-        roomState.status === 'waiting') {
-      setRoomState(prev => ({ ...prev, status: 'ready' }));
-    }
-  }, [roomState.players, roomState.requiredPlayers, roomState.status]);
-
   return {
     roomState,
     startGame,
-    isHost: user?.pubkey === roomState.hostPubkey,
+    isHost,
     webRTCConnection,
-    localSignal
+    localSignal,
+    sendGameInput,
+    sendGameState
   };
 }
