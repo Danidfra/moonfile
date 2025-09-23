@@ -3,28 +3,12 @@ import { Header } from '@/components/Header';
 import { useNostr } from '@nostrify/react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { GameCardNostr } from '@/components/games/GameCardNostr';
+import { GamesEmptyState } from '@/components/games/GamesEmptyState';
 import { Play, Gamepad2 } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
-
-interface GameMetadata {
-  id: string;
-  title: string;
-  summary?: string;
-  genres: string[];
-  modes: string[];
-  status?: string;
-  version?: string;
-  credits?: string;
-  platforms: string[];
-  assets: {
-    cover?: string;
-    icon?: string;
-    banner?: string;
-    screenshots: string[];
-  };
-}
+import type { Game31996 } from '@/types/game';
 
 const GamesPage = () => {
   useSeoMeta({
@@ -50,7 +34,7 @@ const GamesPage = () => {
 
       console.log('[GamesPage] Found', events.length, 'game events');
 
-      // Parse events into game metadata
+      // Parse events into game metadata using the same parser as other pages
       const games = events.map(parseGameMetadata).filter(Boolean);
 
       console.log('[GamesPage] Parsed', games.length, 'valid games');
@@ -108,23 +92,21 @@ const GamesPage = () => {
           {!loading && !error && games.length > 0 && (
             <div className="grid md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
               {games.map((game) => (
-                <GameCard key={game.id} game={game} onPlay={() => navigate(`/game/${game.id}`)} />
+                <GameCardNostr
+                  key={game.id}
+                  game={game}
+                />
               ))}
             </div>
           )}
 
           {/* Empty State */}
           {!loading && !error && games.length === 0 && (
-            <div className="flex flex-col items-center justify-center py-16">
-              <Gamepad2 className="w-16 h-16 text-gray-600 mb-4" />
-              <h2 className="text-2xl font-bold text-white mb-4">No Games Found</h2>
-              <p className="text-gray-400 mb-6 text-center max-w-md">
-                No games are available right now. Check back later or try refreshing.
-              </p>
-              <Button onClick={() => refetch()} className="bg-purple-600 hover:bg-purple-700">
-                Refresh
-              </Button>
-            </div>
+            <GamesEmptyState
+              loading={false}
+              error={null}
+              onRefresh={refetch}
+            />
           )}
         </div>
       </main>
@@ -132,95 +114,79 @@ const GamesPage = () => {
   );
 };
 
-function GameCard({ game, onPlay }: { game: GameMetadata; onPlay: () => void }) {
-  return (
-    <Card className="border-gray-800 bg-gray-900 hover:border-purple-500 transition-colors">
-      <CardHeader className="pb-3">
-        {game.assets.cover && (
-          <div className="aspect-video rounded-lg overflow-hidden mb-3">
-            <img
-              src={game.assets.cover}
-              alt={game.title}
-              className="w-full h-full object-cover"
-            />
-          </div>
-        )}
-        <CardTitle className="text-white line-clamp-1">{game.title}</CardTitle>
-      </CardHeader>
-      <CardContent className="pt-0">
-        <div className="space-y-3">
-          <div className="flex flex-wrap gap-1">
-            {game.genres.slice(0, 2).map((genre) => (
-              <span
-                key={genre}
-                className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded"
-              >
-                {genre}
-              </span>
-            ))}
-          </div>
-
-          {game.status && (
-            <div className="flex items-center gap-2">
-              <div className={`w-2 h-2 rounded-full ${
-                game.status === 'released' ? 'bg-green-400' :
-                game.status === 'beta' ? 'bg-blue-400' :
-                'bg-orange-400'
-              }`}></div>
-              <span className="text-xs text-gray-400 capitalize">{game.status}</span>
-            </div>
-          )}
-
-          <Button onClick={onPlay} className="w-full bg-purple-600 hover:bg-purple-700">
-            <Play className="w-4 h-4 mr-2" />
-            Play
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
-  );
-}
-
 /**
- * Parse game metadata from Nostr event
+ * Parse game metadata from Nostr event using the same logic as gameParser.ts
+ * This ensures consistency across all pages and proper image parsing
  */
-function parseGameMetadata(event: NostrEvent): GameMetadata {
+function parseGameMetadata(event: NostrEvent): Game31996 | null {
   const getTagValue = (tagName: string): string | undefined => {
     const tag = event.tags.find(t => t[0] === tagName);
     return tag?.[1];
   };
 
   const getTagValues = (tagName: string): string[] => {
-    return event.tags
-      .filter(t => t[0] === tagName)
-      .map(t => t[1])
-      .filter(Boolean);
+    const values: string[] = [];
+    for (const t of event.tags) {
+      if (t[0] === tagName && t.length > 1) {
+        values.push(...t.slice(1));
+      }
+    }
+    return values;
   };
 
-  const getAssetUrl = (assetType: string): string | undefined => {
-    const tag = event.tags.find(t => t[0] === 'image' && t[1] === assetType);
-    return tag?.[2];
+  const d = getTagValue('d');
+  const name = getTagValue('name');
+
+  if (!d || !name) return null;
+
+  const size = getTagValue('size');
+  const assets: Game31996['assets'] = {
+    screenshots: []
   };
+
+  // Parse image assets - supports both ["image", "url"] and ["image", "cover", "url"] formats
+  for (const t of event.tags) {
+    if (t[0] === "image") {
+      if (t.length === 2) {
+        // Simple format: ["image", "url"]
+        assets.cover ??= t[1];
+      } else if (t[1] === "cover" && t[2]) {
+        // Typed format: ["image", "cover", "url"] - overrides simple format
+        assets.cover = t[2];
+      } else if (t[1] === "screenshot" && t[2]) {
+        // Screenshot format: ["image", "screenshot", "url"]
+        assets.screenshots.push(t[2]);
+      }
+      // Handle other potential image types gracefully
+      else if (t[1] && !t[2]) {
+        // Handle case where there might be a type but no URL (fallback to simple format)
+        assets.cover ??= t[1];
+      }
+    } else if (t[0] === "icon" && t[1]) {
+      assets.icon = t[1];
+    } else if (t[0] === "banner" && t[1]) {
+      assets.banner = t[1];
+    }
+  }
 
   return {
-    id: getTagValue('d') || event.id,
-    title: getTagValue('name') || 'Unknown Game',
+    id: d,
+    title: name,
     summary: getTagValue('summary'),
-    genres: getTagValues('t').filter(t => !['singleplayer', 'multiplayer', 'co-op', 'competitive'].includes(t)),
-    modes: getTagValues('t').filter(t => ['singleplayer', 'multiplayer', 'co-op', 'competitive'].includes(t)),
-    status: getTagValue('status'),
-    version: getTagValue('version'),
+    genres: getTagValues('genre'),
+    modes: getTagValues('mode'),
+    status: getTagValue('status') as "alpha" | "beta" | "released" | "prototype" | string | undefined,
+    version: getTagValue('ver'),
     credits: getTagValue('credits'),
-    platforms: getTagValues('platform'),
-    assets: {
-      cover: getAssetUrl('cover'),
-      icon: getAssetUrl('icon'),
-      banner: getAssetUrl('banner'),
-      screenshots: event.tags
-        .filter(t => t[0] === 'image' && t[1] === 'screenshot')
-        .map(t => t[2])
-        .filter(Boolean)
-    }
+    platforms: getTagValues('platforms'),
+    mime: getTagValue('mime'),
+    encoding: getTagValue('encoding') as "base64" | string | undefined,
+    compression: getTagValue('compression') as "none" | "gzip" | string | undefined,
+    sizeBytes: size ? Number(size) : undefined,
+    sha256: getTagValue('sha256'),
+    assets,
+    contentBase64: event.content,
+    event
   };
 }
 
