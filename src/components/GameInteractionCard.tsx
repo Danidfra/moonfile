@@ -3,23 +3,23 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { Separator } from '@/components/ui/separator';
+// import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+// import { Separator } from '@/components/ui/separator';
 import {
   MessageCircle,
-  Trophy,
+  // Trophy,
   Users,
   Send,
-  Zap,
-  Clock,
-  Target,
-  Gamepad2,
-  Heart
+  // Zap,
+  // Clock,
+  // Target,
+  // Gamepad2,
+  // Heart
 } from 'lucide-react';
 
 export default function GameInteractionCard() {
-  const [selectedChallenge, setSelectedChallenge] = useState('highest-score');
-  const [wagerAmount, setWagerAmount] = useState('');
+  // const [selectedChallenge, setSelectedChallenge] = useState('highest-score');
+  // const [wagerAmount, setWagerAmount] = useState('');
   const [message, setMessage] = useState('');
 
   // Mock chat messages
@@ -30,36 +30,36 @@ export default function GameInteractionCard() {
     { user: 'SpeedRunner', message: 'Custom challenge sounds interesting!', time: 'Just now' },
   ];
 
-  const challengeTypes = [
-    {
-      id: 'highest-score',
-      icon: <Trophy className="w-4 h-4" />,
-      title: 'Highest Score',
-      emoji: '🏆',
-      description: 'Compete for the highest score in a single session. Best score wins the pot!'
-    },
-    {
-      id: 'survival',
-      icon: <Clock className="w-4 h-4" />,
-      title: 'Survival',
-      emoji: '🕹️',
-      description: 'See who can survive the longest. Last player standing takes all!'
-    },
-    {
-      id: 'custom',
-      icon: <Target className="w-4 h-4" />,
-      title: 'Custom Challenge',
-      emoji: '🧪',
-      description: 'Create your own rules and objectives. Perfect for unique gameplay styles!'
-    },
-    {
-      id: 'casual',
-      icon: <Gamepad2 className="w-4 h-4" />,
-      title: 'Casual Match',
-      emoji: '🎯',
-      description: 'Play for fun without any wagers. Just friendly competition!'
-    }
-  ];
+  // const challengeTypes = [
+  //   {
+  //     id: 'highest-score',
+  //     icon: <Trophy className="w-4 h-4" />,
+  //     title: 'Highest Score',
+  //     emoji: '🏆',
+  //     description: 'Compete for the highest score in a single session. Best score wins the pot!'
+  //   },
+  //   {
+  //     id: 'survival',
+  //     icon: <Clock className="w-4 h-4" />,
+  //     title: 'Survival',
+  //     emoji: '🕹️',
+  //     description: 'See who can survive the longest. Last player standing takes all!'
+  //   },
+  //   {
+  //     id: 'custom',
+  //     icon: <Target className="w-4 h-4" />,
+  //     title: 'Custom Challenge',
+  //     emoji: '🧪',
+  //     description: 'Create your own rules and objectives. Perfect for unique gameplay styles!'
+  //   },
+  //   {
+  //     id: 'casual',
+  //     icon: <Gamepad2 className="w-4 h-4" />,
+  //     title: 'Casual Match',
+  //     emoji: '🎯',
+  //     description: 'Play for fun without any wagers. Just friendly competition!'
+  //   }
+  // ];
 
   return (
     <div className="space-y-6">
@@ -79,7 +79,7 @@ export default function GameInteractionCard() {
         </CardHeader>
         <CardContent className="p-4 pt-0">
           {/* Chat Messages */}
-          <div className="space-y-3 mb-4 max-h-48 overflow-y-auto">
+          <div className="space-y-3 mb-4 max-h-96 overflow-y-auto">
             {chatMessages.map((msg, index) => (
               <div key={index} className="space-y-1">
                 <div className="flex items-center gap-2 text-xs">
@@ -111,6 +111,7 @@ export default function GameInteractionCard() {
       </Card>
 
       {/* Challenge Setup & Bet Options */}
+      {/* 
       <Card className="border-gray-800 bg-gray-900">
         <CardHeader className="pb-3">
           <CardTitle className="text-white flex items-center gap-2 text-lg">
@@ -158,7 +159,7 @@ export default function GameInteractionCard() {
 
                 <Separator className="bg-gray-800" />
 
-                {/* Wager Section */}
+                // Wager Section
                 {challenge.id !== 'casual' ? (
                   <div className="space-y-3">
                     <label className="text-sm font-medium text-gray-300">
@@ -185,7 +186,7 @@ export default function GameInteractionCard() {
                   </div>
                 )}
 
-                {/* Player Options */}
+                //Player Options
                 <div className="space-y-3">
                   <label className="text-sm font-medium text-gray-300">
                     Players
@@ -209,7 +210,7 @@ export default function GameInteractionCard() {
                   </div>
                 </div>
 
-                {/* Action Button */}
+                //Action Button
                 <Button
                   className="w-full bg-purple-600 hover:bg-purple-700"
                   disabled={challenge.id !== 'casual' && !wagerAmount}
@@ -221,6 +222,7 @@ export default function GameInteractionCard() {
           </Tabs>
         </CardContent>
       </Card>
+     */}
     </div>
   );
 }
