@@ -174,6 +174,30 @@ export default function MultiplayerWaitingScreen({
               </div>
             )}
 
+            {status === 'waiting_for_player' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-center gap-2 text-blue-400">
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                  <span className="font-medium">Waiting for players to join...</span>
+                </div>
+                <p className="text-sm text-gray-400">
+                  Room is ready! Share the invite link below to get players.
+                </p>
+              </div>
+            )}
+
+            {status === 'waiting_to_retry' && (
+              <div className="space-y-2">
+                <div className="flex items-center justify-center gap-2 text-yellow-400">
+                  <WifiOff className="w-5 h-5" />
+                  <span className="font-medium">No players joined yet</span>
+                </div>
+                <p className="text-sm text-gray-400">
+                  The wait time has expired. You can retry or share the link again.
+                </p>
+              </div>
+            )}
+
             {status === 'error' && (
               <div className="space-y-2">
                 <div className="flex items-center justify-center gap-2 text-red-400">
