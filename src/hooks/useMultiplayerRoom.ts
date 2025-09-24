@@ -18,7 +18,7 @@ interface ChatMessage {
 }
 
 interface RoomState {
-  status: 'waiting' | 'active' | 'full' | 'error' | 'playing';
+  status: 'waiting' | 'active' | 'full' | 'error' | 'playing' | 'waiting_for_player' | 'waiting_to_retry';
   hostPubkey: string;
   requiredPlayers: number;
   connectedPlayers: ConnectedPlayer[];
@@ -62,6 +62,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [processedPeerSignals, setProcessedPeerSignals] = useState<Set<string>>(new Set());
   const [isConnectionEstablished, setIsConnectionEstablished] = useState(false);
   const [connectionHealthCheck, setConnectionHealthCheck] = useState<NodeJS.Timeout | null>(null);
+  const [isWaitingForLateAnswers, setIsWaitingForLateAnswers] = useState(false);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
@@ -219,6 +220,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
               if (playerSignalTag) {
                 console.log('[MultiplayerRoom] 📡 Found player signal tag for guest:', latestEvent.pubkey);
 
+                // Handle late answers (when connection timed out but answer arrives later)
+                if (isWaitingForLateAnswers && !webRTCConnection) {
+                  console.log('[MultiplayerRoom] 🕒 Late answer detected, recreating connection for guest:', latestEvent.pubkey);
+                  handleLateAnswer(playerSignalTag, latestEvent.pubkey, latestEvent);
+                  return;
+                }
+
                 if (!webRTCConnection) {
                   console.warn('[MultiplayerRoom] ⚠️ No WebRTC connection available to process guest answer');
                 } else if (processedPeerSignals.has(latestEvent.pubkey)) {
@@ -370,10 +378,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         }
         const healthCheck = setTimeout(() => {
           if (pc.iceConnectionState === 'checking') {
-            console.warn('[MultiplayerRoom] ⚠️ Host ICE connection stuck in checking state for 15 seconds');
-            handleConnectionFailure('ICE connection stuck in checking state - possible network issues');
+            console.warn('[MultiplayerRoom] ⚠️ Host ICE connection stuck in checking state for 20 seconds');
+            console.log('[MultiplayerRoom] 💡 This might be due to network restrictions. Connection will continue to try...');
+            // Don't treat as failure, just warn and continue
           }
-        }, 15000); // 15 seconds to detect stuck connections
+        }, 20000); // 20 seconds before warning about stuck connection
         setConnectionHealthCheck(healthCheck);
       } else if (pc.iceConnectionState === 'new') {
         console.log('[MultiplayerRoom] 🆕 Host ICE connection initialized');
@@ -389,16 +398,17 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       console.log('[MultiplayerRoom] Host ICE gathering state changed:', pc.iceGatheringState);
     };
 
-    // Set connection timeout (10 seconds)
+    // Set connection timeout (45 seconds - accommodate slow Nostr relay propagation)
     const timeout = setTimeout(() => {
-      console.warn('[MultiplayerRoom] Host connection timeout after 10 seconds');
+      console.warn('[MultiplayerRoom] Host connection timeout after 45 seconds - enabling late answer mode');
       setHasConnectionTimedOut(true);
+      setIsWaitingForLateAnswers(true);
       setRoomState(prev => ({
         ...prev,
-        status: 'error',
-        error: 'Connection timeout - WebRTC connection failed to establish within 10 seconds'
+        status: 'waiting_for_player', // More specific status for UI feedback
+        error: 'Waiting for other player... They can still join and connect.'
       }));
-    }, 10000);
+    }, 45000);
     setConnectionTimeout(timeout);
 
     // Create data channels for different purposes
@@ -480,6 +490,99 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] WebRTC offer created');
     return offerJson;
   }, [user]);
+
+  // Helper function to handle successful connection
+  const handleConnectionEstablished = useCallback(() => {
+    if (connectionTimeout) {
+      clearTimeout(connectionTimeout);
+      setConnectionTimeout(null);
+    }
+    if (connectionHealthCheck) {
+      clearTimeout(connectionHealthCheck);
+      setConnectionHealthCheck(null);
+    }
+    setHasConnectionTimedOut(false);
+    setIsConnectionEstablished(true);
+    setIsWaitingForLateAnswers(false);
+
+    // Set isWebRTCConnected only when actual peer-to-peer connection is fully established
+    setRoomState(prev => ({ ...prev, isWebRTCConnected: true, status: 'active' }));
+    console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (host)');
+
+    // Start emulator when connection is fully established (host only)
+    if (isHost && onEmulatorStart) {
+      console.log('[MultiplayerRoom] 🎮 WebRTC connection fully established, starting emulator on host');
+      setTimeout(() => {
+        onEmulatorStart();
+      }, 100);
+    }
+  }, [connectionTimeout, connectionHealthCheck, isHost, onEmulatorStart]);
+
+  // Helper function to handle connection failure
+  const handleConnectionFailure = useCallback((reason: string) => {
+    if (connectionTimeout) {
+      clearTimeout(connectionTimeout);
+      setConnectionTimeout(null);
+    }
+    if (connectionHealthCheck) {
+      clearTimeout(connectionHealthCheck);
+      setConnectionHealthCheck(null);
+    }
+    setHasConnectionTimedOut(true);
+    setIsConnectionEstablished(false);
+    setIsWaitingForLateAnswers(false);
+    setRoomState(prev => ({
+      ...prev,
+      status: 'error',
+      error: `Connection failed: ${reason}`,
+      isWebRTCConnected: false
+    }));
+  }, [connectionTimeout, connectionHealthCheck]);
+
+  // Helper function to handle successful guest connection
+  const handleGuestConnectionEstablished = useCallback(() => {
+    if (connectionTimeout) {
+      clearTimeout(connectionTimeout);
+      setConnectionTimeout(null);
+    }
+    if (connectionHealthCheck) {
+      clearTimeout(connectionHealthCheck);
+      setConnectionHealthCheck(null);
+    }
+    setHasConnectionTimedOut(false);
+    setIsConnectionEstablished(true);
+    setIsWaitingForLateAnswers(false);
+
+    // Set isWebRTCConnected only when actual peer-to-peer connection is fully established
+    setRoomState(prev => ({
+      ...prev,
+      isWebRTCConnected: true,
+      canJoinGame: false // Disable join game button once connected
+    }));
+    console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
+  }, [connectionTimeout, connectionHealthCheck]);
+
+  // Helper function to handle guest connection failure
+  const handleGuestConnectionFailure = useCallback((reason: string) => {
+    if (connectionTimeout) {
+      clearTimeout(connectionTimeout);
+      setConnectionTimeout(null);
+    }
+    if (connectionHealthCheck) {
+      clearTimeout(connectionHealthCheck);
+      setConnectionHealthCheck(null);
+    }
+    setHasConnectionTimedOut(true);
+    setIsConnectionEstablished(false);
+    setIsWaitingForLateAnswers(false);
+    setRoomState(prev => ({
+      ...prev,
+      status: 'error',
+      error: `Connection failed: ${reason}`,
+      isWebRTCConnected: false,
+      canJoinGame: true // Re-enable join game button for retry
+    }));
+  }, [connectionTimeout, connectionHealthCheck]);
 
   // Handle remote signal (answer from peer)
   const handleRemoteSignal = useCallback(async (signal: string, fromPubkey: string) => {
@@ -921,10 +1024,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           }
           const healthCheck = setTimeout(() => {
             if (pc.iceConnectionState === 'checking') {
-              console.warn('[MultiplayerRoom] ⚠️ Guest ICE connection stuck in checking state for 15 seconds');
-              handleGuestConnectionFailure('ICE connection stuck in checking state - possible network issues');
+              console.warn('[MultiplayerRoom] ⚠️ Guest ICE connection stuck in checking state for 20 seconds');
+              console.log('[MultiplayerRoom] 💡 This might be due to network restrictions. Connection will continue to try...');
+              // Don't treat as failure, just warn and continue
             }
-          }, 15000); // 15 seconds to detect stuck connections
+          }, 20000); // 20 seconds before warning about stuck connection
           setConnectionHealthCheck(healthCheck);
         } else if (pc.iceConnectionState === 'new') {
           console.log('[MultiplayerRoom] 🆕 Guest ICE connection initialized');
@@ -940,16 +1044,16 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         console.log('[MultiplayerRoom] Guest ICE gathering state changed:', pc.iceGatheringState);
       };
 
-      // Set connection timeout (10 seconds)
+      // Set connection timeout (45 seconds - accommodate slow Nostr relay propagation)
       const timeout = setTimeout(() => {
-        console.warn('[MultiplayerRoom] Guest connection timeout after 10 seconds');
+        console.warn('[MultiplayerRoom] Guest connection timeout after 45 seconds');
         setHasConnectionTimedOut(true);
         setRoomState(prev => ({
           ...prev,
-          status: 'error',
-          error: 'Connection timeout - WebRTC connection failed to establish within 10 seconds'
+          status: 'waiting_to_retry', // Specific status for UI feedback
+          error: 'Connection taking longer than expected. Please try joining again.'
         }));
-      }, 10000);
+      }, 45000);
       setConnectionTimeout(timeout);
 
       // Handle incoming data channels from host
@@ -1310,6 +1414,190 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }));
     }
   }, [webRTCConnection, isHost, roomState.pendingHostSignal, roomState.hostPubkey, roomState.shareableLink, roomState.connectedPlayers, roomState.chatMessages, connectionTimeout, joinGame, joinOrCreateRoom]);
+
+  // Handle late answers (when host connection timed out but answer arrives later)
+  const handleLateAnswer = useCallback(async (signal: string, fromPubkey: string, event: NostrEvent) => {
+    if (!user) return;
+
+    console.log('[MultiplayerRoom] 🕒 Handling late answer from guest:', fromPubkey);
+
+    // Reset timeout state
+    setHasConnectionTimedOut(false);
+    setIsWaitingForLateAnswers(false);
+
+    // Create new peer connection for late answer
+    const pc = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' },
+        { urls: 'stun:stun2.l.google.com:19302' },
+        {
+          urls: 'turn:openrelay.metered.ca:80',
+          username: 'openrelayproject',
+          credential: 'openrelayproject'
+        }
+      ],
+      iceCandidatePoolSize: 10
+    });
+
+    // Set up connection handlers (similar to createWebRTCOffer)
+    pc.onconnectionstatechange = () => {
+      console.log('[MultiplayerRoom] 🔄 Late answer connection state changed:', pc.connectionState);
+      console.log('[MultiplayerRoom] 🧊 Late answer ICE state:', pc.iceConnectionState);
+      console.log('[MultiplayerRoom] 📡 Late answer signaling state:', pc.signalingState);
+
+      if (pc.connectionState === 'connected') {
+        console.log('[MultiplayerRoom] ✅ Late answer connection established successfully');
+        handleConnectionEstablished();
+      } else if (pc.connectionState === 'failed') {
+        console.error('[MultiplayerRoom] ❌ Late answer connection failed');
+        handleConnectionFailure('Late answer connection failed');
+      }
+    };
+
+    pc.oniceconnectionstatechange = () => {
+      console.log('[MultiplayerRoom] 🧊 Late answer ICE connection state changed:', pc.iceConnectionState);
+
+      if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
+        console.log('[MultiplayerRoom] ✅ Late answer ICE connection established successfully');
+        handleConnectionEstablished();
+      } else if (pc.iceConnectionState === 'failed') {
+        console.error('[MultiplayerRoom] ❌ Late answer ICE connection failed');
+        handleConnectionFailure('Late answer ICE connection failed');
+      }
+    };
+
+    // Create data channels
+    const gameDataChannel = pc.createDataChannel('game-data');
+    const chatDataChannel = pc.createDataChannel('chat');
+
+    chatDataChannel.onopen = () => {
+      console.log('[MultiplayerRoom] 📡 Late answer chat data channel opened');
+      setDataChannel(chatDataChannel);
+    };
+
+    chatDataChannel.onclose = () => {
+      console.log('[MultiplayerRoom] 📡 Late answer chat data channel closed');
+      setDataChannel(null);
+    };
+
+    chatDataChannel.onerror = (error) => {
+      console.error('[MultiplayerRoom] ❌ Late answer chat data channel error:', error);
+    };
+
+    // Set up ICE candidate handling
+    const localIceCandidates: RTCIceCandidate[] = [];
+    pc.onicecandidate = (event) => {
+      console.log('[MultiplayerRoom] Late answer ICE candidate generated:', event.candidate ? event.candidate.candidate : 'null (complete)');
+
+      if (event.candidate) {
+        localIceCandidates.push(event.candidate);
+      } else {
+        console.log('[MultiplayerRoom] Late answer ICE gathering complete with', localIceCandidates.length, 'candidates');
+        (pc as any).localIceCandidates = localIceCandidates;
+      }
+    };
+
+    setWebRTCConnection(pc);
+
+    // Process late answer
+    try {
+      const signalData = JSON.parse(signal);
+      console.log('[MultiplayerRoom] Late answer signal type:', signalData.type);
+
+      // Set remote description with late answer
+      await pc.setRemoteDescription(signalData);
+      console.log('[MultiplayerRoom] Late answer remote description set');
+
+      // Add ICE candidates from late answer
+      if (signalData.iceCandidates && Array.isArray(signalData.iceCandidates)) {
+        console.log('[MultiplayerRoom] Adding', signalData.iceCandidates.length, 'late answer ICE candidates');
+        for (const candidate of signalData.iceCandidates) {
+          try {
+            await pc.addIceCandidate(candidate);
+            console.log('[MultiplayerRoom] ✅ Added late answer ICE candidate:', candidate.candidate?.substring(0, 50) + '...');
+          } catch (error) {
+            console.warn('[MultiplayerRoom] Failed to add late answer ICE candidate:', error);
+          }
+        }
+      }
+
+      // Create new offer for late connection
+      const offer = await pc.createOffer();
+      await pc.setLocalDescription(offer);
+
+      // Wait for ICE gathering
+      await new Promise<void>((resolve) => {
+        if (pc.iceGatheringState === 'complete') {
+          resolve();
+        } else {
+          const checkState = () => {
+            if (pc.iceGatheringState === 'complete') {
+              resolve();
+            } else {
+              setTimeout(checkState, 100);
+            }
+          };
+          checkState();
+        }
+      });
+
+      // Create enhanced offer with ICE candidates
+      const offerWithCandidates = {
+        sdp: pc.localDescription?.sdp,
+        type: pc.localDescription?.type,
+        iceCandidates: (pc as any).localIceCandidates || []
+      };
+
+      // Publish new offer for late connection
+      await publishEvent({
+        kind: 31997,
+        content: '',
+        tags: [
+          ['d', roomId],
+          ['game', gameId],
+          ['players', roomState.requiredPlayers.toString()],
+          ['host', user.pubkey],
+          ['status', 'active'],
+          ['signal', JSON.stringify(offerWithCandidates)]
+        ]
+      });
+
+      console.log('[MultiplayerRoom] 🕒 Late answer connection initiated successfully');
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error processing late answer:', error);
+      handleConnectionFailure('Failed to process late answer');
+    }
+  }, [user, roomId, gameId, roomState.requiredPlayers, publishEvent]);
+
+  // Send chat message via WebRTC data channel (not Nostr events)
+  const sendChatMessage = useCallback((message: string) => {
+    if (!dataChannel || !user) {
+      console.warn('[MultiplayerRoom] Cannot send chat message - data channel or user not available');
+      return;
+    }
+
+    const chatMessage: ChatMessage = {
+      id: Date.now().toString(),
+      sender: user.pubkey,
+      message,
+      timestamp: Date.now(),
+    };
+
+    try {
+      dataChannel.send(JSON.stringify(chatMessage));
+      console.log('[MultiplayerRoom] 📤 Chat message sent via WebRTC data channel:', chatMessage);
+
+      // Add to local state immediately for UI feedback
+      setRoomState(prev => ({
+        ...prev,
+        chatMessages: [...(prev.chatMessages || []), chatMessage]
+      }));
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error sending chat message via WebRTC data channel:', error);
+      // Fallback: could implement Nostr event fallback here if needed
+    }
+  }, [dataChannel, user]);
 
   // Track room initialization to prevent multiple calls
   const roomInitializationRef = useRef<boolean>(false);
