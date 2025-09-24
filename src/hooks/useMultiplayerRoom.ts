@@ -238,13 +238,41 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         const statusTag = event.tags.find(t => t[0] === 'status');
 
         if (hostTag && statusTag) {
+          const status = statusTag[1];
+          const playersTag = event.tags.find(t => t[0] === 'players');
+          const requiredPlayers = playersTag ? parseInt(playersTag[1], 10) : 2;
+
           console.log('[MultiplayerRoom] Found host room event:', {
             eventId: event.id,
             hostPubkey: hostTag[1],
-            status: statusTag[1],
+            status,
+            requiredPlayers,
             createdAt: event.created_at
           });
-          return event;
+
+          // Validate room is available for joining
+          if (status === 'waiting' || status === 'waiting_for_player') {
+            // Check if current user is already connected
+            const isAlreadyConnected = event.tags.some(t =>
+              t[0] === 'connected' && t[1] === user?.pubkey
+            );
+
+            if (isAlreadyConnected) {
+              throw new Error('You are already connected to this room');
+            }
+
+            // Check if room is already full by counting connected players
+            const connectedTags = event.tags.filter(t => t[0] === 'connected');
+            const currentPlayerCount = connectedTags.length;
+
+            if (currentPlayerCount >= requiredPlayers) {
+              throw new Error('Room is full');
+            }
+
+            return event;
+          } else {
+            throw new Error(`Room is not available for joining (status: ${status})`);
+          }
         }
       }
 
