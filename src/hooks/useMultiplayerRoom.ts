@@ -25,7 +25,6 @@ interface RoomState {
   latestEvent: NostrEvent | null;
   error?: string;
   shareableLink?: string;
-  isWebRTCConnected?: boolean;
   chatMessages?: ChatMessage[];
   pendingHostSignal?: string;
   canJoinGame?: boolean;
@@ -42,7 +41,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     requiredPlayers: 2,
     connectedPlayers: [],
     latestEvent: null,
-    isWebRTCConnected: false,
     chatMessages: [],
     pendingHostSignal: undefined,
     canJoinGame: false,
@@ -61,6 +59,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [processedEvents, setProcessedEvents] = useState<Set<string>>(new Set());
   const [processedPeerSignals, setProcessedPeerSignals] = useState<Set<string>>(new Set());
   const [isConnectionEstablished, setIsConnectionEstablished] = useState(false);
+  const [isWebRTCConnected, setIsWebRTCConnected] = useState(false);
   const [connectionHealthCheck, setConnectionHealthCheck] = useState<NodeJS.Timeout | null>(null);
   const [isWaitingForLateAnswers, setIsWaitingForLateAnswers] = useState(false);
 
@@ -83,9 +82,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   setIsWaitingForLateAnswers(false);
 
   // Set isWebRTCConnected only when actual peer-to-peer connection is fully established
+  setIsWebRTCConnected(true);
   setRoomState(prev => ({
     ...prev,
-    isWebRTCConnected: true,
     canJoinGame: false // Disable join game button once connected
   }));
   console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
@@ -153,14 +152,13 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
       requiredPlayers,
       connectedPlayers,
       latestEvent: event,
-      isWebRTCConnected: roomState.isWebRTCConnected, // Preserve existing WebRTC connection state
       chatMessages: roomState.chatMessages, // Preserve existing chat messages
       shareableLink: roomState.shareableLink, // Preserve shareable link
       pendingHostSignal: roomState.pendingHostSignal, // Preserve pending host signal
       canJoinGame: roomState.canJoinGame, // Preserve can join game state
       error: roomState.error, // Preserve error state
     };
-  }, [roomState.isWebRTCConnected, roomState.chatMessages, roomState.shareableLink, roomState.pendingHostSignal, roomState.canJoinGame, roomState.error]);
+  }, [roomState.chatMessages, roomState.shareableLink, roomState.pendingHostSignal, roomState.canJoinGame, roomState.error]);
 
   // Subscribe to room updates - get latest event
   const fetchLatestRoomEvent = useCallback(async () => {
@@ -213,7 +211,6 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
               ...newRoomState,
               // Preserve all existing state properties that shouldn't be overwritten
               shareableLink: prev.shareableLink,
-              isWebRTCConnected: prev.isWebRTCConnected, // Preserve WebRTC connection state
               chatMessages: prev.chatMessages, // Preserve chat messages
               pendingHostSignal: prev.pendingHostSignal, // Preserve pending host signal
               canJoinGame: prev.canJoinGame, // Preserve can join game state
@@ -331,10 +328,10 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
         handleConnectionFailure('Peer connection failed');
       } else if (pc.connectionState === 'disconnected') {
         console.warn('[MultiplayerRoom] ⚠️ Host peer connection disconnected');
-        setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+        setIsWebRTCConnected(false);
       } else if (pc.connectionState === 'closed') {
         console.log('[MultiplayerRoom] 🔒 Host peer connection closed');
-        setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+        setIsWebRTCConnected(false);
       }
     };
 
@@ -372,11 +369,11 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
       }
       setHasConnectionTimedOut(true);
       setIsConnectionEstablished(false);
+      setIsWebRTCConnected(false);
       setRoomState(prev => ({
         ...prev,
         status: 'error',
-        error: `Connection failed: ${reason}`,
-        isWebRTCConnected: false
+        error: `Connection failed: ${reason}`
       }));
     };
 
@@ -395,7 +392,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
         handleConnectionFailure('ICE connection failed - network connectivity issues');
       } else if (pc.iceConnectionState === 'disconnected') {
         console.warn('[MultiplayerRoom] ⚠️ Host ICE connection disconnected');
-        setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+        setIsWebRTCConnected(false);
       } else if (pc.iceConnectionState === 'checking') {
         console.log('[MultiplayerRoom] 🔍 Host ICE connection checking...');
 
@@ -558,11 +555,11 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
     setHasConnectionTimedOut(true);
     setIsConnectionEstablished(false);
     setIsWaitingForLateAnswers(false);
+    setIsWebRTCConnected(false);
     setRoomState(prev => ({
       ...prev,
       status: 'error',
-      error: `Connection failed: ${reason}`,
-      isWebRTCConnected: false
+      error: `Connection failed: ${reason}`
     }));
   }, [connectionTimeout, connectionHealthCheck]);
 
@@ -579,11 +576,11 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
     setHasConnectionTimedOut(true);
     setIsConnectionEstablished(false);
     setIsWaitingForLateAnswers(false);
+    setIsWebRTCConnected(false);
     setRoomState(prev => ({
       ...prev,
       status: 'error',
       error: `Connection failed: ${reason}`,
-      isWebRTCConnected: false,
       canJoinGame: true // Re-enable join game button for retry
     }));
   }, [connectionTimeout, connectionHealthCheck]);
@@ -728,7 +725,6 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
           ...roomData,
           shareableLink,
           // Preserve existing state properties
-          isWebRTCConnected: prev.isWebRTCConnected,
           chatMessages: prev.chatMessages,
           pendingHostSignal: prev.pendingHostSignal,
           canJoinGame: prev.canJoinGame,
@@ -747,7 +743,6 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
           ...roomData,
           shareableLink,
           // Preserve existing state properties
-          isWebRTCConnected: prev.isWebRTCConnected,
           chatMessages: prev.chatMessages,
           pendingHostSignal: prev.pendingHostSignal,
           canJoinGame: prev.canJoinGame,
@@ -819,7 +814,6 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
         }],
         status: 'waiting',
         // Preserve existing state properties
-        isWebRTCConnected: prev.isWebRTCConnected,
         chatMessages: prev.chatMessages,
         pendingHostSignal: prev.pendingHostSignal,
         canJoinGame: prev.canJoinGame,
@@ -961,10 +955,10 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
           handleGuestConnectionFailure('Peer connection failed');
         } else if (pc.connectionState === 'disconnected') {
           console.warn('[MultiplayerRoom] ⚠️ Guest peer connection disconnected');
-          setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+          setIsWebRTCConnected(false);
         } else if (pc.connectionState === 'closed') {
           console.log('[MultiplayerRoom] 🔒 Guest peer connection closed');
-          setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+          setIsWebRTCConnected(false);
         }
       };
 
@@ -998,11 +992,11 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
         }
         setHasConnectionTimedOut(true);
         setIsConnectionEstablished(false);
+        setIsWebRTCConnected(false);
         setRoomState(prev => ({
           ...prev,
           status: 'error',
           error: `Connection failed: ${reason}`,
-          isWebRTCConnected: false,
           canJoinGame: true // Re-enable join game button for retry
         }));
       };
@@ -1022,7 +1016,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
           handleGuestConnectionFailure('ICE connection failed - network connectivity issues');
         } else if (pc.iceConnectionState === 'disconnected') {
           console.warn('[MultiplayerRoom] ⚠️ Guest ICE connection disconnected');
-          setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+          setIsWebRTCConnected(false);
         } else if (pc.iceConnectionState === 'checking') {
           console.log('[MultiplayerRoom] 🔍 Guest ICE connection checking...');
 
@@ -1389,7 +1383,6 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
       ...prev,
       status: 'waiting',
       error: undefined,
-      isWebRTCConnected: false,
       hostPubkey: prev.hostPubkey, // Ensure hostPubkey is preserved
       shareableLink: prev.shareableLink, // Preserve shareable link
       connectedPlayers: prev.connectedPlayers, // Preserve connected players from Nostr
@@ -1633,6 +1626,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
     isJoining,
     connectionState,
     iceConnectionState,
+    isWebRTCConnected,
     hasConnectionTimedOut,
     retryConnection
   };

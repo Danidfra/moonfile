@@ -62,6 +62,7 @@ export default function MultiplayerRoomPage() {
     isJoining,
     connectionState,
     iceConnectionState,
+    isWebRTCConnected,
     hasConnectionTimedOut,
     retryConnection
   } = useMultiplayerRoom(roomId || '', gameId || '');
@@ -367,7 +368,7 @@ export default function MultiplayerRoomPage() {
           {/* Main game area */}
           <div ref={gameAreaRef} className="lg:col-span-3">
             {/* Show waiting screen if WebRTC is not connected yet */}
-            {!roomState.isWebRTCConnected || roomState.status === 'error' ? (
+            {!isWebRTCConnected || roomState.status === 'error' ? (
               <MultiplayerWaitingScreen
                 status={roomState.status}
                 connectedPlayers={roomState.connectedPlayers}
@@ -512,7 +513,7 @@ export default function MultiplayerRoomPage() {
               connectedPlayers={roomState.connectedPlayers}
               hostPubkey={roomState.hostPubkey}
               chatMessages={roomState.chatMessages || []}
-              isWebRTCConnected={roomState.isWebRTCConnected || false}
+              isWebRTCConnected={isWebRTCConnected}
               onSendMessage={sendChatMessage}
             />
           </div>
