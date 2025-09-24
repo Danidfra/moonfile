@@ -161,15 +161,39 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           // Skip our own events
           if (user && event.pubkey === user.pubkey) continue;
 
-          // Log guest activity for now
-          console.log('[MultiplayerRoom] Guest activity detected:', {
-            eventId: event.id,
-            guestPubkey: event.pubkey,
-            createdAt: event.created_at,
-            tags: event.tags
-          });
+          // Check if this is a guest connection event
+          const playerTag = event.tags.find(t => t[0] === 'player' && t[1] === event.pubkey);
+          const connectedTag = event.tags.find(t => t[0] === 'connected' && t[1] === event.pubkey);
 
-          // TODO: In next phase, handle guest connection attempts here
+          if (playerTag && connectedTag) {
+            console.log('[MultiplayerRoom] Guest connection detected from:', event.pubkey);
+
+            // Update room state to include guest
+            setRoomState(prev => {
+              // Check if guest is already in connectedPlayers
+              const isGuestAlreadyConnected = prev.connectedPlayers.some(p => p.pubkey === event.pubkey);
+
+              if (!isGuestAlreadyConnected) {
+                console.log('[MultiplayerRoom] Adding guest to connected players');
+                return {
+                  ...prev,
+                  status: 'active',
+                  connectedPlayers: [
+                    ...prev.connectedPlayers,
+                    { pubkey: event.pubkey }
+                  ]
+                };
+              }
+
+              return prev;
+            });
+          } else {
+            console.log('[MultiplayerRoom] Guest activity detected but not a connection event:', {
+              eventId: event.id,
+              guestPubkey: event.pubkey,
+              tags: event.tags
+            });
+          }
         }
 
       } catch (error) {
@@ -191,6 +215,138 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     };
 
   }, [nostr, roomId, user]);
+
+  // Guest: Fetch host room event and validate room exists
+  const fetchHostRoomEvent = useCallback(async (): Promise<NostrEvent | null> => {
+    if (!nostr || !roomId) return null;
+
+    console.log('[MultiplayerRoom] Guest fetching host room event...');
+
+    try {
+      const events = await nostr.query([{
+        kinds: [31997],
+        '#d': [roomId],
+        limit: 10
+      }], { signal: AbortSignal.timeout(30000) }); // 30 second timeout
+
+      // Sort by created_at to get most recent events
+      const sortedEvents = events.sort((a, b) => b.created_at - a.created_at);
+
+      // Find the host event (should have 'host' tag)
+      for (const event of sortedEvents) {
+        const hostTag = event.tags.find(t => t[0] === 'host');
+        const statusTag = event.tags.find(t => t[0] === 'status');
+
+        if (hostTag && statusTag) {
+          console.log('[MultiplayerRoom] Found host room event:', {
+            eventId: event.id,
+            hostPubkey: hostTag[1],
+            status: statusTag[1],
+            createdAt: event.created_at
+          });
+          return event;
+        }
+      }
+
+      console.log('[MultiplayerRoom] No host room event found');
+      return null;
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error fetching host room event:', error);
+      throw error;
+    }
+  }, [nostr, roomId]);
+
+  // Guest: Publish answer event to join the room
+  const publishGuestAnswerEvent = useCallback(async (hostEvent: NostrEvent): Promise<void> => {
+    if (!user || !roomId || !gameId) {
+      throw new Error('Missing required parameters for guest answer');
+    }
+
+    console.log('[MultiplayerRoom] Guest publishing answer event...');
+
+    try {
+      const event = await publishEvent({
+        kind: 31997,
+        content: '',
+        tags: [
+          ['d', roomId],
+          ['game', gameId],
+          ['player', user.pubkey],
+          ['status', 'active'],
+          ['connected', user.pubkey]
+        ]
+      });
+
+      console.log('[MultiplayerRoom] Guest answer event published:', event.id);
+      setCurrentRoomEventId(event.id);
+
+      // Extract host info from host event
+      const hostTag = hostEvent.tags.find(t => t[0] === 'host');
+      const hostPubkey = hostTag?.[1];
+
+      if (!hostPubkey) {
+        throw new Error('Invalid host event: missing host tag');
+      }
+
+      // Update room state
+      const shareableLink = generateShareableLink(roomId);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'active',
+        hostPubkey,
+        shareableLink,
+        connectedPlayers: [
+          { pubkey: hostPubkey }, // Host
+          { pubkey: user.pubkey }  // Guest (self)
+        ]
+      }));
+
+      console.log('[MultiplayerRoom] Guest room state updated to active');
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error publishing guest answer event:', error);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to join room'
+      }));
+      throw error;
+    }
+  }, [user, roomId, gameId, publishEvent, generateShareableLink]);
+
+  // Guest: Initialize guest flow
+  const initializeGuestFlow = useCallback(async (): Promise<void> => {
+    console.log('[MultiplayerRoom] Starting guest flow...');
+
+    try {
+      // Step 1: Fetch host room event
+      const hostEvent = await fetchHostRoomEvent();
+
+      if (!hostEvent) {
+        setRoomState(prev => ({
+          ...prev,
+          status: 'error',
+          error: 'Room not found'
+        }));
+        return;
+      }
+
+      // Step 2: Publish guest answer event
+      await publishGuestAnswerEvent(hostEvent);
+
+      // Step 3: Subscribe to room events to monitor host responses
+      subscribeToRoomEvents();
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error in guest flow:', error);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to join room'
+      }));
+    }
+  }, [fetchHostRoomEvent, publishGuestAnswerEvent, subscribeToRoomEvents]);
 
   // Set up host timeout (1 minute)
   const setupHostTimeout = useCallback((): void => {
@@ -224,13 +380,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         subscribeToRoomEvents();
         setupHostTimeout();
       } else {
-        console.log('[MultiplayerRoom] Starting guest flow (not implemented yet)');
-        // TODO: Implement guest flow in next phase
-        setRoomState(prev => ({
-          ...prev,
-          status: 'waiting',
-          error: 'Guest flow not implemented yet'
-        }));
+        console.log('[MultiplayerRoom] Starting guest flow');
+        await initializeGuestFlow();
       }
 
     } catch (error) {
@@ -241,7 +392,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         error: error instanceof Error ? error.message : 'Failed to initialize room'
       }));
     }
-  }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToRoomEvents, setupHostTimeout]);
+  }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToRoomEvents, setupHostTimeout, initializeGuestFlow]);
 
   // Initialize room on mount
   useEffect(() => {
