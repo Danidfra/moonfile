@@ -66,6 +66,33 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
+  const handleGuestConnectionEstablishedRef = useRef<() => void>(() => {});
+
+  // Helper function to handle successful guest connection
+  const handleGuestConnectionEstablished = useCallback(() => {
+  if (connectionTimeout) {
+    clearTimeout(connectionTimeout);
+    setConnectionTimeout(null);
+  }
+  if (connectionHealthCheck) {
+    clearTimeout(connectionHealthCheck);
+    setConnectionHealthCheck(null);
+  }
+  setHasConnectionTimedOut(false);
+  setIsConnectionEstablished(true);
+  setIsWaitingForLateAnswers(false);
+
+  // Set isWebRTCConnected only when actual peer-to-peer connection is fully established
+  setRoomState(prev => ({
+    ...prev,
+    isWebRTCConnected: true,
+    canJoinGame: false // Disable join game button once connected
+  }));
+  console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
+}, [connectionTimeout, connectionHealthCheck]);
+
+// 👇 Coloque ESTA LINHA depois da definição acima:
+handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
 
   // Parse room event from Nostr event
   const parseRoomEvent = useCallback((event: NostrEvent, currentHostPubkey?: string): RoomState => {
@@ -539,29 +566,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }));
   }, [connectionTimeout, connectionHealthCheck]);
 
-  // Helper function to handle successful guest connection
-  const handleGuestConnectionEstablished = useCallback(() => {
-    if (connectionTimeout) {
-      clearTimeout(connectionTimeout);
-      setConnectionTimeout(null);
-    }
-    if (connectionHealthCheck) {
-      clearTimeout(connectionHealthCheck);
-      setConnectionHealthCheck(null);
-    }
-    setHasConnectionTimedOut(false);
-    setIsConnectionEstablished(true);
-    setIsWaitingForLateAnswers(false);
-
-    // Set isWebRTCConnected only when actual peer-to-peer connection is fully established
-    setRoomState(prev => ({
-      ...prev,
-      isWebRTCConnected: true,
-      canJoinGame: false // Disable join game button once connected
-    }));
-    console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
-  }, [connectionTimeout, connectionHealthCheck]);
-
   // Helper function to handle guest connection failure
   const handleGuestConnectionFailure = useCallback((reason: string) => {
     if (connectionTimeout) {
@@ -881,9 +885,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [webRTCConnection, isHost]);
 
-  // Send chat message via WebRTC data channel
+  // Send chat message via WebRTC data channel (not Nostr events)
   const sendChatMessage = useCallback((message: string) => {
-    if (!dataChannel || !user) return;
+    if (!dataChannel || !user) {
+      console.warn('[MultiplayerRoom] Cannot send chat message - data channel or user not available');
+      return;
+    }
 
     const chatMessage: ChatMessage = {
       id: Date.now().toString(),
@@ -894,16 +901,16 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     try {
       dataChannel.send(JSON.stringify(chatMessage));
+      console.log('[MultiplayerRoom] 📤 Chat message sent via WebRTC data channel:', chatMessage);
 
-      // Add to local state immediately
+      // Add to local state immediately for UI feedback
       setRoomState(prev => ({
         ...prev,
         chatMessages: [...(prev.chatMessages || []), chatMessage]
       }));
-
-      console.log('[MultiplayerRoom] Chat message sent:', chatMessage);
     } catch (error) {
-      console.error('[MultiplayerRoom] Error sending chat message:', error);
+      console.error('[MultiplayerRoom] Error sending chat message via WebRTC data channel:', error);
+      // Fallback: could implement Nostr event fallback here if needed
     }
   }, [dataChannel, user]);
 
@@ -947,6 +954,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         // Handle different connection states
         if (pc.connectionState === 'connected') {
           console.log('[MultiplayerRoom] ✅ Guest peer connection established successfully');
+          const handleGuestConnectionEstablished = handleGuestConnectionEstablishedRef.current;
           handleGuestConnectionEstablished();
         } else if (pc.connectionState === 'failed') {
           console.error('[MultiplayerRoom] ❌ Guest peer connection failed');
@@ -1569,35 +1577,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       handleConnectionFailure('Failed to process late answer');
     }
   }, [user, roomId, gameId, roomState.requiredPlayers, publishEvent]);
-
-  // Send chat message via WebRTC data channel (not Nostr events)
-  const sendChatMessage = useCallback((message: string) => {
-    if (!dataChannel || !user) {
-      console.warn('[MultiplayerRoom] Cannot send chat message - data channel or user not available');
-      return;
-    }
-
-    const chatMessage: ChatMessage = {
-      id: Date.now().toString(),
-      sender: user.pubkey,
-      message,
-      timestamp: Date.now(),
-    };
-
-    try {
-      dataChannel.send(JSON.stringify(chatMessage));
-      console.log('[MultiplayerRoom] 📤 Chat message sent via WebRTC data channel:', chatMessage);
-
-      // Add to local state immediately for UI feedback
-      setRoomState(prev => ({
-        ...prev,
-        chatMessages: [...(prev.chatMessages || []), chatMessage]
-      }));
-    } catch (error) {
-      console.error('[MultiplayerRoom] Error sending chat message via WebRTC data channel:', error);
-      // Fallback: could implement Nostr event fallback here if needed
-    }
-  }, [dataChannel, user]);
 
   // Track room initialization to prevent multiple calls
   const roomInitializationRef = useRef<boolean>(false);
