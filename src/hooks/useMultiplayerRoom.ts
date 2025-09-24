@@ -145,7 +145,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
       }
     }
 
-    const connectedCount = connectedCountTag ? parseInt(connectedCountTag, 10) : connectedPlayers.length;
+    const _connectedCount = connectedCountTag ? parseInt(connectedCountTag, 10) : connectedPlayers.length;
 
     return {
       status: statusTag as 'waiting' | 'active' | 'full' || 'waiting',
@@ -567,7 +567,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
   }, [connectionTimeout, connectionHealthCheck]);
 
   // Helper function to handle guest connection failure
-  const handleGuestConnectionFailure = useCallback((reason: string) => {
+  const _handleGuestConnectionFailure = useCallback((reason: string) => {
     if (connectionTimeout) {
       clearTimeout(connectionTimeout);
       setConnectionTimeout(null);
@@ -589,7 +589,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
   }, [connectionTimeout, connectionHealthCheck]);
 
   // Handle remote signal (answer from peer)
-  const handleRemoteSignal = useCallback(async (signal: string, fromPubkey: string) => {
+  const _handleRemoteSignal = useCallback(async (signal: string, fromPubkey: string) => {
     // Skip processing if the sender is the current user
     if (user && fromPubkey === user.pubkey) {
       console.log('[MultiplayerRoom] Skipping processing of own signal');
@@ -1249,7 +1249,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
   }, [user, isHost, roomState.pendingHostSignal, roomState.requiredPlayers, roomState.hostPubkey, roomState.connectedPlayers.length, roomId, gameId, publishEvent]);
 
   // Handle remote signal with event context (for accessing event.tags)
-  const handleRemoteSignalWithEvent = useCallback(async (signal: string, fromPubkey: string, event: NostrEvent) => {
+  const handleRemoteSignalWithEvent = useCallback(async (signal: string, fromPubkey: string, _event: NostrEvent) => {
     // Skip processing if the sender is the current user
     if (user && fromPubkey === user.pubkey) {
       console.log('[MultiplayerRoom] Skipping processing of own signal');
@@ -1424,7 +1424,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
   }, [webRTCConnection, isHost, roomState.pendingHostSignal, roomState.hostPubkey, roomState.shareableLink, roomState.connectedPlayers, roomState.chatMessages, connectionTimeout, joinGame, joinOrCreateRoom]);
 
   // Handle late answers (when host connection timed out but answer arrives later)
-  const handleLateAnswer = useCallback(async (signal: string, fromPubkey: string, event: NostrEvent) => {
+  const handleLateAnswer = useCallback(async (signal: string, fromPubkey: string, _event: NostrEvent) => {
     if (!user) return;
 
     console.log('[MultiplayerRoom] 🕒 Handling late answer from guest:', fromPubkey);
@@ -1476,7 +1476,7 @@ handleGuestConnectionEstablishedRef.current = handleGuestConnectionEstablished;
     };
 
     // Create data channels
-    const gameDataChannel = pc.createDataChannel('game-data');
+    const _gameDataChannel = pc.createDataChannel('game-data');
     const chatDataChannel = pc.createDataChannel('chat');
 
     chatDataChannel.onopen = () => {

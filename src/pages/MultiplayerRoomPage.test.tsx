@@ -31,8 +31,8 @@ describe('MultiplayerRoomPage', () => {
 
   it('matches required URL pattern', () => {
     const validUrl = '/multiplayer/game:tetris-2-usa-nintendo:v1.0/room_q9k3ccg0p_ms';
-    const pattern = /^\/multiplayer\/[^\/]+\/[^\/]+$/;
-    
+    const pattern = /^\/multiplayer\/[^/]+\/[^/]+$/;
+
     expect(pattern.test(validUrl)).toBe(true);
   });
 });

@@ -244,7 +244,7 @@ export default function MultiplayerWaitingScreen({
 
             <div className="space-y-2">
               {/* Show all connected players (host is already included in connectedPlayers) */}
-              {connectedPlayers.map((player, index) => (
+              {connectedPlayers.map((player, _index) => (
                 <PlayerCard
                   key={player.pubkey}
                   pubkey={player.pubkey}

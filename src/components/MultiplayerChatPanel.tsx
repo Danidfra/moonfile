@@ -11,8 +11,6 @@ import {
   MessageCircle,
   Users,
   Send,
-  ChevronDown,
-  ChevronUp,
   Minimize2,
   Maximize2,
   Crown
@@ -72,12 +70,12 @@ export default function MultiplayerChatPanel({
     }
   };
 
-  const getStatusColor = () => {
+  const _getStatusColor = () => {
     // All connected players are considered online
     return 'bg-green-500';
   };
 
-  const getStatusText = () => {
+  const _getStatusText = () => {
     // All connected players are considered online
     return 'Online';
   };
@@ -266,7 +264,7 @@ interface ChatMessageItemProps {
   hostPubkey: string;
 }
 
-function ChatMessageItem({ message, connectedPlayers, hostPubkey }: ChatMessageItemProps) {
+function ChatMessageItem({ message, connectedPlayers: _connectedPlayers, hostPubkey }: ChatMessageItemProps) {
   const { data: author } = useAuthor(message.sender);
   const senderName = author?.metadata?.name || `${message.sender.substring(0, 8)}...`;
   const isHost = message.sender === hostPubkey;

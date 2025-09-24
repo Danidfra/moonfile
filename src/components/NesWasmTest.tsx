@@ -121,7 +121,7 @@ export const NesWasmTest: React.FC = () => {
 
       console.log('\n🎉 NES WebAssembly Test PASSED! All steps completed successfully.');
 
-    } catch (error) {
+    } catch (_error) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       console.error('\n❌ NES WebAssembly Test FAILED:', errorMessage);
       setTestResult(prev => ({ ...prev, error: errorMessage }));
@@ -190,7 +190,7 @@ export const NesWasmTest: React.FC = () => {
         const romBuffer = await romResponse.arrayBuffer();
         return new Uint8Array(romBuffer);
       }
-    } catch (error) {
+    } catch (_error) {
       console.log('Could not load test ROM from /roms/test-rom.nes, trying base64...');
     }
 

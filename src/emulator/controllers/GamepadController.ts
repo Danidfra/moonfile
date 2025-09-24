@@ -24,7 +24,7 @@ interface GamepadControllerOptions {
   onButtonUp: (playerId: number, buttonId: number) => void;
 }
 
-interface GamepadState {
+interface _GamepadState {
   buttons: Array<{ pressed: boolean }>;
   axes: number[];
 }

@@ -5,7 +5,7 @@ import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { GameCardNostr } from '@/components/games/GameCardNostr';
 import { GamesEmptyState } from '@/components/games/GamesEmptyState';
-import { Play, Gamepad2 } from 'lucide-react';
+
 import { useNavigate } from 'react-router-dom';
 import type { NostrEvent } from '@nostrify/nostrify';
 import type { Game31996 } from '@/types/game';
@@ -17,7 +17,7 @@ const GamesPage = () => {
   });
 
   const { nostr } = useNostr();
-  const navigate = useNavigate();
+  const _navigate = useNavigate();
 
   // Query for kind 31996 game events
   const { data: games = [], isLoading: loading, error, refetch } = useQuery({
