@@ -61,6 +61,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const [processedEvents, setProcessedEvents] = useState<Set<string>>(new Set());
   const [processedPeerSignals, setProcessedPeerSignals] = useState<Set<string>>(new Set());
   const [isConnectionEstablished, setIsConnectionEstablished] = useState(false);
+  const [connectionHealthCheck, setConnectionHealthCheck] = useState<NodeJS.Timeout | null>(null);
 
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const alreadyPublishedRef = useRef<boolean>(false);
@@ -212,17 +213,30 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
             // Process answer signals if we're the host
             if (user && isHost && latestEvent.pubkey !== user.pubkey) {
+              console.log('[MultiplayerRoom] 🏠 Host checking event from guest:', latestEvent.pubkey);
               const playerSignalTag = latestEvent.tags.find(t => t[0] === 'player' && t[1] === latestEvent.pubkey)?.[2];
 
-              // Only process if we haven't seen a signal from this peer yet
-              if (playerSignalTag && webRTCConnection && !processedPeerSignals.has(latestEvent.pubkey)) {
-                console.log('[MultiplayerRoom] Processing answer signal from guest:', latestEvent.pubkey);
+              if (playerSignalTag) {
+                console.log('[MultiplayerRoom] 📡 Found player signal tag for guest:', latestEvent.pubkey);
 
-                // Process the answer signal through the handler with event context
-                handleRemoteSignalWithEvent(playerSignalTag, latestEvent.pubkey, latestEvent);
+                if (!webRTCConnection) {
+                  console.warn('[MultiplayerRoom] ⚠️ No WebRTC connection available to process guest answer');
+                } else if (processedPeerSignals.has(latestEvent.pubkey)) {
+                  console.log('[MultiplayerRoom] ⏭️ Already processed signal from guest:', latestEvent.pubkey);
+                } else {
+                  console.log('[MultiplayerRoom] 🔄 Processing answer signal from guest:', latestEvent.pubkey);
+                  console.log('[MultiplayerRoom] 🔄 Host connection state:', webRTCConnection.connectionState);
+                  console.log('[MultiplayerRoom] 🧊 Host ICE state:', webRTCConnection.iceConnectionState);
+                  console.log('[MultiplayerRoom] 📡 Host signaling state:', webRTCConnection.signalingState);
 
-                // Mark peer as processed to prevent duplicate processing
-                setProcessedPeerSignals(prev => new Set([...prev, latestEvent.pubkey]));
+                  // Process the answer signal through the handler with event context
+                  handleRemoteSignalWithEvent(playerSignalTag, latestEvent.pubkey, latestEvent);
+
+                  // Mark peer as processed to prevent duplicate processing
+                  setProcessedPeerSignals(prev => new Set([...prev, latestEvent.pubkey]));
+                }
+              } else {
+                console.log('[MultiplayerRoom] ❌ No player signal tag found for guest:', latestEvent.pubkey);
               }
             }
           } catch (error) {
@@ -268,47 +282,101 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     // Add connection state logging and timeout handling
     pc.onconnectionstatechange = () => {
-      console.log('[MultiplayerRoom] Host connection state changed:', pc.connectionState);
+      console.log('[MultiplayerRoom] 🔄 Host connection state changed:', pc.connectionState);
+      console.log('[MultiplayerRoom] 🧊 Host ICE state:', pc.iceConnectionState);
+      console.log('[MultiplayerRoom] 📡 Host signaling state:', pc.signalingState);
       setConnectionState(pc.connectionState);
 
-      // Clear timeout on successful connection
+      // Handle different connection states
       if (pc.connectionState === 'connected') {
-        if (connectionTimeout) {
-          clearTimeout(connectionTimeout);
-          setConnectionTimeout(null);
-        }
-        setHasConnectionTimedOut(false);
-        setIsConnectionEstablished(true);
-        console.log('[MultiplayerRoom] Host connection established successfully');
-
-        // Set isWebRTCConnected only when the actual peer-to-peer connection is fully established
-        setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
-        console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established');
-
-        // Start emulator when connection is fully established (host only)
-        if (isHost && onEmulatorStart) {
-          console.log('[MultiplayerRoom] WebRTC connection fully established, starting emulator on host');
-          // Small delay to ensure everything is ready
-          setTimeout(() => {
-            onEmulatorStart();
-          }, 100);
-        }
+        console.log('[MultiplayerRoom] ✅ Host peer connection established successfully');
+        handleConnectionEstablished();
+      } else if (pc.connectionState === 'failed') {
+        console.error('[MultiplayerRoom] ❌ Host peer connection failed');
+        handleConnectionFailure('Peer connection failed');
+      } else if (pc.connectionState === 'disconnected') {
+        console.warn('[MultiplayerRoom] ⚠️ Host peer connection disconnected');
+        setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+      } else if (pc.connectionState === 'closed') {
+        console.log('[MultiplayerRoom] 🔒 Host peer connection closed');
+        setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
       }
     };
 
+    // Helper function to handle successful connection
+    const handleConnectionEstablished = () => {
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+        setConnectionTimeout(null);
+      }
+      if (connectionHealthCheck) {
+        clearTimeout(connectionHealthCheck);
+        setConnectionHealthCheck(null);
+      }
+      setHasConnectionTimedOut(false);
+      setIsConnectionEstablished(true);
+
+      // Set isWebRTCConnected only when the actual peer-to-peer connection is fully established
+      setRoomState(prev => ({ ...prev, isWebRTCConnected: true }));
+      console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (host)');
+
+      // Start emulator when connection is fully established (host only)
+      if (isHost && onEmulatorStart) {
+        console.log('[MultiplayerRoom] WebRTC connection fully established, starting emulator on host');
+        setTimeout(() => {
+          onEmulatorStart();
+        }, 100);
+      }
+    };
+
+    // Helper function to handle connection failure
+    const handleConnectionFailure = (reason: string) => {
+      if (connectionTimeout) {
+        clearTimeout(connectionTimeout);
+        setConnectionTimeout(null);
+      }
+      setHasConnectionTimedOut(true);
+      setIsConnectionEstablished(false);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: `Connection failed: ${reason}`,
+        isWebRTCConnected: false
+      }));
+    };
+
     pc.oniceconnectionstatechange = () => {
-      console.log('[MultiplayerRoom] Host ICE connection state changed:', pc.iceConnectionState);
+      console.log('[MultiplayerRoom] 🧊 Host ICE connection state changed:', pc.iceConnectionState);
+      console.log('[MultiplayerRoom] 🔄 Host connection state:', pc.connectionState);
+      console.log('[MultiplayerRoom] 📡 Host signaling state:', pc.signalingState);
       setIceConnectionState(pc.iceConnectionState);
 
-      // Clear timeout on successful ICE connection
+      // Handle different ICE connection states
       if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-        if (connectionTimeout) {
-          clearTimeout(connectionTimeout);
-          setConnectionTimeout(null);
+        console.log('[MultiplayerRoom] ✅ Host ICE connection established successfully');
+        handleConnectionEstablished();
+      } else if (pc.iceConnectionState === 'failed') {
+        console.error('[MultiplayerRoom] ❌ Host ICE connection failed');
+        handleConnectionFailure('ICE connection failed - network connectivity issues');
+      } else if (pc.iceConnectionState === 'disconnected') {
+        console.warn('[MultiplayerRoom] ⚠️ Host ICE connection disconnected');
+        setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+      } else if (pc.iceConnectionState === 'checking') {
+        console.log('[MultiplayerRoom] 🔍 Host ICE connection checking...');
+
+        // Start health check for stuck connections
+        if (connectionHealthCheck) {
+          clearTimeout(connectionHealthCheck);
         }
-        setHasConnectionTimedOut(false);
-        setIsConnectionEstablished(true);
-        console.log('[MultiplayerRoom] Host ICE connection established successfully');
+        const healthCheck = setTimeout(() => {
+          if (pc.iceConnectionState === 'checking') {
+            console.warn('[MultiplayerRoom] ⚠️ Host ICE connection stuck in checking state for 15 seconds');
+            handleConnectionFailure('ICE connection stuck in checking state - possible network issues');
+          }
+        }, 15000); // 15 seconds to detect stuck connections
+        setConnectionHealthCheck(healthCheck);
+      } else if (pc.iceConnectionState === 'new') {
+        console.log('[MultiplayerRoom] 🆕 Host ICE connection initialized');
       }
     };
 
@@ -355,17 +423,23 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     // Handle chat data channel
     chatDataChannel.onopen = () => {
-      console.log('[MultiplayerRoom] 📡 Chat data channel opened locally (host)');
-      console.log('[MultiplayerRoom] ⏳ Waiting for peer-to-peer connection to be fully established...');
+      console.log('[MultiplayerRoom] 📡 Host chat data channel opened');
+      console.log('[MultiplayerRoom] 🔄 Host connection state:', pc.connectionState);
+      console.log('[MultiplayerRoom] 🧊 Host ICE state:', pc.iceConnectionState);
+      console.log('[MultiplayerRoom] 📡 Host signaling state:', pc.signalingState);
       setDataChannel(chatDataChannel);
 
-      // Note: isWebRTCConnected will be set in onconnectionstatechange when connectionState === 'connected'
-      // This ensures we only mark as connected when actual peer-to-peer connection is established
+      // Note: isWebRTCConnected will be set in connection state handlers when connection is fully established
+      console.log('[MultiplayerRoom] ⏳ Host waiting for peer-to-peer connection to be fully established...');
+    };
 
-      if (isHost && onEmulatorStart) {
-        console.log('[MultiplayerRoom] Chat data channel opened, emulator will start when connection is fully established');
-        // We don't start emulator here - wait for actual connection to be established
-      }
+    chatDataChannel.onclose = () => {
+      console.log('[MultiplayerRoom] 📡 Host chat data channel closed');
+      setDataChannel(null);
+    };
+
+    chatDataChannel.onerror = (error) => {
+      console.error('[MultiplayerRoom] ❌ Host chat data channel error:', error);
     };
 
     chatDataChannel.onmessage = (event) => {
@@ -762,42 +836,98 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       // Add connection state logging and timeout handling
       pc.onconnectionstatechange = () => {
-        console.log('[MultiplayerRoom] Guest connection state changed:', pc.connectionState);
+        console.log('[MultiplayerRoom] 🔄 Guest connection state changed:', pc.connectionState);
+        console.log('[MultiplayerRoom] 🧊 Guest ICE state:', pc.iceConnectionState);
+        console.log('[MultiplayerRoom] 📡 Guest signaling state:', pc.signalingState);
         setConnectionState(pc.connectionState);
 
-        // Clear timeout on successful connection
+        // Handle different connection states
         if (pc.connectionState === 'connected') {
-          if (connectionTimeout) {
-            clearTimeout(connectionTimeout);
-            setConnectionTimeout(null);
-          }
-          setHasConnectionTimedOut(false);
-          setIsConnectionEstablished(true);
-          console.log('[MultiplayerRoom] Guest connection established successfully');
-
-          // Set isWebRTCConnected only when the actual peer-to-peer connection is fully established
-          setRoomState(prev => ({
-            ...prev,
-            isWebRTCConnected: true,
-            canJoinGame: false // Disable join game button once connected
-          }));
-          console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
+          console.log('[MultiplayerRoom] ✅ Guest peer connection established successfully');
+          handleGuestConnectionEstablished();
+        } else if (pc.connectionState === 'failed') {
+          console.error('[MultiplayerRoom] ❌ Guest peer connection failed');
+          handleGuestConnectionFailure('Peer connection failed');
+        } else if (pc.connectionState === 'disconnected') {
+          console.warn('[MultiplayerRoom] ⚠️ Guest peer connection disconnected');
+          setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+        } else if (pc.connectionState === 'closed') {
+          console.log('[MultiplayerRoom] 🔒 Guest peer connection closed');
+          setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
         }
       };
 
+      // Helper function to handle successful guest connection
+      const handleGuestConnectionEstablished = () => {
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          setConnectionTimeout(null);
+        }
+        if (connectionHealthCheck) {
+          clearTimeout(connectionHealthCheck);
+          setConnectionHealthCheck(null);
+        }
+        setHasConnectionTimedOut(false);
+        setIsConnectionEstablished(true);
+
+        // Set isWebRTCConnected only when the actual peer-to-peer connection is fully established
+        setRoomState(prev => ({
+          ...prev,
+          isWebRTCConnected: true,
+          canJoinGame: false // Disable join game button once connected
+        }));
+        console.log('[MultiplayerRoom] ✅ isWebRTCConnected set to true - peer-to-peer connection fully established (guest)');
+      };
+
+      // Helper function to handle guest connection failure
+      const handleGuestConnectionFailure = (reason: string) => {
+        if (connectionTimeout) {
+          clearTimeout(connectionTimeout);
+          setConnectionTimeout(null);
+        }
+        setHasConnectionTimedOut(true);
+        setIsConnectionEstablished(false);
+        setRoomState(prev => ({
+          ...prev,
+          status: 'error',
+          error: `Connection failed: ${reason}`,
+          isWebRTCConnected: false,
+          canJoinGame: true // Re-enable join game button for retry
+        }));
+      };
+
       pc.oniceconnectionstatechange = () => {
-        console.log('[MultiplayerRoom] Guest ICE connection state changed:', pc.iceConnectionState);
+        console.log('[MultiplayerRoom] 🧊 Guest ICE connection state changed:', pc.iceConnectionState);
+        console.log('[MultiplayerRoom] 🔄 Guest connection state:', pc.connectionState);
+        console.log('[MultiplayerRoom] 📡 Guest signaling state:', pc.signalingState);
         setIceConnectionState(pc.iceConnectionState);
 
-        // Clear timeout on successful ICE connection
+        // Handle different ICE connection states
         if (pc.iceConnectionState === 'connected' || pc.iceConnectionState === 'completed') {
-          if (connectionTimeout) {
-            clearTimeout(connectionTimeout);
-            setConnectionTimeout(null);
+          console.log('[MultiplayerRoom] ✅ Guest ICE connection established successfully');
+          handleGuestConnectionEstablished();
+        } else if (pc.iceConnectionState === 'failed') {
+          console.error('[MultiplayerRoom] ❌ Guest ICE connection failed');
+          handleGuestConnectionFailure('ICE connection failed - network connectivity issues');
+        } else if (pc.iceConnectionState === 'disconnected') {
+          console.warn('[MultiplayerRoom] ⚠️ Guest ICE connection disconnected');
+          setRoomState(prev => ({ ...prev, isWebRTCConnected: false }));
+        } else if (pc.iceConnectionState === 'checking') {
+          console.log('[MultiplayerRoom] 🔍 Guest ICE connection checking...');
+
+          // Start health check for stuck connections
+          if (connectionHealthCheck) {
+            clearTimeout(connectionHealthCheck);
           }
-          setHasConnectionTimedOut(false);
-          setIsConnectionEstablished(true);
-          console.log('[MultiplayerRoom] Guest ICE connection established successfully');
+          const healthCheck = setTimeout(() => {
+            if (pc.iceConnectionState === 'checking') {
+              console.warn('[MultiplayerRoom] ⚠️ Guest ICE connection stuck in checking state for 15 seconds');
+              handleGuestConnectionFailure('ICE connection stuck in checking state - possible network issues');
+            }
+          }, 15000); // 15 seconds to detect stuck connections
+          setConnectionHealthCheck(healthCheck);
+        } else if (pc.iceConnectionState === 'new') {
+          console.log('[MultiplayerRoom] 🆕 Guest ICE connection initialized');
         }
       };
 
@@ -829,14 +959,23 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
         if (receivedChannel.label === 'chat') {
           receivedChannel.onopen = () => {
-            console.log('[MultiplayerRoom] 📡 Chat data channel opened locally (guest)');
-            console.log('[MultiplayerRoom] ⏳ Waiting for peer-to-peer connection to be fully established...');
+            console.log('[MultiplayerRoom] 📡 Guest chat data channel opened');
+            console.log('[MultiplayerRoom] 🔄 Guest connection state:', pc.connectionState);
+            console.log('[MultiplayerRoom] 🧊 Guest ICE state:', pc.iceConnectionState);
+            console.log('[MultiplayerRoom] 📡 Guest signaling state:', pc.signalingState);
             setDataChannel(receivedChannel);
 
-            // Note: isWebRTCConnected will be set in onconnectionstatechange when connectionState === 'connected'
-            // This ensures we only mark as connected when actual peer-to-peer connection is established
+            // Note: isWebRTCConnected will be set in connection state handlers when connection is fully established
+            console.log('[MultiplayerRoom] ⏳ Guest waiting for peer-to-peer connection to be fully established...');
+          };
 
-            console.log('[MultiplayerRoom] Guest chat data channel opened, waiting for full connection establishment');
+          receivedChannel.onclose = () => {
+            console.log('[MultiplayerRoom] 📡 Guest chat data channel closed');
+            setDataChannel(null);
+          };
+
+          receivedChannel.onerror = (error) => {
+            console.error('[MultiplayerRoom] ❌ Guest chat data channel error:', error);
           };
 
           receivedChannel.onmessage = (event) => {
@@ -1108,15 +1247,17 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
   // Retry connection after timeout or failure
   const retryConnection = useCallback(() => {
-    console.log('[MultiplayerRoom] Retrying connection...');
+    console.log('[MultiplayerRoom] 🔄 Retrying WebRTC connection...');
 
     // Clear timeout state
     setHasConnectionTimedOut(false);
     setConnectionState('new');
     setIceConnectionState('new');
+    setIsConnectionEstablished(false);
 
     // Close existing connection if any
     if (webRTCConnection) {
+      console.log('[MultiplayerRoom] 🔒 Closing existing WebRTC connection for retry');
       webRTCConnection.close();
       setWebRTCConnection(null);
     }
@@ -1125,26 +1266,50 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     setDataChannel(null);
     setLocalSignal(null);
 
-    // Reset room state but preserve hostPubkey
+    // Clear connection timeout if any
+    if (connectionTimeout) {
+      clearTimeout(connectionTimeout);
+      setConnectionTimeout(null);
+    }
+
+    // Reset room state but preserve important properties
     setRoomState(prev => ({
       ...prev,
       status: 'waiting',
       error: undefined,
       isWebRTCConnected: false,
-      hostPubkey: prev.hostPubkey // Ensure hostPubkey is preserved
+      hostPubkey: prev.hostPubkey, // Ensure hostPubkey is preserved
+      shareableLink: prev.shareableLink, // Preserve shareable link
+      connectedPlayers: prev.connectedPlayers, // Preserve connected players from Nostr
+      chatMessages: prev.chatMessages, // Preserve chat messages
     }));
 
     // Reset processed events to allow reprocessing
     setProcessedEvents(new Set());
     setProcessedPeerSignals(new Set());
 
-    // Retry join if we're a guest with pending signal
-    if (!isHost && roomState.pendingHostSignal) {
+    // Retry based on role
+    if (isHost) {
+      console.log('[MultiplayerRoom] 🏠 Host retrying - will recreate offer');
+      // Host should recreate the room/offer
+      setTimeout(() => {
+        joinOrCreateRoom();
+      }, 1000);
+    } else if (roomState.pendingHostSignal) {
+      console.log('[MultiplayerRoom] 👤 Guest retrying - will rejoin with existing host signal');
+      // Guest should retry joining with existing signal
       setTimeout(() => {
         joinGame();
-      }, 1000); // Small delay before retry
+      }, 1000);
+    } else {
+      console.log('[MultiplayerRoom] ⏳ Waiting for host signal to retry');
+      // Reset to allow new join attempt
+      setRoomState(prev => ({
+        ...prev,
+        canJoinGame: true
+      }));
     }
-  }, [webRTCConnection, isHost, roomState.pendingHostSignal, joinGame]);
+  }, [webRTCConnection, isHost, roomState.pendingHostSignal, roomState.hostPubkey, roomState.shareableLink, roomState.connectedPlayers, roomState.chatMessages, connectionTimeout, joinGame, joinOrCreateRoom]);
 
   // Track room initialization to prevent multiple calls
   const roomInitializationRef = useRef<boolean>(false);
@@ -1176,6 +1341,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }
       if (connectionTimeout) {
         clearTimeout(connectionTimeout);
+      }
+      if (connectionHealthCheck) {
+        clearTimeout(connectionHealthCheck);
       }
       // Reset initialization flag when room changes
       if (roomId || gameId) {
