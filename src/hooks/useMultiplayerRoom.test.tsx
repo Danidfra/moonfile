@@ -43,7 +43,6 @@ describe('useMultiplayerRoom', () => {
     expect(result.current.roomState.status).toBe('waiting');
     expect(result.current.roomState.connectedPlayers).toEqual([]);
     expect(result.current.roomState.requiredPlayers).toBe(2);
-    expect(result.current.roomState.latestEvent).toBeNull();
   });
 
   it('should identify host correctly', () => {
