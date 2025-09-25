@@ -101,6 +101,67 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [nostr, user, roomId, config.relayUrl]);
 
+  // Generate WebRTC offer and return base64-encoded string
+  const generateWebRTCOffer = useCallback(async (): Promise<string> => {
+    console.log('[MultiplayerRoom] Generating WebRTC offer...');
+
+    try {
+      // Create a new RTCPeerConnection
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
+
+      // Create a data channel for game communication
+      const _dataChannel = peerConnection.createDataChannel('game-data');
+
+      // Create offer
+      const offer = await peerConnection.createOffer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: false
+      });
+
+      // Set local description
+      await peerConnection.setLocalDescription(offer);
+
+      // Wait for ICE gathering to complete
+      await new Promise<void>((resolve) => {
+        if (peerConnection.iceGatheringState === 'complete') {
+          resolve();
+        } else {
+          peerConnection.onicegatheringstatechange = () => {
+            if (peerConnection.iceGatheringState === 'complete') {
+              resolve();
+            }
+          };
+        }
+      });
+
+      // Get the complete offer with ICE candidates
+      const completeOffer = peerConnection.localDescription;
+
+      if (!completeOffer) {
+        throw new Error('Failed to generate WebRTC offer');
+      }
+
+      // Close the connection as we'll create a new one when guests connect
+      peerConnection.close();
+
+      // Serialize and base64 encode the offer
+      const offerString = JSON.stringify(completeOffer);
+      const base64Offer = btoa(offerString);
+
+      console.log('[MultiplayerRoom] WebRTC offer generated and encoded');
+      return base64Offer;
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error generating WebRTC offer:', error);
+      throw new Error('Failed to generate WebRTC offer');
+    }
+  }, []);
+
   // Publish host room event
   const publishHostRoomEvent = useCallback(async (): Promise<void> => {
     if (!user || !roomId || !gameId) {
@@ -111,6 +172,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     try {
       const requiredPlayers = roomState.requiredPlayers || 2;
+
+      // Generate WebRTC offer
+      const webRTCOffer = await generateWebRTCOffer();
 
       // Publish only to the currently connected relay
       const connectedRelays = [config.relayUrl];
@@ -123,7 +187,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           ['game', gameId],
           ['host', user.pubkey],
           ['status', 'waiting'],
-          ['players', requiredPlayers.toString()]
+          ['players', requiredPlayers.toString()],
+          ['signal', webRTCOffer]
         ],
         relays: connectedRelays, // Specify which relays to publish to
         created_at: Math.floor(Date.now() / 1000)
@@ -304,6 +369,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] Republishing host room event with new guest:', guestPubkey);
 
     try {
+      // Generate new WebRTC offer for each republish
+      const webRTCOffer = await generateWebRTCOffer();
+
       // Publish only to currently connected relay
       const connectedRelays = [config.relayUrl];
 
@@ -314,6 +382,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ['host', user.pubkey],
         ['status', 'waiting_for_player'],
         ['players', roomState.requiredPlayers.toString()],
+        ['signal', webRTCOffer],
         ['guest', guestPubkey]
       ];
 
