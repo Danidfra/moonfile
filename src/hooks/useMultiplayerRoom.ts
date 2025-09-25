@@ -583,7 +583,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       console.log('[MultiplayerRoom] WebRTC answer generated and encoded');
 
-      // Publish the answer back to the relay
+      // Publish the answer back to the relay (this is the ONLY event the guest publishes)
       const connectedRelays = [config.relayUrl];
 
       const answerEvent = await publishEvent({
@@ -791,13 +791,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [nostr, roomId, config.relayUrl]);
 
-  // Guest: Publish answer event to join the room
-  const publishGuestAnswerEvent = useCallback(async (hostEvent: NostrEvent): Promise<void> => {
+  // Guest: Prepare guest flow (no longer publishes an event)
+  const prepareGuestFlow = useCallback(async (hostEvent: NostrEvent): Promise<void> => {
     if (!user || !roomId || !gameId) {
-      throw new Error('Missing required parameters for guest answer');
+      throw new Error('Missing required parameters for guest flow');
     }
 
-    console.log('[MultiplayerRoom] Guest publishing answer event...');
+    console.log('[MultiplayerRoom] Guest preparing flow...');
 
     // Extract host info from host event
     const hostTag = hostEvent.tags.find(t => t[0] === 'host');
@@ -808,26 +808,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
 
     try {
-      // Publish only to currently connected relay
-      const connectedRelays = [config.relayUrl];
-
-      const event = await publishEvent({
-        kind: 31997,
-        content: '',
-        tags: [
-          ['d', roomId],
-          ['game', gameId],
-          ['host', hostPubkey],
-          ['guest', user.pubkey],
-          ['status', 'active']
-        ],
-        relays: connectedRelays // Specify which relays to publish to
-      });
-
-      console.log('[MultiplayerRoom] Guest answer event published to connected relays:', event.id);
-      setCurrentRoomEventId(event.id);
-
-      // Update room state
+      // Update room state locally (no event publication yet)
       const shareableLink = generateShareableLink(roomId);
       setRoomState(prev => ({
         ...prev,
@@ -840,18 +821,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ]
       }));
 
-      console.log('[MultiplayerRoom] Guest room state updated to active');
+      console.log('[MultiplayerRoom] Guest room state updated to active (waiting for WebRTC)');
 
     } catch (error) {
-      console.error('[MultiplayerRoom] Error publishing guest answer event:', error);
+      console.error('[MultiplayerRoom] Error preparing guest flow:', error);
       setRoomState(prev => ({
         ...prev,
         status: 'error',
-        error: error instanceof Error ? error.message : 'Failed to join room'
+        error: error instanceof Error ? error.message : 'Failed to prepare guest flow'
       }));
       throw error;
     }
-  }, [user, roomId, gameId, publishEvent, generateShareableLink]);
+  }, [user, roomId, gameId, generateShareableLink]);
 
   // Guest: Initialize guest flow
   const initializeGuestFlow = useCallback(async (): Promise<void> => {
@@ -870,10 +851,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         return;
       }
 
-      // Step 2: Publish guest answer event
-      await publishGuestAnswerEvent(hostEvent);
+      // Step 2: Prepare guest flow (update local state, no event publication)
+      await prepareGuestFlow(hostEvent);
 
-      // Step 3: Subscribe to room events to monitor host responses
+      // Step 3: Subscribe to room events to monitor host responses and WebRTC offers
       subscribeToGuestRoomEvents();
 
     } catch (error) {
@@ -884,7 +865,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         error: error instanceof Error ? error.message : 'Failed to join room'
       }));
     }
-  }, [fetchHostRoomEvent, publishGuestAnswerEvent, subscribeToGuestRoomEvents]);
+  }, [fetchHostRoomEvent, prepareGuestFlow, subscribeToGuestRoomEvents]);
 
   // Set up host timeout (1 minute)
   const setupHostTimeout = useCallback((): void => {
