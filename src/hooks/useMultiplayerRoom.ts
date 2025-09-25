@@ -162,16 +162,17 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           if (user && event.pubkey === user.pubkey) continue;
 
           // Check if this is a guest connection event
-          const playerTag = event.tags.find(t => t[0] === 'player' && t[1] === event.pubkey);
-          const connectedTag = event.tags.find(t => t[0] === 'connected' && t[1] === event.pubkey);
+          const guestTag = event.tags.find(t => t[0] === 'guest');
+          const statusTag = event.tags.find(t => t[0] === 'status' && t[1] === 'active');
 
-          if (playerTag && connectedTag) {
-            console.log('[MultiplayerRoom] Guest connection detected from:', event.pubkey);
+          if (guestTag && statusTag) {
+            const guestPubkey = guestTag[1];
+            console.log('[MultiplayerRoom] Guest connection detected from:', guestPubkey);
 
             // Update room state to include guest
             setRoomState(prev => {
               // Check if guest is already in connectedPlayers
-              const isGuestAlreadyConnected = prev.connectedPlayers.some(p => p.pubkey === event.pubkey);
+              const isGuestAlreadyConnected = prev.connectedPlayers.some(p => p.pubkey === guestPubkey);
 
               if (!isGuestAlreadyConnected) {
                 console.log('[MultiplayerRoom] Adding guest to connected players');
@@ -180,7 +181,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                   status: 'active',
                   connectedPlayers: [
                     ...prev.connectedPlayers,
-                    { pubkey: event.pubkey }
+                    { pubkey: guestPubkey }
                   ]
                 };
               }
@@ -252,18 +253,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
           // Validate room is available for joining
           if (status === 'waiting' || status === 'waiting_for_player') {
-            // Check if current user is already connected
+            // Check if current user is already connected as a guest
             const isAlreadyConnected = event.tags.some(t =>
-              t[0] === 'connected' && t[1] === user?.pubkey
+              t[0] === 'guest' && t[1] === user?.pubkey
             );
 
             if (isAlreadyConnected) {
               throw new Error('You are already connected to this room');
             }
 
-            // Check if room is already full by counting connected players
-            const connectedTags = event.tags.filter(t => t[0] === 'connected');
-            const currentPlayerCount = connectedTags.length;
+            // Check if room is already full by counting guest players
+            const guestTags = event.tags.filter(t => t[0] === 'guest');
+            const currentPlayerCount = guestTags.length;
 
             if (currentPlayerCount >= requiredPlayers) {
               throw new Error('Room is full');
@@ -293,6 +294,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     console.log('[MultiplayerRoom] Guest publishing answer event...');
 
+    // Extract host info from host event
+    const hostTag = hostEvent.tags.find(t => t[0] === 'host');
+    const hostPubkey = hostTag?.[1];
+
+    if (!hostPubkey) {
+      throw new Error('Invalid host event: missing host tag');
+    }
+
     try {
       const event = await publishEvent({
         kind: 31997,
@@ -300,22 +309,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         tags: [
           ['d', roomId],
           ['game', gameId],
-          ['player', user.pubkey],
-          ['status', 'active'],
-          ['connected', user.pubkey]
+          ['host', hostPubkey],
+          ['guest', user.pubkey],
+          ['status', 'active']
         ]
       });
 
       console.log('[MultiplayerRoom] Guest answer event published:', event.id);
       setCurrentRoomEventId(event.id);
-
-      // Extract host info from host event
-      const hostTag = hostEvent.tags.find(t => t[0] === 'host');
-      const hostPubkey = hostTag?.[1];
-
-      if (!hostPubkey) {
-        throw new Error('Invalid host event: missing host tag');
-      }
 
       // Update room state
       const shareableLink = generateShareableLink(roomId);
