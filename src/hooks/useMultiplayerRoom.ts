@@ -18,7 +18,7 @@ interface ChatMessage {
 }
 
 interface RoomState {
-  status: 'waiting' | 'active' | 'full' | 'error' | 'playing' | 'waiting_for_player' | 'waiting_to_retry';
+  status: 'waiting' | 'active' | 'full' | 'error' | 'playing' | 'waiting_for_player' | 'waiting_to_retry' | 'room_full';
   hostPubkey: string;
   requiredPlayers: number;
   connectedPlayers: ConnectedPlayer[];
@@ -52,6 +52,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const subscriptionRef = useRef<{ close: () => void } | null>(null);
   const hostTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const roomInitializedRef = useRef(false);
+  const guestEventsRef = useRef<NostrEvent[]>([]); // Track guest events in order
+  const isListeningForGuestsRef = useRef(false); // Track if host is still listening for guests
 
   // Generate shareable link
   const generateShareableLink = useCallback((roomId: string): string => {
@@ -102,6 +104,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] Publishing host room event...');
 
     try {
+      const requiredPlayers = roomState.requiredPlayers || 2;
       const event = await publishEvent({
         kind: 31997,
         content: '',
@@ -110,7 +113,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           ['game', gameId],
           ['host', user.pubkey],
           ['status', 'waiting'],
-          ['players', '2']
+          ['players', requiredPlayers.toString()]
         ]
       });
 
@@ -138,15 +141,190 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }));
       throw error;
     }
-  }, [user, roomId, gameId, publishEvent, generateShareableLink]);
+  }, [user, roomId, gameId, publishEvent, generateShareableLink, roomState.requiredPlayers]);
 
-  // Subscribe to room events and listen for guest responses
-  const subscribeToRoomEvents = useCallback((): void => {
-    if (!nostr || !roomId) return;
+  // Host: Subscribe to room events and listen for guest responses
+  const subscribeToHostGuestEvents = useCallback((): void => {
+    if (!nostr || !roomId || !user || !isListeningForGuestsRef.current) return;
 
-    console.log('[MultiplayerRoom] Subscribing to room events for roomId:', roomId);
+    console.log('[MultiplayerRoom] Host subscribing to guest events for roomId:', roomId);
 
     const pollForGuestEvents = async (): Promise<void> => {
+      try {
+        // Query for guest events with specific filters
+        const events = await nostr.query([{
+          kinds: [31997],
+          '#d': [roomId],
+          '#game': [gameId],
+          '#host': [user.pubkey],
+          limit: 20
+        }], { signal: AbortSignal.timeout(5000) });
+
+        // Sort by created_at to get events in chronological order
+        const sortedEvents = events.sort((a, b) => a.created_at - b.created_at);
+
+        for (const event of sortedEvents) {
+          // Skip our own events (host events)
+          if (event.pubkey === user.pubkey) continue;
+
+          // Check if this is a valid guest event
+          const guestTag = event.tags.find(t => t[0] === 'guest');
+          const statusTag = event.tags.find(t => t[0] === 'status' && t[1] === 'active');
+          const eventRoomId = event.tags.find(t => t[0] === 'd')?.[1];
+          const eventGameId = event.tags.find(t => t[0] === 'game')?.[1];
+          const eventHostPubkey = event.tags.find(t => t[0] === 'host')?.[1];
+
+          // Validate event matches our filters
+          if (guestTag && statusTag &&
+              eventRoomId === roomId &&
+              eventGameId === gameId &&
+              eventHostPubkey === user.pubkey) {
+
+            const guestPubkey = guestTag[1];
+
+            // Check if we've already processed this guest event
+            const isAlreadyProcessed = guestEventsRef.current.some(
+              processedEvent => processedEvent.id === event.id
+            );
+
+            if (!isAlreadyProcessed) {
+              console.log('[MultiplayerRoom] Valid guest event detected:', {
+                eventId: event.id,
+                guestPubkey,
+                timestamp: event.created_at
+              });
+
+              // Add to processed events
+              guestEventsRef.current.push(event);
+
+              // Update room state to include guest
+              setRoomState(prev => {
+                const isGuestAlreadyConnected = prev.connectedPlayers.some(p => p.pubkey === guestPubkey);
+
+                if (!isGuestAlreadyConnected) {
+                  const newConnectedPlayers = [...prev.connectedPlayers, { pubkey: guestPubkey }];
+                  const currentGuestCount = newConnectedPlayers.length - 1; // Exclude host
+                  const requiredGuests = prev.requiredPlayers - 1; // Exclude host
+
+                  console.log('[MultiplayerRoom] Guest added to room:', {
+                    guestPubkey,
+                    currentGuestCount,
+                    requiredGuests
+                  });
+
+                  // Check if we've reached the required number of players
+                  if (currentGuestCount >= requiredGuests) {
+                    console.log('[MultiplayerRoom] Room is now full, stopping guest listening');
+                    isListeningForGuestsRef.current = false;
+
+                    // Schedule room completion update
+                    setTimeout(() => updateHostRoomWithGuests(newConnectedPlayers), 0);
+
+                    return {
+                      ...prev,
+                      status: 'room_full',
+                      connectedPlayers: newConnectedPlayers
+                    };
+                  }
+
+                  return {
+                    ...prev,
+                    status: 'active',
+                    connectedPlayers: newConnectedPlayers
+                  };
+                }
+
+                return prev;
+              });
+            }
+          }
+        }
+
+      } catch (error) {
+        console.error('[MultiplayerRoom] Error polling for guest events:', error);
+      }
+    };
+
+    // Initial poll
+    pollForGuestEvents();
+
+    // Set up periodic polling every 2 seconds for faster response
+    const interval = setInterval(pollForGuestEvents, 2000);
+
+    subscriptionRef.current = {
+      close: () => {
+        console.log('[MultiplayerRoom] Closing host guest event subscription');
+        clearInterval(interval);
+      }
+    };
+
+  }, [nostr, roomId, gameId, user]);
+
+  // Host: Update room event with connected guests
+  const updateHostRoomWithGuests = useCallback(async (connectedPlayers: ConnectedPlayer[]): Promise<void> => {
+    if (!user || !roomId || !gameId || !currentRoomEventId) {
+      console.error('[MultiplayerRoom] Missing required parameters for room update');
+      return;
+    }
+
+    console.log('[MultiplayerRoom] Updating host room event with connected guests:', connectedPlayers);
+
+    try {
+      // Build tags with connected players
+      const tags = [
+        ['d', roomId],
+        ['game', gameId],
+        ['host', user.pubkey],
+        ['status', 'full'],
+        ['players', roomState.requiredPlayers.toString()]
+      ];
+
+      // Add connected guest pubkeys as tags
+      connectedPlayers.forEach(player => {
+        if (player.pubkey !== user.pubkey) { // Don't add host as connected
+          tags.push(['connected', player.pubkey]);
+        }
+      });
+
+      const event = await publishEvent({
+        kind: 31997,
+        content: '',
+        tags
+      });
+
+      console.log('[MultiplayerRoom] Host room updated with guests:', event.id);
+      setCurrentRoomEventId(event.id);
+
+      // Update final room state
+      setRoomState(prev => ({
+        ...prev,
+        status: 'full',
+        connectedPlayers
+      }));
+
+      // Close subscription to stop listening for more guests
+      if (subscriptionRef.current) {
+        subscriptionRef.current.close();
+        subscriptionRef.current = null;
+      }
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error updating host room with guests:', error);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to update room'
+      }));
+    }
+  }, [user, roomId, gameId, publishEvent, roomState.requiredPlayers, currentRoomEventId]);
+
+  // Guest: Subscribe to room events to monitor host responses
+  const subscribeToGuestRoomEvents = useCallback((): void => {
+    if (!nostr || !roomId) return;
+
+    console.log('[MultiplayerRoom] Guest subscribing to room events for roomId:', roomId);
+
+    const pollForHostEvents = async (): Promise<void> => {
       try {
         const events = await nostr.query([{
           kinds: [31997],
@@ -161,56 +339,38 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           // Skip our own events
           if (user && event.pubkey === user.pubkey) continue;
 
-          // Check if this is a guest connection event
-          const guestTag = event.tags.find(t => t[0] === 'guest');
-          const statusTag = event.tags.find(t => t[0] === 'status' && t[1] === 'active');
+          const hostTag = event.tags.find(t => t[0] === 'host');
+          const statusTag = event.tags.find(t => t[0] === 'status');
 
-          if (guestTag && statusTag) {
-            const guestPubkey = guestTag[1];
-            console.log('[MultiplayerRoom] Guest connection detected from:', guestPubkey);
+          if (hostTag && statusTag) {
+            const status = statusTag[1];
+            const hostPubkey = hostTag[1];
 
-            // Update room state to include guest
-            setRoomState(prev => {
-              // Check if guest is already in connectedPlayers
-              const isGuestAlreadyConnected = prev.connectedPlayers.some(p => p.pubkey === guestPubkey);
-
-              if (!isGuestAlreadyConnected) {
-                console.log('[MultiplayerRoom] Adding guest to connected players');
-                return {
-                  ...prev,
-                  status: 'active',
-                  connectedPlayers: [
-                    ...prev.connectedPlayers,
-                    { pubkey: guestPubkey }
-                  ]
-                };
-              }
-
-              return prev;
-            });
-          } else {
-            console.log('[MultiplayerRoom] Guest activity detected but not a connection event:', {
-              eventId: event.id,
-              guestPubkey: event.pubkey,
-              tags: event.tags
-            });
+            if (status === 'full') {
+              console.log('[MultiplayerRoom] Room is now full, status updated');
+              setRoomState(prev => ({
+                ...prev,
+                status: 'full'
+              }));
+              break;
+            }
           }
         }
 
       } catch (error) {
-        console.error('[MultiplayerRoom] Error polling for guest events:', error);
+        console.error('[MultiplayerRoom] Error polling for host events:', error);
       }
     };
 
     // Initial poll
-    pollForGuestEvents();
+    pollForHostEvents();
 
     // Set up periodic polling every 3 seconds
-    const interval = setInterval(pollForGuestEvents, 3000);
+    const interval = setInterval(pollForHostEvents, 3000);
 
     subscriptionRef.current = {
       close: () => {
-        console.log('[MultiplayerRoom] Closing room event subscription');
+        console.log('[MultiplayerRoom] Closing guest room event subscription');
         clearInterval(interval);
       }
     };
@@ -365,7 +525,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       await publishGuestAnswerEvent(hostEvent);
 
       // Step 3: Subscribe to room events to monitor host responses
-      subscribeToRoomEvents();
+      subscribeToGuestRoomEvents();
 
     } catch (error) {
       console.error('[MultiplayerRoom] Error in guest flow:', error);
@@ -375,7 +535,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         error: error instanceof Error ? error.message : 'Failed to join room'
       }));
     }
-  }, [fetchHostRoomEvent, publishGuestAnswerEvent, subscribeToRoomEvents]);
+  }, [fetchHostRoomEvent, publishGuestAnswerEvent, subscribeToGuestRoomEvents]);
 
   // Set up host timeout (1 minute)
   const setupHostTimeout = useCallback((): void => {
@@ -405,8 +565,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       if (shouldBeHost) {
         console.log('[MultiplayerRoom] Starting host flow');
+        isListeningForGuestsRef.current = true; // Start listening for guests
+        guestEventsRef.current = []; // Reset guest events
         await publishHostRoomEvent();
-        subscribeToRoomEvents();
+        subscribeToHostGuestEvents();
         setupHostTimeout();
       } else {
         console.log('[MultiplayerRoom] Starting guest flow');
@@ -421,7 +583,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         error: error instanceof Error ? error.message : 'Failed to initialize room'
       }));
     }
-  }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToRoomEvents, setupHostTimeout, initializeGuestFlow]);
+  }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToHostGuestEvents, setupHostTimeout, initializeGuestFlow]);
 
   // Initialize room on mount
   useEffect(() => {
@@ -440,8 +602,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         clearTimeout(hostTimeoutRef.current);
       }
 
-      // Reset initialization flag when dependencies change
+      // Reset initialization flag and listening state when dependencies change
       roomInitializedRef.current = false;
+      isListeningForGuestsRef.current = false;
+      guestEventsRef.current = [];
     };
   }, [initializeRoom]);
 
