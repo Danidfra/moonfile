@@ -274,8 +274,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     subscriptionRef.current = {
       close: () => {
         console.log('[MultiplayerRoom] Closing host guest event subscription');
-        // Type assertion to ensure close method exists
-        (subscription as { close: () => void }).close();
+        // Type assertion to ensure close method exists - cast to unknown first
+        (subscription as unknown as { close: () => void }).close();
       }
     };
 
@@ -437,8 +437,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     subscriptionRef.current = {
       close: () => {
         console.log('[MultiplayerRoom] Closing guest subscription');
-        // Type assertion to ensure close method exists
-        (subscription as { close: () => void }).close();
+        // Type assertion to ensure close method exists - cast to unknown first
+        (subscription as unknown as { close: () => void }).close();
       }
     };
 
