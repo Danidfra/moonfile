@@ -128,11 +128,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       // Wait for ICE gathering to complete
       await new Promise<void>((resolve) => {
+        const timeout = setTimeout(() => {
+          console.warn('[MultiplayerRoom] ICE gathering timeout (fallback)');
+          resolve();
+        }, 3000); // tempo de segurança
+
         if (peerConnection.iceGatheringState === 'complete') {
+          clearTimeout(timeout);
           resolve();
         } else {
           peerConnection.onicegatheringstatechange = () => {
             if (peerConnection.iceGatheringState === 'complete') {
+              clearTimeout(timeout);
               resolve();
             }
           };
@@ -475,6 +482,140 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, []);
 
+  // Guest: Generate WebRTC answer from host offer and publish response
+  const generateAndPublishWebRTCAnswer = useCallback(async (hostEvent: NostrEvent): Promise<void> => {
+    if (!user || !roomId || !gameId) {
+      console.error('[MultiplayerRoom] Missing required parameters for WebRTC answer');
+      return;
+    }
+
+    try {
+      // Extract the host's WebRTC offer from the signal tag
+      const signalTag = hostEvent.tags.find(t => t[0] === 'signal');
+      const hostTag = hostEvent.tags.find(t => t[0] === 'host');
+
+      if (!signalTag || !hostTag) {
+        console.error('[MultiplayerRoom] Host event missing signal or host tag');
+        return;
+      }
+
+      const base64Offer = signalTag[1];
+      const hostPubkey = hostTag[1];
+
+      console.log('[MultiplayerRoom] Processing WebRTC offer from host:', hostPubkey);
+
+      // Decode and parse the offer
+      const offerString = atob(base64Offer);
+      const offer: RTCSessionDescriptionInit = JSON.parse(offerString);
+
+      // Create a new RTCPeerConnection for the guest
+      const peerConnection = new RTCPeerConnection({
+        iceServers: [
+          { urls: 'stun:stun.l.google.com:19302' },
+          { urls: 'stun:stun1.l.google.com:19302' }
+        ]
+      });
+
+      // Set up data channel listener to handle host's data channel
+      peerConnection.ondatachannel = (event) => {
+        const dataChannel = event.channel;
+        console.log('[MultiplayerRoom] Data channel received from host:', dataChannel.label);
+
+        // Set up data channel event handlers
+        dataChannel.onopen = () => {
+          console.log('[MultiplayerRoom] Data channel opened with host');
+        };
+
+        dataChannel.onmessage = (event) => {
+          console.log('[MultiplayerRoom] Received message from host:', event.data);
+          // TODO: Handle game data messages from host
+        };
+
+        dataChannel.onclose = () => {
+          console.log('[MultiplayerRoom] Data channel closed with host');
+        };
+
+        dataChannel.onerror = (error) => {
+          console.error('[MultiplayerRoom] Data channel error:', error);
+        };
+      };
+
+      // Set the remote description with the host's offer
+      await peerConnection.setRemoteDescription(offer);
+
+      // Create an answer
+      const answer = await peerConnection.createAnswer();
+
+      // Set the local description
+      await peerConnection.setLocalDescription(answer);
+
+      // Wait for ICE gathering to complete with timeout fallback
+      await Promise.race([
+        new Promise<void>((resolve) => {
+          if (peerConnection.iceGatheringState === 'complete') {
+            resolve();
+          } else {
+            peerConnection.onicegatheringstatechange = () => {
+              if (peerConnection.iceGatheringState === 'complete') {
+                resolve();
+              }
+            };
+          }
+        }),
+        new Promise<void>((resolve) => {
+          setTimeout(() => {
+            console.log('[MultiplayerRoom] ICE gathering timeout, using current candidates');
+            resolve();
+          }, 5000); // 5 second timeout
+        })
+      ]);
+
+      // Get the complete answer with ICE candidates
+      const completeAnswer = peerConnection.localDescription;
+
+      if (!completeAnswer) {
+        throw new Error('Failed to generate WebRTC answer');
+      }
+
+      // Serialize and base64 encode the answer
+      const answerString = JSON.stringify(completeAnswer);
+      const base64Answer = btoa(answerString);
+
+      console.log('[MultiplayerRoom] WebRTC answer generated and encoded');
+
+      // Publish the answer back to the relay
+      const connectedRelays = [config.relayUrl];
+
+      const answerEvent = await publishEvent({
+        kind: 31997,
+        content: '',
+        tags: [
+          ['d', roomId],
+          ['game', gameId],
+          ['host', hostPubkey],
+          ['guest', user.pubkey],
+          ['status', 'active'],
+          ['signal', base64Answer]
+        ],
+        relays: connectedRelays
+      });
+
+      console.log('[MultiplayerRoom] WebRTC answer published to relay:', answerEvent.id);
+      setCurrentRoomEventId(answerEvent.id);
+
+      // Keep the peer connection reference for future use
+      // TODO: Store peer connection reference for game communication
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error generating WebRTC answer:', error);
+      setRoomState(prev => ({
+        ...prev,
+        status: 'error',
+        error: error instanceof Error ? error.message : 'Failed to establish WebRTC connection'
+      }));
+    }
+  }, [user, roomId, gameId, publishEvent, config.relayUrl]);
+
   // Guest: Close subscription and send CLOSE message
   const closeGuestSubscription = useCallback((): void => {
     if (subscriptionRef.current && subscriptionIdRef.current) {
@@ -528,10 +669,23 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
             const hostTag = event.tags.find(t => t[0] === 'host');
             const statusTag = event.tags.find(t => t[0] === 'status');
+            const signalTag = event.tags.find(t => t[0] === 'signal');
 
             if (hostTag && statusTag) {
               const status = statusTag[1];
 
+              // Check if this is a host event with a WebRTC offer (signal tag)
+              if (signalTag && (status === 'waiting' || status === 'waiting_for_player')) {
+                console.log('[MultiplayerRoom] Host event with WebRTC offer detected, generating answer...');
+
+                // Generate and publish WebRTC answer
+                await generateAndPublishWebRTCAnswer(event);
+
+                // Continue listening for more events in case host republishes
+                continue;
+              }
+
+              // Handle room full status
               if (status === 'full') {
                 console.log('[MultiplayerRoom] Room is now full, status updated');
                 setRoomState(prev => ({
@@ -562,7 +716,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }
     };
 
-  }, [nostr, roomId, user, config.relayUrl]);
+  }, [nostr, roomId, user, config.relayUrl, generateAndPublishWebRTCAnswer]);
 
   // Guest: Fetch host room event and validate room exists
   const fetchHostRoomEvent = useCallback(async (): Promise<NostrEvent | null> => {
