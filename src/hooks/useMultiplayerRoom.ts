@@ -65,8 +65,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     if (!nostr || !user || !roomId) return false;
 
     try {
-      // Check if room already exists
-      const existingEvents = await nostr.query([{
+      // Check if room already exists (only from connected relay)
+      const connectedRelays = [config.relayUrl];
+      const relayGroup = nostr.group(connectedRelays);
+
+      const existingEvents = await relayGroup.query([{
         kinds: [31997],
         '#d': [roomId],
         limit: 1
@@ -93,7 +96,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       console.error('[MultiplayerRoom] Error checking host status:', error);
       return false;
     }
-  }, [nostr, user, roomId]);
+  }, [nostr, user, roomId, config.relayUrl]);
 
   // Publish host room event
   const publishHostRoomEvent = useCallback(async (): Promise<void> => {
@@ -105,6 +108,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
     try {
       const requiredPlayers = roomState.requiredPlayers || 2;
+
+      // Publish only to the currently connected relay
+      const connectedRelays = [config.relayUrl];
+
       const event = await publishEvent({
         kind: 31997,
         content: '',
@@ -114,10 +121,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           ['host', user.pubkey],
           ['status', 'waiting'],
           ['players', requiredPlayers.toString()]
-        ]
+        ],
+        relays: connectedRelays // Specify which relays to publish to
       });
 
-      console.log('[MultiplayerRoom] Host room event published:', event.id);
+      console.log('[MultiplayerRoom] Host room event published to connected relays:', event.id);
       setCurrentRoomEventId(event.id);
 
       // Update room state
@@ -141,7 +149,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }));
       throw error;
     }
-  }, [user, roomId, gameId, publishEvent, generateShareableLink, roomState.requiredPlayers]);
+  }, [user, roomId, gameId, publishEvent, generateShareableLink, roomState.requiredPlayers, config.relayUrl]);
 
   // Host: Subscribe to room events and listen for guest responses
   const subscribeToHostGuestEvents = useCallback((): void => {
@@ -270,6 +278,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] Updating host room event with connected guests:', connectedPlayers);
 
     try {
+      // Publish only to currently connected relay
+      const connectedRelays = [config.relayUrl];
+
       // Build tags with connected players
       const tags = [
         ['d', roomId],
@@ -289,7 +300,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       const event = await publishEvent({
         kind: 31997,
         content: '',
-        tags
+        tags,
+        relays: connectedRelays // Specify which relays to publish to
       });
 
       console.log('[MultiplayerRoom] Host room updated with guests:', event.id);
@@ -316,7 +328,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         error: error instanceof Error ? error.message : 'Failed to update room'
       }));
     }
-  }, [user, roomId, gameId, publishEvent, roomState.requiredPlayers, currentRoomEventId]);
+  }, [user, roomId, gameId, publishEvent, roomState.requiredPlayers, currentRoomEventId, config.relayUrl]);
 
   // Guest: Subscribe to room events to monitor host responses
   const subscribeToGuestRoomEvents = useCallback((): void => {
@@ -384,7 +396,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] Guest fetching host room event...');
 
     try {
-      const events = await nostr.query([{
+      // Query only from connected relay
+      const connectedRelays = [config.relayUrl];
+      const relayGroup = nostr.group(connectedRelays);
+
+      const events = await relayGroup.query([{
         kinds: [31997],
         '#d': [roomId],
         limit: 10
@@ -444,7 +460,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       console.error('[MultiplayerRoom] Error fetching host room event:', error);
       throw error;
     }
-  }, [nostr, roomId]);
+  }, [nostr, roomId, config.relayUrl]);
 
   // Guest: Publish answer event to join the room
   const publishGuestAnswerEvent = useCallback(async (hostEvent: NostrEvent): Promise<void> => {
@@ -463,6 +479,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
 
     try {
+      // Publish only to currently connected relay
+      const connectedRelays = [config.relayUrl];
+
       const event = await publishEvent({
         kind: 31997,
         content: '',
@@ -472,10 +491,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           ['host', hostPubkey],
           ['guest', user.pubkey],
           ['status', 'active']
-        ]
+        ],
+        relays: connectedRelays // Specify which relays to publish to
       });
 
-      console.log('[MultiplayerRoom] Guest answer event published:', event.id);
+      console.log('[MultiplayerRoom] Guest answer event published to connected relays:', event.id);
       setCurrentRoomEventId(event.id);
 
       // Update room state
