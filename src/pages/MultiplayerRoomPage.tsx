@@ -368,7 +368,7 @@ export default function MultiplayerRoomPage() {
           {/* Main game area */}
           <div ref={gameAreaRef} className="lg:col-span-3">
             {/* Show waiting screen if WebRTC is not connected yet */}
-            {!isWebRTCConnected || roomState.status === 'error' ? (
+            {!isWebRTCConnected || roomState.status === 'error' || roomState.status === 'room_full' ? (
               <MultiplayerWaitingScreen
                 status={roomState.status}
                 connectedPlayers={roomState.connectedPlayers}

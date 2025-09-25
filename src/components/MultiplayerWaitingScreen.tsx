@@ -13,7 +13,7 @@ interface ConnectedPlayer {
 }
 
 interface MultiplayerWaitingScreenProps {
-  status: 'waiting' | 'active' | 'full' | 'error' | 'playing' | 'waiting_for_player' | 'waiting_to_retry';
+  status: 'waiting' | 'active' | 'full' | 'error' | 'playing' | 'waiting_for_player' | 'waiting_to_retry' | 'room_full';
   connectedPlayers: ConnectedPlayer[];
   requiredPlayers: number;
   hostPubkey: string;

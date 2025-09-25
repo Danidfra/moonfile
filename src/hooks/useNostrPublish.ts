@@ -5,7 +5,11 @@ import { useCurrentUser } from "./useCurrentUser";
 
 import type { NostrEvent } from "@nostrify/nostrify";
 
-interface PublishEventParams extends Omit<NostrEvent, 'id' | 'pubkey' | 'sig'> {
+interface PublishEventParams {
+  kind: number;
+  content: string;
+  tags?: string[][];
+  created_at?: number;
   relays?: string[]; // Optional array of relay URLs to publish to
 }
 
