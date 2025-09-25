@@ -232,6 +232,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                       requiredGuests
                     });
 
+                    // Immediately republish host room event with the new guest
+                    republishHostRoomWithGuest(guestPubkey, newConnectedPlayers);
+
                     // Check if we've reached the required number of players
                     if (currentGuestCount >= requiredGuests && isListeningForGuestsRef.current) {
                       console.log('[MultiplayerRoom] Room is now full, stopping guest listening');
@@ -280,6 +283,54 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     };
 
   }, [nostr, roomId, gameId, user, config.relayUrl]);
+
+  // Host: Republish room event when a new guest joins
+  const republishHostRoomWithGuest = useCallback(async (guestPubkey: string, currentConnectedPlayers: ConnectedPlayer[]): Promise<void> => {
+    if (!user || !roomId || !gameId) {
+      console.error('[MultiplayerRoom] Missing required parameters for room republish');
+      return;
+    }
+
+    // Checa se o guest já está listado
+    const isAlreadyIncluded = currentConnectedPlayers.some(
+      (player) => player.pubkey === guestPubkey
+    );
+
+    if (isAlreadyIncluded) {
+      console.log('[MultiplayerRoom] Guest already included, skipping republish:', guestPubkey);
+      return;
+    }
+
+    console.log('[MultiplayerRoom] Republishing host room event with new guest:', guestPubkey);
+
+    try {
+      // Publish only to currently connected relay
+      const connectedRelays = [config.relayUrl];
+
+      // Build tags with all current connected players
+      const tags = [
+        ['d', roomId],
+        ['game', gameId],
+        ['host', user.pubkey],
+        ['status', 'waiting_for_player'],
+        ['players', roomState.requiredPlayers.toString()],
+        ['guest', guestPubkey]
+      ];
+
+      const event = await publishEvent({
+        kind: 31997,
+        content: '',
+        tags,
+        relays: connectedRelays
+      });
+
+      console.log('[MultiplayerRoom] Host room republished with new guest:', event.id);
+      setCurrentRoomEventId(event.id);
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error republishing host room with guest:', error);
+    }
+  }, [user, roomId, gameId, publishEvent, roomState.requiredPlayers, config.relayUrl]);
 
   // Host: Update room event with connected guests
   const updateHostRoomWithGuests = useCallback(async (connectedPlayers: ConnectedPlayer[]): Promise<void> => {
