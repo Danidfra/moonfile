@@ -57,6 +57,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const guestEventsRef = useRef<NostrEvent[]>([]); // Track guest events in order
   const isListeningForGuestsRef = useRef(false); // Track if host is still listening for guests
   const subscriptionIdRef = useRef<string | null>(null); // Track subscription ID for CLOSE message
+  const hostPeerConnectionRef = useRef<RTCPeerConnection | null>(null); // Store host's peer connection
+  const hostDataChannelRef = useRef<RTCDataChannel | null>(null); // Store host's data channel
 
   // Generate shareable link
   const generateShareableLink = useCallback((roomId: string): string => {
@@ -114,8 +116,40 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ]
       });
 
+      // Store peer connection in ref for reuse
+      hostPeerConnectionRef.current = peerConnection;
+
       // Create a data channel for game communication
-      const _dataChannel = peerConnection.createDataChannel('game-data');
+      const dataChannel = peerConnection.createDataChannel('game-data');
+
+      // Store data channel in ref for reuse
+      hostDataChannelRef.current = dataChannel;
+
+      // Set up data channel event handlers
+      dataChannel.onopen = () => {
+        console.log('[MultiplayerRoom] Host data channel opened with guest');
+        setRoomState(prev => ({
+          ...prev,
+          isWebRTCConnected: true
+        }));
+      };
+
+      dataChannel.onmessage = (event) => {
+        console.log('[MultiplayerRoom] Host received message from guest:', event.data);
+        // TODO: Handle game data messages from guest
+      };
+
+      dataChannel.onclose = () => {
+        console.log('[MultiplayerRoom] Host data channel closed with guest');
+        setRoomState(prev => ({
+          ...prev,
+          isWebRTCConnected: false
+        }));
+      };
+
+      dataChannel.onerror = (error) => {
+        console.error('[MultiplayerRoom] Host data channel error:', error);
+      };
 
       // Create offer
       const offer = await peerConnection.createOffer({
@@ -153,8 +187,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         throw new Error('Failed to generate WebRTC offer');
       }
 
-      // Close the connection as we'll create a new one when guests connect
-      peerConnection.close();
+      // Do NOT close the connection - we'll reuse it for guest answers
+      // peerConnection.close();
 
       // Serialize and base64 encode the offer
       const offerString = JSON.stringify(completeOffer);
@@ -389,6 +423,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     try {
       console.log('[MultiplayerRoom] Processing WebRTC answer from guest:', guestPubkey);
 
+      // Check if we have an existing peer connection
+      const peerConnection = hostPeerConnectionRef.current;
+      if (!peerConnection) {
+        console.error('[MultiplayerRoom] No existing peer connection found - cannot process guest answer');
+        setRoomState(prev => ({
+          ...prev,
+          status: 'error',
+          error: 'No WebRTC connection available - please recreate room'
+        }));
+        return;
+      }
+
       // Validate event has required tags
       const hostTag = event.tags.find(t => t[0] === 'host');
       const signalTag = event.tags.find(t => t[0] === 'signal');
@@ -412,68 +458,67 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       console.log('[MultiplayerRoom] WebRTC answer parsed successfully');
 
-      // For now, we'll create a new peer connection for each guest
-      // TODO: In future, manage multiple peer connections for multiple guests
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
-      });
+      // Set up connection state monitoring (if not already set)
+      if (!peerConnection.onconnectionstatechange) {
+        peerConnection.onconnectionstatechange = () => {
+          console.log('[MultiplayerRoom] WebRTC connection state changed:', peerConnection.connectionState);
 
-      // Set up connection state monitoring
-      peerConnection.onconnectionstatechange = () => {
-        console.log('[MultiplayerRoom] WebRTC connection state changed:', peerConnection.connectionState);
+          if (peerConnection.connectionState === 'connected') {
+            console.log('[MultiplayerRoom] WebRTC connection established with guest:', guestPubkey);
+            setRoomState(prev => ({
+              ...prev,
+              isWebRTCConnected: true
+            }));
+          } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
+            console.warn('[MultiplayerRoom] WebRTC connection failed with guest:', guestPubkey);
+            setRoomState(prev => ({
+              ...prev,
+              isWebRTCConnected: false
+            }));
+          }
+        };
+      }
 
-        if (peerConnection.connectionState === 'connected') {
-          console.log('[MultiplayerRoom] WebRTC connection established with guest:', guestPubkey);
-          setRoomState(prev => ({
-            ...prev,
-            isWebRTCConnected: true
-          }));
-        } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
-          console.warn('[MultiplayerRoom] WebRTC connection failed with guest:', guestPubkey);
-          setRoomState(prev => ({
-            ...prev,
-            isWebRTCConnected: false
-          }));
-        }
-      };
-
-      // Set up ICE connection state monitoring
-      peerConnection.oniceconnectionstatechange = () => {
-        console.log('[MultiplayerRoom] ICE connection state changed:', peerConnection.iceConnectionState);
-      };
+      // Set up ICE connection state monitoring (if not already set)
+      if (!peerConnection.oniceconnectionstatechange) {
+        peerConnection.oniceconnectionstatechange = () => {
+          console.log('[MultiplayerRoom] ICE connection state changed:', peerConnection.iceConnectionState);
+        };
+      }
 
       // Apply the guest's answer as remote description
       await peerConnection.setRemoteDescription(answer);
 
       console.log('[MultiplayerRoom] Remote description set for guest:', guestPubkey);
 
-      // Create a data channel for game communication
-      const dataChannel = peerConnection.createDataChannel('game-data');
+      // Data channel was already created during offer generation
+      // It will automatically connect once guest sets remote description
+      const dataChannel = hostDataChannelRef.current;
+      if (dataChannel) {
+        console.log('[MultiplayerRoom] Data channel found and ready for guest:', guestPubkey);
 
-      // Set up data channel event handlers
-      dataChannel.onopen = () => {
-        console.log('[MultiplayerRoom] Data channel opened with guest:', guestPubkey);
-      };
+        // Ensure event handlers are set (they should already be set from offer generation)
+        if (!dataChannel.onopen) {
+          dataChannel.onopen = () => {
+            console.log('[MultiplayerRoom] Host data channel opened with guest:', guestPubkey);
+            setRoomState(prev => ({
+              ...prev,
+              isWebRTCConnected: true
+            }));
+          };
+        }
 
-      dataChannel.onmessage = (event) => {
-        console.log('[MultiplayerRoom] Received message from guest:', guestPubkey, event.data);
-        // TODO: Handle game data messages from guest
-      };
+        if (!dataChannel.onmessage) {
+          dataChannel.onmessage = (event) => {
+            console.log('[MultiplayerRoom] Host received message from guest:', guestPubkey, event.data);
+            // TODO: Handle game data messages from guest
+          };
+        }
+      } else {
+        console.warn('[MultiplayerRoom] No data channel found in ref');
+      }
 
-      dataChannel.onclose = () => {
-        console.log('[MultiplayerRoom] Data channel closed with guest:', guestPubkey);
-      };
-
-      dataChannel.onerror = (error) => {
-        console.error('[MultiplayerRoom] Data channel error with guest:', guestPubkey, error);
-      };
-
-      // Store the peer connection and data channel for future use
-      // TODO: Store in a ref or state for multiple guest support
-      console.log('[MultiplayerRoom] WebRTC connection setup complete for guest:', guestPubkey);
+      console.log('[MultiplayerRoom] WebRTC answer processing complete for guest:', guestPubkey);
 
       // Optional: Update host's event to mark this guest as connected
       // This can be done in a future iteration when supporting multiple guests
