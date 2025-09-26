@@ -252,7 +252,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     // Handle subscription events
     (async () => {
       try {
+        console.log('[MultiplayerRoom] Host subscription started, waiting for events...');
         for await (const msg of subscription) {
+          console.log('[MultiplayerRoom] Host received message:', msg[0]);
           if (msg[0] === 'EVENT') {
             const event = msg[2] as NostrEvent;
 
@@ -261,16 +263,32 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
             // Check if this is a valid guest event
             const guestTag = event.tags.find(t => t[0] === 'guest');
-            const statusTag = event.tags.find(t => t[0] === 'status' && t[1] === 'active');
+            const statusTag = event.tags.find(t => t[0] === 'status');
+            const signalTag = event.tags.find(t => t[0] === 'signal');
             const eventRoomId = event.tags.find(t => t[0] === 'd')?.[1];
             const eventGameId = event.tags.find(t => t[0] === 'game')?.[1];
             const eventHostPubkey = event.tags.find(t => t[0] === 'host')?.[1];
 
-            // Validate event matches our filters
-            if (guestTag && statusTag &&
-                eventRoomId === roomId &&
-                eventGameId === gameId &&
-                eventHostPubkey === user.pubkey) {
+            console.log('[MultiplayerRoom] Processing event from:', event.pubkey, {
+              hasGuestTag: !!guestTag,
+              status: statusTag?.[1],
+              hasSignalTag: !!signalTag,
+              eventRoomId,
+              expectedRoomId: roomId,
+              eventGameId,
+              expectedGameId: gameId,
+              eventHostPubkey,
+              expectedHostPubkey: user.pubkey
+            });
+
+            // Validate event matches our filters - accept both 'active' status and any status with signal tag
+            const isValidGuestEvent = guestTag &&
+              eventRoomId === roomId &&
+              eventGameId === gameId &&
+              eventHostPubkey === user.pubkey &&
+              ((statusTag && statusTag[1] === 'active') || signalTag);
+
+            if (isValidGuestEvent) {
 
               const guestPubkey = guestTag[1];
 
@@ -305,6 +323,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
                     });
 
                     // Immediately republish host room event with the new guest
+                    console.log('[MultiplayerRoom] Calling republishHostRoomWithGuest for guest:', guestPubkey);
                     republishHostRoomWithGuest(guestPubkey, newConnectedPlayers);
 
                     // Check if we've reached the required number of players
@@ -358,12 +377,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
   // Host: Republish room event when a new guest joins
   const republishHostRoomWithGuest = useCallback(async (guestPubkey: string, currentConnectedPlayers: ConnectedPlayer[]): Promise<void> => {
+    console.log('[MultiplayerRoom] republishHostRoomWithGuest called with guest:', guestPubkey, 'and players:', currentConnectedPlayers);
+
     if (!user || !roomId || !gameId) {
       console.error('[MultiplayerRoom] Missing required parameters for room republish');
       return;
     }
 
-    // Checa se o guest já está listado
     const isAlreadyIncluded = currentConnectedPlayers.some(
       (player) => player.pubkey === guestPubkey
     );
@@ -372,8 +392,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       console.log('[MultiplayerRoom] Guest already included, skipping republish:', guestPubkey);
       return;
     }
-
-    console.log('[MultiplayerRoom] Republishing host room event with new guest:', guestPubkey);
+    console.log('[MultiplayerRoom] Republishing host room event with all guests:', guestPubkey);
 
     try {
       // Generate new WebRTC offer for each republish
@@ -389,8 +408,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ['host', user.pubkey],
         ['status', 'waiting_for_player'],
         ['players', roomState.requiredPlayers.toString()],
+        ['guest', guestPubkey],
         ['signal', webRTCOffer],
-        ['guest', guestPubkey]
       ];
 
       const event = await publishEvent({
