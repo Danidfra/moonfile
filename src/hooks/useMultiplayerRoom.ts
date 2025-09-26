@@ -375,6 +375,51 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
   }, [nostr, roomId, gameId, user, config.relayUrl]);
 
+  // Helper function to check if guest is already in latest published host event
+  const isGuestInLatestHostEvent = useCallback(async (guestPubkey: string): Promise<boolean> => {
+    if (!nostr || !roomId || !user) return false;
+
+    try {
+      console.log('[MultiplayerRoom] Checking if guest is in latest host event:', guestPubkey);
+
+      // Query for the latest host event
+      const connectedRelays = [config.relayUrl];
+      const relayGroup = nostr.group(connectedRelays);
+
+      const hostEvents = await relayGroup.query([{
+        kinds: [31997],
+        '#d': [roomId],
+        authors: [user.pubkey],
+        limit: 1
+      }], { signal: AbortSignal.timeout(5000) });
+
+      if (hostEvents.length === 0) {
+        console.log('[MultiplayerRoom] No host events found, guest is not included');
+        return false;
+      }
+
+      const latestHostEvent = hostEvents[0];
+      console.log('[MultiplayerRoom] Found latest host event:', latestHostEvent.id);
+
+      // Extract all guest tags from the latest host event
+      const guestTags = latestHostEvent.tags.filter(t => t[0] === 'guest');
+      const guestPubkeys = guestTags.map(t => t[1]);
+
+      console.log('[MultiplayerRoom] Guest pubkeys in latest event:', guestPubkeys);
+
+      // Check if the guest pubkey is already in the event
+      const isGuestIncluded = guestPubkeys.includes(guestPubkey);
+      console.log('[MultiplayerRoom] Guest', guestPubkey, 'is included in latest event:', isGuestIncluded);
+
+      return isGuestIncluded;
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] Error checking guest in latest host event:', error);
+      // If we can't check, assume guest is not included to be safe
+      return false;
+    }
+  }, [nostr, roomId, user, config.relayUrl]);
+
   // Host: Republish room event when a new guest joins
   const republishHostRoomWithGuest = useCallback(async (guestPubkey: string, currentConnectedPlayers: ConnectedPlayer[]): Promise<void> => {
     console.log('[MultiplayerRoom] republishHostRoomWithGuest called with guest:', guestPubkey, 'and players:', currentConnectedPlayers);
@@ -384,15 +429,15 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       return;
     }
 
-    const isAlreadyIncluded = currentConnectedPlayers.some(
-      (player) => player.pubkey === guestPubkey
-    );
+    // Check if guest is already in the latest published host event (not just local state)
+    const isGuestInPublishedEvent = await isGuestInLatestHostEvent(guestPubkey);
 
-    if (isAlreadyIncluded) {
-      console.log('[MultiplayerRoom] Guest already included, skipping republish:', guestPubkey);
+    if (isGuestInPublishedEvent) {
+      console.log('[MultiplayerRoom] Guest already included in latest published event, skipping republish:', guestPubkey);
       return;
     }
-    console.log('[MultiplayerRoom] Republishing host room event with all guests:', guestPubkey);
+
+    console.log('[MultiplayerRoom] Guest not in published event, republishing with all guests:', guestPubkey);
 
     try {
       // Generate new WebRTC offer for each republish
@@ -408,9 +453,16 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         ['host', user.pubkey],
         ['status', 'waiting_for_player'],
         ['players', roomState.requiredPlayers.toString()],
-        ['guest', guestPubkey],
-        ['signal', webRTCOffer],
       ];
+
+      // Add all current connected guest pubkeys as guest tags
+      currentConnectedPlayers.forEach(player => {
+        if (player.pubkey !== user.pubkey) { // Don't add host as guest
+          tags.push(['guest', player.pubkey]);
+        }
+      });
+
+      tags.push(['signal', webRTCOffer]);
 
       const event = await publishEvent({
         kind: 31997,
@@ -425,7 +477,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     } catch (error) {
       console.error('[MultiplayerRoom] Error republishing host room with guest:', error);
     }
-  }, [user, roomId, gameId, publishEvent, roomState.requiredPlayers, config.relayUrl]);
+  }, [user, roomId, gameId, publishEvent, roomState.requiredPlayers, config.relayUrl, isGuestInLatestHostEvent]);
 
   // Host: Update room event with connected guests
   const updateHostRoomWithGuests = useCallback(async (connectedPlayers: ConnectedPlayer[]): Promise<void> => {
