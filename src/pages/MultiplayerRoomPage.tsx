@@ -202,7 +202,7 @@ export default function MultiplayerRoomPage() {
   useEffect(() => {
     if (isHost) {
       setEmulatorStartCallback(() => {
-        console.log('[MultiplayerRoomPage] WebRTC connected, starting emulator for host');
+        console.log('[MultiplayerRoomPage] 🔥 Emulator start callback triggered (host)');
         setShouldStartEmulator(true);
       });
     }
@@ -390,14 +390,14 @@ export default function MultiplayerRoomPage() {
             ) : (
               /* Show emulator or stream view based on role */
               <div>
-                {isHost && shouldStartEmulator ? (
+                {shouldStartEmulator ? (
                   /* Host: Show actual emulator */
                   <NesPlayer
                     romPath={romPath}
                     title={gameMeta.title}
                     className="w-full"
                   />
-                ) : isHost && !shouldStartEmulator ? (
+                ) : isHost ? (
                   /* Host: WebRTC connected but emulator not started yet */
                   <Card className="border-gray-800 bg-gray-900">
                     <CardContent className="py-12 px-8 text-center">
@@ -405,7 +405,7 @@ export default function MultiplayerRoomPage() {
                         <div className="text-green-400 text-4xl mb-4">✅</div>
                         <h3 className="text-lg font-semibold text-white">WebRTC Connected!</h3>
                         <p className="text-gray-400">
-                          Emulator will start automatically when all players are ready.
+                          Emulator will start automatically for host when connection is fully established.
                         </p>
                       </div>
                     </CardContent>
@@ -431,7 +431,7 @@ export default function MultiplayerRoomPage() {
             )}
 
             {/* Game Info Card below emulator (only show when emulator is running) */}
-            {isHost && shouldStartEmulator && (
+            {shouldStartEmulator && (
               <div className="mt-8">
                 <Card className="border-gray-800 bg-gray-900">
                   <CardHeader>

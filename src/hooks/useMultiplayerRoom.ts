@@ -60,6 +60,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const hostPeerConnectionRef = useRef<RTCPeerConnection | null>(null); // Store host's peer connection
   const hostDataChannelRef = useRef<RTCDataChannel | null>(null); // Store host's data channel
   const guestDataChannelRef = useRef<RTCDataChannel | null>(null); // Store guest's data channel
+  const emulatorStartCallbackRef = useRef<(() => void) | null>(null); // Store emulator start callback
 
   // Generate shareable link
   const generateShareableLink = useCallback((roomId: string): string => {
@@ -134,6 +135,14 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
           console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true (data channel open)', nextState);
           return nextState;
         });
+
+        // Trigger emulator start callback if available (only for host)
+        if (emulatorStartCallbackRef.current) {
+          console.log('[MultiplayerRoom] 🔥 Emulator start callback triggered (host)');
+          emulatorStartCallbackRef.current();
+          // Clear the callback after triggering to ensure it only runs once
+          emulatorStartCallbackRef.current = null;
+        }
       };
 
       dataChannel.onmessage = (event) => {
