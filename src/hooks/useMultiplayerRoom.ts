@@ -757,7 +757,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
         // Set up data channel event handlers
         dataChannel.onopen = () => {
-          console.log('[MultiplayerRoom] Data channel opened with host');
+          console.log('[MultiplayerRoom] Guest data channel opened with host');
+          setRoomState(prev => {
+            const nextState = { ...prev, isWebRTCConnected: true };
+            console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true (dataChannel.onopen)', nextState);
+            return nextState;
+          });
         };
 
         dataChannel.onmessage = (event) => {
@@ -766,7 +771,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         };
 
         dataChannel.onclose = () => {
-          console.log('[MultiplayerRoom] Data channel closed with host');
+          console.log('[MultiplayerRoom] Guest data channel closed with host');
+          setRoomState(prev => {
+            const nextState = { ...prev, isWebRTCConnected: false };
+            console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false (dataChannel.onclose)', nextState);
+            return nextState;
+          });
         };
 
         dataChannel.onerror = (error) => {
