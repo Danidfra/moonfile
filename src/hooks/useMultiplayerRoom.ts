@@ -128,10 +128,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Set up data channel event handlers
       dataChannel.onopen = () => {
         console.log('[MultiplayerRoom] Host data channel opened with guest');
-        setRoomState(prev => ({
-          ...prev,
-          isWebRTCConnected: true
-        }));
+        setRoomState(prev => {
+          const nextState = { ...prev, isWebRTCConnected: true };
+          console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true (data channel open)', nextState);
+          return nextState;
+        });
       };
 
       dataChannel.onmessage = (event) => {
@@ -141,10 +142,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       dataChannel.onclose = () => {
         console.log('[MultiplayerRoom] Host data channel closed with guest');
-        setRoomState(prev => ({
-          ...prev,
-          isWebRTCConnected: false
-        }));
+        setRoomState(prev => {
+          const nextState = { ...prev, isWebRTCConnected: false };
+          console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false (data channel close)', nextState);
+          return nextState;
+        });
       };
 
       dataChannel.onerror = (error) => {
@@ -465,16 +467,18 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
           if (peerConnection.connectionState === 'connected') {
             console.log('[MultiplayerRoom] WebRTC connection established with guest:', guestPubkey);
-            setRoomState(prev => ({
-              ...prev,
-              isWebRTCConnected: true
-            }));
+            setRoomState(prev => {
+              const nextState = { ...prev, isWebRTCConnected: true };
+              console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true', nextState);
+              return nextState;
+            });
           } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
             console.warn('[MultiplayerRoom] WebRTC connection failed with guest:', guestPubkey);
-            setRoomState(prev => ({
-              ...prev,
-              isWebRTCConnected: false
-            }));
+            setRoomState(prev => {
+              const nextState = { ...prev, isWebRTCConnected: false };
+              console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false', nextState);
+              return nextState;
+            });
           }
         };
       }
@@ -501,10 +505,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         if (!dataChannel.onopen) {
           dataChannel.onopen = () => {
             console.log('[MultiplayerRoom] Host data channel opened with guest:', guestPubkey);
-            setRoomState(prev => ({
-              ...prev,
-              isWebRTCConnected: true
-            }));
+            setRoomState(prev => {
+              const nextState = { ...prev, isWebRTCConnected: true };
+              console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true (data channel open - answer processing)', nextState);
+              return nextState;
+            });
           };
         }
 
@@ -1144,6 +1149,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToHostGuestEvents, setupHostTimeout, initializeGuestFlow]);
 
+  // Monitor roomState.isWebRTCConnected changes
+  useEffect(() => {
+    console.log('[MultiplayerRoom] roomState.isWebRTCConnected changed:', roomState.isWebRTCConnected);
+  }, [roomState.isWebRTCConnected]);
+
   // Initialize room on mount
   useEffect(() => {
     console.log('[MultiplayerRoom] Hook initialized for room:', roomId, 'game:', gameId);
@@ -1211,7 +1221,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     isJoining: false,
     connectionState: 'new' as RTCPeerConnectionState,
     iceConnectionState: 'new' as RTCIceConnectionState,
-    isWebRTCConnected: false,
+    isWebRTCConnected: roomState.isWebRTCConnected || false,
     hasConnectionTimedOut: roomState.status === 'waiting_to_retry',
     retryConnection
   };

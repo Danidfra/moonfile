@@ -63,6 +63,11 @@ export default function MultiplayerChatPanel({
     console.log('[ChatPanel] Updated chatMessages:', chatMessages);
   }, [isWebRTCConnected, connectedPlayers, chatMessages]);
 
+  // Add useEffect to track isWebRTCConnected changes specifically
+  useEffect(() => {
+    console.log('[ChatPanel] 🔄 useEffect saw isWebRTCConnected change:', isWebRTCConnected);
+  }, [isWebRTCConnected]);
+
   const handleSendMessage = () => {
     if (message.trim() && isWebRTCConnected) {
       onSendMessage(message.trim());
