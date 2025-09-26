@@ -59,6 +59,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const subscriptionIdRef = useRef<string | null>(null); // Track subscription ID for CLOSE message
   const hostPeerConnectionRef = useRef<RTCPeerConnection | null>(null); // Store host's peer connection
   const hostDataChannelRef = useRef<RTCDataChannel | null>(null); // Store host's data channel
+  const guestDataChannelRef = useRef<RTCDataChannel | null>(null); // Store guest's data channel
 
   // Generate shareable link
   const generateShareableLink = useCallback((roomId: string): string => {
@@ -122,7 +123,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Create a data channel for game communication
       const dataChannel = peerConnection.createDataChannel('game-data');
 
-      // Store data channel in ref for reuse
+      // Store data channel in ref for reuse and chat functionality
       hostDataChannelRef.current = dataChannel;
 
       // Set up data channel event handlers
@@ -137,7 +138,29 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       dataChannel.onmessage = (event) => {
         console.log('[MultiplayerRoom] Host received message from guest:', event.data);
-        // TODO: Handle game data messages from guest
+
+        try {
+          // Parse the incoming message
+          const messageData = JSON.parse(event.data);
+
+          if (messageData.type === 'chat' && messageData.data) {
+            console.log('[Chat][recv] 📥 Host received chat message:', messageData.data);
+
+            // Add to chat messages
+            setRoomState(prev => {
+              const updatedMessages = [...(prev.chatMessages || []), messageData.data];
+              console.log('[Chat][recv] ✅ Added received message to state:', messageData.data);
+              return {
+                ...prev,
+                chatMessages: updatedMessages
+              };
+            });
+          } else {
+            console.log('[MultiplayerRoom] Host received non-chat message:', messageData.type);
+          }
+        } catch (error) {
+          console.error('[MultiplayerRoom] Error parsing message from guest:', error);
+        }
       };
 
       dataChannel.onclose = () => {
@@ -755,6 +778,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         const dataChannel = event.channel;
         console.log('[MultiplayerRoom] Data channel received from host:', dataChannel.label);
 
+        // Store data channel reference for chat functionality
+        guestDataChannelRef.current = dataChannel;
+
         // Set up data channel event handlers
         dataChannel.onopen = () => {
           console.log('[MultiplayerRoom] Guest data channel opened with host');
@@ -767,7 +793,29 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
         dataChannel.onmessage = (event) => {
           console.log('[MultiplayerRoom] Received message from host:', event.data);
-          // TODO: Handle game data messages from host
+
+          try {
+            // Parse the incoming message
+            const messageData = JSON.parse(event.data);
+
+            if (messageData.type === 'chat' && messageData.data) {
+              console.log('[Chat][recv] 📥 Guest received chat message:', messageData.data);
+
+              // Add to chat messages
+              setRoomState(prev => {
+                const updatedMessages = [...(prev.chatMessages || []), messageData.data];
+                console.log('[Chat][recv] ✅ Added received message to state:', messageData.data);
+                return {
+                  ...prev,
+                  chatMessages: updatedMessages
+                };
+              });
+            } else {
+              console.log('[MultiplayerRoom] Guest received non-chat message:', messageData.type);
+            }
+          } catch (error) {
+            console.error('[MultiplayerRoom] Error parsing message from host:', error);
+          }
         };
 
         dataChannel.onclose = () => {
@@ -1201,8 +1249,50 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] sendGameState called (not implemented yet)');
   };
 
-  const sendChatMessage = (_message: string): void => {
-    console.log('[MultiplayerRoom] sendChatMessage called (not implemented yet)');
+  const sendChatMessage = (message: string): void => {
+    if (!user || !message.trim()) {
+      console.log('[Chat][send] ❌ Cannot send message: no user or empty message');
+      return;
+    }
+
+    console.log('[Chat][send] 📤 Sending chat message:', message);
+
+    // Create chat message object
+    const chatMessage: ChatMessage = {
+      id: `msg-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
+      sender: user.pubkey,
+      message: message.trim(),
+      timestamp: Date.now(),
+      senderName: undefined // Will be resolved by UI component using useAuthor
+    };
+
+    // Update local state immediately
+    setRoomState(prev => {
+      const updatedMessages = [...(prev.chatMessages || []), chatMessage];
+      console.log('[Chat][send] ✅ Added message to local state:', chatMessage);
+      return {
+        ...prev,
+        chatMessages: updatedMessages
+      };
+    });
+
+    // Send via WebRTC data channel
+    try {
+      const dataChannel = isHost ? hostDataChannelRef.current : guestDataChannelRef.current;
+
+      if (dataChannel && dataChannel.readyState === 'open') {
+        const messageData = JSON.stringify({
+          type: 'chat',
+          data: chatMessage
+        });
+        dataChannel.send(messageData);
+        console.log('[Chat][send] ✅ Message sent via WebRTC data channel');
+      } else {
+        console.warn('[Chat][send] ❌ Data channel not available or not open:', dataChannel?.readyState);
+      }
+    } catch (error) {
+      console.error('[Chat][send] ❌ Error sending message via WebRTC:', error);
+    }
   };
 
   const setEmulatorStartCallback = (_callback: () => void): void => {
