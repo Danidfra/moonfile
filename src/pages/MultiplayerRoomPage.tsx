@@ -405,7 +405,7 @@ export default function MultiplayerRoomPage() {
                         <div className="text-green-400 text-4xl mb-4">✅</div>
                         <h3 className="text-lg font-semibold text-white">WebRTC Connected!</h3>
                         <p className="text-gray-400">
-                          Emulator will start automatically for host when connection is fully established.
+                          Emulator will start automatically when connection is fully established.
                         </p>
                       </div>
                     </CardContent>

@@ -61,6 +61,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const hostDataChannelRef = useRef<RTCDataChannel | null>(null); // Store host's data channel
   const guestDataChannelRef = useRef<RTCDataChannel | null>(null); // Store guest's data channel
   const emulatorStartCallbackRef = useRef<(() => void) | null>(null); // Store emulator start callback
+  const hasStartedEmulatorRef = useRef(false);
 
   // Generate shareable link
   const generateShareableLink = useCallback((roomId: string): string => {
@@ -502,6 +503,13 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
             setRoomState(prev => {
               const nextState = { ...prev, isWebRTCConnected: true };
               console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true', nextState);
+
+              if (isHost && emulatorStartCallbackRef.current && !hasStartedEmulatorRef.current) {
+                console.log('[MultiplayerRoom] 🎮 Calling emulatorStartCallback...');
+                hasStartedEmulatorRef.current = true;
+                emulatorStartCallbackRef.current();
+              }
+
               return nextState;
             });
           } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
@@ -1304,8 +1312,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   };
 
-  const setEmulatorStartCallback = (_callback: () => void): void => {
-    console.log('[MultiplayerRoom] setEmulatorStartCallback called (not implemented yet)');
+  const setEmulatorStartCallback = (callback: () => void): void => {
+    emulatorStartCallbackRef.current = callback;
+    console.log('[MultiplayerRoom] ✅ Emulator start callback registered');
   };
 
   const joinGame = (): void => {
