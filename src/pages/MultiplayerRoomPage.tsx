@@ -74,6 +74,34 @@ export default function MultiplayerRoomPage() {
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romPath, setRomPath] = useState<string | null>(null);
   const [shouldStartEmulator, setShouldStartEmulator] = useState(false);
+  const [isRomReady, setIsRomReady] = useState(false);
+
+  // Debug log for shouldStartEmulator changes
+  useEffect(() => {
+    console.log('[MultiplayerRoomPage] 🎯 shouldStartEmulator changed to:', shouldStartEmulator, 'at:', new Date().toISOString());
+  }, [shouldStartEmulator]);
+
+  // Debug log for isWebRTCConnected changes
+  useEffect(() => {
+    console.log('[MultiplayerRoomPage] 🔌 isWebRTCConnected changed to:', isWebRTCConnected, 'at:', new Date().toISOString());
+  }, [isWebRTCConnected]);
+
+  // Debug log for isRomReady changes
+  useEffect(() => {
+    console.log('[MultiplayerRoomPage] 📀 isRomReady changed to:', isRomReady, 'at:', new Date().toISOString());
+  }, [isRomReady]);
+
+  // Auto-start emulator when both ROM is ready and WebRTC is connected (for host)
+  useEffect(() => {
+    if (isHost && isRomReady && isWebRTCConnected && !shouldStartEmulator) {
+      console.log('[MultiplayerRoomPage] 🚀 Auto-starting emulator (all conditions met) at:', new Date().toISOString());
+      // Use setTimeout with 0 delay to ensure this runs in the next event loop
+      setTimeout(() => {
+        console.log('[MultiplayerRoomPage] ⚡ Executing auto-start emulator');
+        setShouldStartEmulator(true);
+      }, 0);
+    }
+  }, [isHost, isRomReady, isWebRTCConnected, shouldStartEmulator]);
   const gameAreaRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -179,6 +207,7 @@ export default function MultiplayerRoomPage() {
 
         setRomPath(romBinaryString);
         setStatus('ready');
+        setIsRomReady(true);
         console.log('[MultiplayerRoomPage] Game ready to play');
 
       } catch (err) {
@@ -201,12 +230,34 @@ export default function MultiplayerRoomPage() {
    */
   useEffect(() => {
     if (isHost) {
+      console.log('[MultiplayerRoomPage] 📋 Setting up emulator start callback for host at:', new Date().toISOString());
       setEmulatorStartCallback(() => {
-        console.log('[MultiplayerRoomPage] 🔥 Emulator start callback triggered (host)');
-        setShouldStartEmulator(true);
+        console.log('[MultiplayerRoomPage] 🔥 Emulator start callback triggered (host) at:', new Date().toISOString());
+
+        // Only start emulator if ROM is ready
+        if (isRomReady) {
+          console.log('[MultiplayerRoomPage] ✅ ROM is ready, starting emulator immediately');
+          setShouldStartEmulator(true);
+
+          // Force immediate render by triggering a re-render
+          setTimeout(() => {
+            console.log('[MultiplayerRoomPage] ⚡ Forced re-render after emulator start callback');
+            setShouldStartEmulator(prev => prev); // Force re-render
+          }, 0);
+        } else {
+          console.log('[MultiplayerRoomPage] ⏳ ROM not ready yet, will start when ready');
+          // Set up a watcher to start emulator when ROM is ready
+          const checkRomReady = setInterval(() => {
+            if (isRomReady) {
+              console.log('[MultiplayerRoomPage] ✅ ROM now ready, starting emulator');
+              setShouldStartEmulator(true);
+              clearInterval(checkRomReady);
+            }
+          }, 50); // Check every 50ms
+        }
       });
     }
-  }, [isHost, setEmulatorStartCallback]);
+  }, [isHost, setEmulatorStartCallback, isRomReady]);
 
   /**
    * Auto-scroll to game area when all players are connected
@@ -392,11 +443,40 @@ export default function MultiplayerRoomPage() {
               <div>
                 {shouldStartEmulator ? (
                   /* Host: Show actual emulator */
-                  <NesPlayer
-                    romPath={romPath}
-                    title={gameMeta.title}
-                    className="w-full"
-                  />
+                  (() => {
+                    console.log('[MultiplayerRoomPage] 🎮 Rendering NesPlayer component at:', new Date().toISOString());
+                    return (
+                      <NesPlayer
+                        romPath={romPath}
+                        title={gameMeta.title}
+                        className="w-full"
+                      />
+                    );
+                  })()
+                ) : isHost && isWebRTCConnected ? (
+                  /* Host: WebRTC connected but emulator not started yet - show ultra-minimal delay */
+                  (() => {
+                    console.log('[MultiplayerRoomPage] ⚡ WebRTC connected, starting emulator immediately at:', new Date().toISOString());
+
+                    // Start emulator immediately if ROM is ready
+                    if (isRomReady && !shouldStartEmulator) {
+                      console.log('[MultiplayerRoomPage] 🚀 Auto-starting emulator (ROM ready, WebRTC connected)');
+                      setTimeout(() => setShouldStartEmulator(true), 0);
+                    }
+
+                    return (
+                      <Card className="border-gray-800 bg-gray-900">
+                        <CardContent className="py-2 px-8 text-center">
+                          <div className="max-w-sm mx-auto space-y-1">
+                            <div className="text-green-400 text-xl mb-1">✅</div>
+                            <p className="text-gray-400 text-sm">
+                              Starting emulator...
+                            </p>
+                          </div>
+                        </CardContent>
+                      </Card>
+                    );
+                  })()
                 ) : isHost ? (
                   /* Host: WebRTC connected but emulator not started yet */
                   <Card className="border-gray-800 bg-gray-900">

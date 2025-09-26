@@ -27,6 +27,15 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
 
   const emulatorContainerRef = React.useRef<HTMLDivElement>(null);
 
+  // Debug log for component mount
+  useEffect(() => {
+    console.log('[NesPlayer] 🎮 Component mounted at:', new Date().toISOString(), 'with props:', {
+      title,
+      romPathLength: romPath?.length || 0,
+      className
+    });
+  }, []);
+
   // Validate NES ROM header
   const validateNesHeader = (data: string): boolean => {
     console.log('[NesPlayer] Validating NES header...');

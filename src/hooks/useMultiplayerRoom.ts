@@ -62,6 +62,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const guestDataChannelRef = useRef<RTCDataChannel | null>(null); // Store guest's data channel
   const emulatorStartCallbackRef = useRef<(() => void) | null>(null); // Store emulator start callback
   const hasStartedEmulatorRef = useRef(false);
+  const hasPublishedAnswerRef = useRef(false); // Track whether guest has already published WebRTC answer
 
   // Generate shareable link
   const generateShareableLink = useCallback((roomId: string): string => {
@@ -130,20 +131,25 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       // Set up data channel event handlers
       dataChannel.onopen = () => {
-        console.log('[MultiplayerRoom] Host data channel opened with guest');
+        console.log('[MultiplayerRoom] 📡 Host data channel opened with guest at:', new Date().toISOString());
+
+        // Trigger emulator callback immediately BEFORE state update for maximum speed
+        if (isHost && emulatorStartCallbackRef.current && !hasStartedEmulatorRef.current) {
+          console.log('[MultiplayerRoom] 🎮 Emulator start callback triggered IMMEDIATELY (host) from dataChannel.onopen at:', new Date().toISOString());
+          hasStartedEmulatorRef.current = true;
+          const callback = emulatorStartCallbackRef.current;
+          emulatorStartCallbackRef.current = null;
+
+          // Execute callback synchronously for immediate response
+          callback();
+        }
+
+        // Then update state
         setRoomState(prev => {
           const nextState = { ...prev, isWebRTCConnected: true };
-          console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true (data channel open)', nextState);
+          console.log('[MultiplayerRoom] 🔥 set isWebRTCConnected: true (data channel open) at:', new Date().toISOString(), nextState);
           return nextState;
         });
-
-        // Trigger emulator start callback if available (only for host)
-        if (emulatorStartCallbackRef.current) {
-          console.log('[MultiplayerRoom] 🔥 Emulator start callback triggered (host)');
-          emulatorStartCallbackRef.current();
-          // Clear the callback after triggering to ensure it only runs once
-          emulatorStartCallbackRef.current = null;
-        }
       };
 
       dataChannel.onmessage = (event) => {
@@ -496,27 +502,32 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Set up connection state monitoring (if not already set)
       if (!peerConnection.onconnectionstatechange) {
         peerConnection.onconnectionstatechange = () => {
-          console.log('[MultiplayerRoom] WebRTC connection state changed:', peerConnection.connectionState);
+          console.log('[MultiplayerRoom] 🔌 WebRTC connection state changed:', peerConnection.connectionState, 'at:', new Date().toISOString());
 
           if (peerConnection.connectionState === 'connected') {
-            console.log('[MultiplayerRoom] WebRTC connection established with guest:', guestPubkey);
+            console.log('[MultiplayerRoom] ✅ WebRTC connection established with guest:', guestPubkey);
+
+            // Only trigger if data channel hasn't already opened and callback exists
+            if (!hasStartedEmulatorRef.current && isHost && emulatorStartCallbackRef.current) {
+              console.log('[MultiplayerRoom] 🎮 Calling emulatorStartCallback IMMEDIATELY from connectionState handler...');
+              hasStartedEmulatorRef.current = true;
+              const callback = emulatorStartCallbackRef.current;
+              emulatorStartCallbackRef.current = null;
+
+              // Execute callback synchronously for immediate response
+              callback();
+            }
+
             setRoomState(prev => {
               const nextState = { ...prev, isWebRTCConnected: true };
-              console.log('[MultiplayerRoom] ✅ set isWebRTCConnected: true', nextState);
-
-              if (isHost && emulatorStartCallbackRef.current && !hasStartedEmulatorRef.current) {
-                console.log('[MultiplayerRoom] 🎮 Calling emulatorStartCallback...');
-                hasStartedEmulatorRef.current = true;
-                emulatorStartCallbackRef.current();
-              }
-
+              console.log('[MultiplayerRoom] 🔥 set isWebRTCConnected: true (connectionState === connected) at:', new Date().toISOString(), nextState);
               return nextState;
             });
           } else if (peerConnection.connectionState === 'failed' || peerConnection.connectionState === 'disconnected') {
-            console.warn('[MultiplayerRoom] WebRTC connection failed with guest:', guestPubkey);
+            console.warn('[MultiplayerRoom] ❌ WebRTC connection failed with guest:', guestPubkey);
             setRoomState(prev => {
               const nextState = { ...prev, isWebRTCConnected: false };
-              console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false', nextState);
+              console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false (connectionState failed/disconnected) at:', new Date().toISOString(), nextState);
               return nextState;
             });
           }
@@ -643,8 +654,8 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     console.log('[MultiplayerRoom] Guest not in published event, republishing with all guests:', guestPubkey);
 
     try {
-      // Generate new WebRTC offer for each republish
-      const webRTCOffer = await generateWebRTCOffer();
+      const offerSdp = hostPeerConnectionRef.current?.localDescription;
+      const encodedOffer = offerSdp ? btoa(JSON.stringify(offerSdp)) : null;
 
       // Publish only to currently connected relay
       const connectedRelays = [config.relayUrl];
@@ -665,7 +676,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         }
       });
 
-      tags.push(['signal', webRTCOffer]);
+      if (encodedOffer) {
+        tags.push(['signal', encodedOffer]);
+      } else {
+        console.error('[MultiplayerRoom] ❌ Failed to encode offer: offer SDP is missing.');
+        return; // ou throw, dependendo do seu fluxo
+      }
 
       const event = await publishEvent({
         kind: 31997,
@@ -760,6 +776,12 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const generateAndPublishWebRTCAnswer = useCallback(async (hostEvent: NostrEvent): Promise<void> => {
     if (!user || !roomId || !gameId) {
       console.error('[MultiplayerRoom] Missing required parameters for WebRTC answer');
+      return;
+    }
+
+    // Check if answer has already been published in this session
+    if (hasPublishedAnswerRef.current) {
+      console.log('[MultiplayerRoom] ⚠️ Guest already published answer. Skipping duplicate publication to prevent InvalidStateError...');
       return;
     }
 
@@ -911,6 +933,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       console.log('[MultiplayerRoom] WebRTC answer published to relay:', answerEvent.id);
       setCurrentRoomEventId(answerEvent.id);
+
+      // Mark that answer has been published to prevent duplicates
+      hasPublishedAnswerRef.current = true;
+      console.log('[MultiplayerRoom] ✅ Answer published successfully, marked hasPublishedAnswerRef = true');
 
       // Keep the peer connection reference for future use
       // TODO: Store peer connection reference for game communication
@@ -1250,6 +1276,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       roomInitializedRef.current = false;
       isListeningForGuestsRef.current = false;
       guestEventsRef.current = [];
+
+      // Reset answer publication flag for fresh sessions
+      hasPublishedAnswerRef.current = false;
     };
   }, [initializeRoom]);
 
@@ -1313,6 +1342,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   };
 
   const setEmulatorStartCallback = (callback: () => void): void => {
+    console.log('[MultiplayerRoom] 🔧 setEmulatorStartCallback called at:', new Date().toISOString());
     emulatorStartCallbackRef.current = callback;
     console.log('[MultiplayerRoom] ✅ Emulator start callback registered');
   };
