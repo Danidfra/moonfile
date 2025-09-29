@@ -91,6 +91,26 @@ export default function MultiplayerRoomPage() {
     console.log('[MultiplayerRoomPage] 📀 isRomReady changed to:', isRomReady, 'at:', new Date().toISOString());
   }, [isRomReady]);
 
+  // Debug log for startEmulatorRequested changes
+  useEffect(() => {
+    console.log('[MultiplayerRoomPage] 🚀 startEmulatorRequested changed to:', startEmulatorRequested, 'at:', new Date().toISOString());
+  }, [startEmulatorRequested]);
+
+  // CRITICAL: Log when NesPlayer render conditions are met
+  useEffect(() => {
+    const canRenderNesPlayer = startEmulatorRequested && isRomReady;
+    console.log('[MultiplayerRoomPage] 🔍 NesPlayer render check:', {
+      startEmulatorRequested,
+      isRomReady,
+      canRenderNesPlayer,
+      timestamp: new Date().toISOString()
+    });
+
+    if (canRenderNesPlayer) {
+      console.log('[MultiplayerRoomPage] ✅ NESPLAYER SHOULD RENDER NOW at:', new Date().toISOString());
+    }
+  }, [startEmulatorRequested, isRomReady]);
+
 
   const gameAreaRef = useRef<HTMLDivElement>(null);
 
@@ -439,7 +459,20 @@ export default function MultiplayerRoomPage() {
                 {startEmulatorRequested && isRomReady ? (
                   /* Host: Show actual emulator */
                   (() => {
-                    console.log('[MultiplayerRoomPage] 🎮 Rendering NesPlayer component at:', new Date().toISOString());
+                    const renderTime = new Date().toISOString();
+                    console.log('[MultiplayerRoomPage] 🎮 ABOUT TO RENDER NesPlayer component at:', renderTime);
+                    console.log('[MultiplayerRoomPage] 🎮 Render conditions:', {
+                      startEmulatorRequested,
+                      isRomReady,
+                      romPath: romPath ? 'PRESENT' : 'MISSING',
+                      gameTitle: gameMeta?.title || 'MISSING',
+                      timestamp: renderTime
+                    });
+
+                    // Add performance measurement
+                    const renderStart = performance.now();
+                    console.log('[MultiplayerRoomPage] ⏱️ Performance mark: NesPlayer render started at', renderStart);
+
                     return (
                       <NesPlayer
                         romPath={romPath}

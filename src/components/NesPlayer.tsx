@@ -76,15 +76,17 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   // Process ROM data on component mount
   useEffect(() => {
     const processRom = () => {
-      try {
-        console.log('[NesPlayer] Processing ROM data...');
-        setError(null);
+      const startTime = performance.now();
+      console.log('[NesPlayer] ⏱️ Starting ROM processing at:', new Date().toISOString());
+      setError(null);
 
+      try {
         // Validate that we have ROM data
         if (!romPath || typeof romPath !== 'string') {
           throw new Error('No ROM data provided');
         }
 
+        const validationStartTime = performance.now();
         console.log(`[NesPlayer] ROM data length: ${romPath.length} characters`);
 
         // Validate ROM header
@@ -92,16 +94,24 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
           throw new Error('Not a valid NES ROM file');
         }
 
-        console.log('[NesPlayer] ROM validation passed, ready to play');
+        const validationEndTime = performance.now();
+        console.log('[NesPlayer] ⏱️ ROM validation completed in:', validationEndTime - validationStartTime, 'ms');
+
+        console.log('[NesPlayer] ROM validation passed, setting isReady = true');
         setIsReady(true);
+
+        const totalTime = performance.now() - startTime;
+        console.log('[NesPlayer] ⏱️ Total ROM processing time:', totalTime, 'ms');
 
       } catch (err) {
         const errorMessage = err instanceof Error ? err.message : 'Failed to process ROM data';
-        console.error('[NesPlayer] ROM processing error:', errorMessage);
+        const errorTime = performance.now();
+        console.error('[NesPlayer] ❌ ROM processing error after', errorTime - startTime, 'ms:', errorMessage);
         setError(errorMessage);
       }
     };
 
+    console.log('[NesPlayer] 🚀 Component mounted, starting ROM processing...');
     processRom();
   }, [romPath]);
 
@@ -203,17 +213,28 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   }
 
   if (!isReady) {
+    const loadingStartTime = performance.now();
+    console.log('[NesPlayer] ⏳ Showing loading state at:', new Date().toISOString());
+
     return (
       <div className={`flex items-center justify-center ${className}`}>
         <Card className="w-full max-w-4xl">
           <CardContent className="p-8 text-center">
             <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
             <p className="text-muted-foreground">Processing {title}...</p>
+            <p className="text-xs text-muted-foreground mt-2">
+              Loading since: {new Date().toISOString()}
+            </p>
           </CardContent>
         </Card>
       </div>
     );
+  } else {
+    console.log('[NesPlayer] ✅ isReady = true, proceeding to render Emulator at:', new Date().toISOString());
   }
+
+  const renderStartTime = performance.now();
+  console.log('[NesPlayer] 🎨 Starting main render at:', new Date().toISOString());
 
   return (
     <div

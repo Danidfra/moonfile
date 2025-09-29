@@ -77,8 +77,13 @@ class Emulator extends Component<EmulatorProps> {
   }
 
   componentDidMount() {
+    const mountStartTime = performance.now();
+    console.log('[Emulator] ⏱️ Component mounting started at:', new Date().toISOString());
+
     this.fitInParent();
 
+    const speakersStartTime = performance.now();
+    console.log('[Emulator] 🎵 Creating Speakers...');
     this.speakers = new Speakers({
       onBufferUnderrun: (actualSize: number, desiredSize: number) => {
         if (this.props.paused) return;
@@ -97,6 +102,8 @@ class Emulator extends Component<EmulatorProps> {
       },
     });
 
+    const nesStartTime = performance.now();
+    console.log('[Emulator] 🕹️ Creating NES instance...');
     this.nes = new NES({
       onFrame: this.screen ? this.screen.setBuffer : () => {},
       onStatusUpdate: console.log,
@@ -105,6 +112,7 @@ class Emulator extends Component<EmulatorProps> {
     });
 
     (window as unknown as Record<string, unknown>)["nes"] = this.nes;
+    console.log('[Emulator] ⏱️ NES instance created in:', performance.now() - nesStartTime, 'ms');
 
     this.frameTimer = new FrameTimer({
       onGenerateFrame: this.nes.frame,
@@ -128,8 +136,21 @@ class Emulator extends Component<EmulatorProps> {
     document.addEventListener("keyup", this.keyboardController.handleKeyUp);
     document.addEventListener("keypress", this.keyboardController.handleKeyPress);
 
+    const romLoadStartTime = performance.now();
+    console.log('[Emulator] 📀 Loading ROM data...');
+    console.log('[Emulator] 📊 ROM data size:', this.props.romData.length, 'characters');
+
     this.nes.loadROM(this.props.romData);
+
+    const romLoadEndTime = performance.now();
+    console.log('[Emulator] ⏱️ ROM loading completed in:', romLoadEndTime - romLoadStartTime, 'ms');
+
+    const startStartTime = performance.now();
+    console.log('[Emulator] ▶️ Starting emulator...');
     this.start();
+
+    const totalMountTime = performance.now() - mountStartTime;
+    console.log('[Emulator] ⏱️ Total componentDidMount time:', totalMountTime, 'ms');
   }
 
   componentWillUnmount() {
