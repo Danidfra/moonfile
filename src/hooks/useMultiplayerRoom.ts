@@ -1179,21 +1179,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [fetchHostRoomEvent, prepareGuestFlow, subscribeToGuestRoomEvents]);
 
-  // Set up host timeout (1 minute)
-  const setupHostTimeout = useCallback((): void => {
-    console.log('[MultiplayerRoom] Setting up host timeout (1 minute)');
-
-    const timeout = setTimeout(() => {
-      console.log('[MultiplayerRoom] Host timeout reached - no guest connected within 1 minute');
-      setRoomState(prev => ({
-        ...prev,
-        status: 'waiting_to_retry'
-      }));
-    }, 60000); // 1 minute
-
-    hostTimeoutRef.current = timeout;
-  }, []);
-
   // Initialize room (host flow)
   const initializeRoom = useCallback(async (): Promise<void> => {
     if (!user || !roomId || !gameId || roomInitializedRef.current) return;
@@ -1211,7 +1196,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         guestEventsRef.current = []; // Reset guest events
         await publishHostRoomEvent();
         subscribeToHostGuestEvents();
-        setupHostTimeout();
       } else {
         console.log('[MultiplayerRoom] Starting guest flow');
         await initializeGuestFlow();
@@ -1225,12 +1209,27 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         error: error instanceof Error ? error.message : 'Failed to initialize room'
       }));
     }
-  }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToHostGuestEvents, setupHostTimeout, initializeGuestFlow]);
+  }, [user, roomId, gameId, checkIfHost, publishHostRoomEvent, subscribeToHostGuestEvents, initializeGuestFlow]);
 
   // Monitor roomState.isWebRTCConnected changes
   useEffect(() => {
     console.log('[MultiplayerRoom] roomState.isWebRTCConnected changed:', roomState.isWebRTCConnected);
   }, [roomState.isWebRTCConnected]);
+
+  // Trigger emulator immediately when guest connects and WebRTC is established
+  useEffect(() => {
+    if (
+      isHost &&
+      roomState.connectedPlayers.length >= 2 &&
+      hostPeerConnectionRef.current?.connectionState === 'connected'
+    ) {
+      console.log('[MultiplayerRoom] ✅ Peer connected and guest present, starting emulator');
+       setRoomState(prev => ({
+        ...prev,
+        status: 'playing'
+      }));
+    }
+  }, [isHost, roomState.connectedPlayers.length, hostPeerConnectionRef.current?.connectionState]);
 
   // Initialize room on mount
   useEffect(() => {
@@ -1243,10 +1242,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
       if (subscriptionRef.current) {
         subscriptionRef.current.close();
-      }
-
-      if (hostTimeoutRef.current) {
-        clearTimeout(hostTimeoutRef.current);
       }
 
       // Reset initialization flag and listening state when dependencies change
