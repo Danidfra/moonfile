@@ -118,38 +118,42 @@ export default function MultiplayerRoomPage() {
   /**
    * Handle incoming WebRTC stream for guests
    */
-  useEffect(() => {
-    if (!isHost && peerConnectionRef.current && remoteVideoRef.current) {
-      console.log('[Guest] 🔧 Setting up ontrack handler for remote stream');
+useEffect(() => {
+  const peer = peerConnectionRef.current;
+  const videoEl = remoteVideoRef.current;
 
-      peerConnectionRef.current.ontrack = (event) => {
-        console.log('[Guest] 📥 ontrack fired');
+  if (!isHost && peer && videoEl) {
+    console.log('[Guest] 🔧 Setting up ontrack handler for remote stream');
 
-        if (event.streams && event.streams.length > 0) {
-          console.log('[Guest] 🎬 Attaching remote stream');
+    // ✅ Define ontrack handler BEFORE any setRemoteDescription is called
+    peer.ontrack = (event) => {
+      console.log('[Guest] 📥 ontrack fired:', event);
 
-          if (remoteVideoRef.current) {
-            remoteVideoRef.current.srcObject = event.streams[0];
-            console.log('[Guest] ✅ Remote stream attached to video element');
-          } else {
-            console.error('[Guest] ❌ remoteVideoRef.current is null');
-          }
-        } else {
-          console.warn('[Guest] ⚠️ No streams found in ontrack event');
-        }
-      };
-
-      console.log('[Guest] 🔌 ontrack handler configured');
-    }
-
-    return () => {
-      // Cleanup ontrack handler when component unmounts
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.ontrack = null;
-        console.log('[Guest] 🧹 ontrack handler cleaned up');
+      const remoteStream = event.streams?.[0];
+      if (remoteStream) {
+        videoEl.srcObject = remoteStream;
+        console.log('[Guest] ✅ Remote stream attached to video element');
+      } else {
+        console.warn('[Guest] ⚠️ No streams found in ontrack event');
       }
     };
-  }, [isHost, peerConnectionRef]);
+
+    // Optional: log when stream is attached
+    const observer = setInterval(() => {
+      if (videoEl.srcObject) {
+        console.log('[Guest] 📺 videoRef.srcObject is now set:', videoEl.srcObject);
+        clearInterval(observer);
+      }
+    }, 500);
+  }
+
+  return () => {
+    if (peer) {
+      peer.ontrack = null;
+      console.log('[Guest] 🧹 ontrack handler cleaned up');
+    }
+  };
+}, [isHost, peerConnectionRef, remoteVideoRef]);
 
   const gameAreaRef = useRef<HTMLDivElement>(null);
 

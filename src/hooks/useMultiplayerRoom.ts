@@ -180,6 +180,33 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         console.error('[MultiplayerRoom] Host data channel error:', error);
       };
 
+      // Wait for the video track from the emulator to be added
+      console.log('[MultiplayerRoom] ⏳ Waiting for video track to be added before creating offer...');
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          console.warn('[MultiplayerRoom] ⏰ Timeout waiting for video track, creating offer without video');
+          resolve();
+        }, 5000); // 5 second timeout
+
+        const checkForVideoTrack = () => {
+          const senders = peerConnection.getSenders();
+          const videoSenders = senders.filter(sender => sender.track && sender.track.kind === 'video');
+
+          if (videoSenders.length > 0) {
+            console.log('[MultiplayerRoom] ✅ Video track detected, proceeding to create offer');
+            clearTimeout(timeout);
+            resolve();
+          } else {
+            // Check again in 100ms
+            setTimeout(checkForVideoTrack, 100);
+          }
+        };
+
+        // Start checking for video track
+        checkForVideoTrack();
+      });
+
       // Create offer
       const offer = await peerConnection.createOffer({
         offerToReceiveAudio: false,
@@ -851,8 +878,11 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Set the remote description with the host's offer
       await peerConnection.setRemoteDescription(offer);
 
-      // Create an answer
-      const answer = await peerConnection.createAnswer();
+      // Create an answer with video receive capability
+      const answer = await peerConnection.createAnswer({
+        offerToReceiveAudio: false,
+        offerToReceiveVideo: true
+      });
 
       // Set the local description
       await peerConnection.setLocalDescription(answer);
@@ -1231,6 +1261,44 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [isHost, roomState.connectedPlayers.length, hostPeerConnectionRef.current?.connectionState]);
 
+  // Cleanup function for WebRTC resources
+  const cleanupWebRTC = useCallback(() => {
+    console.log('[MultiplayerRoom] 🧹 Cleaning up WebRTC resources...');
+
+    // Clean up peer connection
+    if (hostPeerConnectionRef.current) {
+      console.log('[MultiplayerRoom] 🗑️ Removing video senders from peer connection...');
+      const senders = hostPeerConnectionRef.current.getSenders();
+      senders
+        .filter(sender => sender.track && sender.track.kind === 'video')
+        .forEach(sender => {
+          console.log('[MultiplayerRoom] 🗑️ Removing video sender:', sender.track?.id);
+          hostPeerConnectionRef.current?.removeTrack(sender);
+        });
+
+      // Close data channel
+      if (hostDataChannelRef.current) {
+        console.log('[MultiplayerRoom] 📡 Closing host data channel...');
+        hostDataChannelRef.current.close();
+        hostDataChannelRef.current = null;
+      }
+
+      // Close peer connection
+      console.log('[MultiplayerRoom] 🔌 Closing peer connection...');
+      hostPeerConnectionRef.current.close();
+      hostPeerConnectionRef.current = null;
+    }
+
+    // Clean up guest data channel
+    if (guestDataChannelRef.current) {
+      console.log('[MultiplayerRoom] 📡 Closing guest data channel...');
+      guestDataChannelRef.current.close();
+      guestDataChannelRef.current = null;
+    }
+
+    console.log('[MultiplayerRoom] ✅ WebRTC cleanup completed');
+  }, []);
+
   // Initialize room on mount
   useEffect(() => {
     console.log('[MultiplayerRoom] Hook initialized for room:', roomId, 'game:', gameId);
@@ -1244,6 +1312,9 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
         subscriptionRef.current.close();
       }
 
+      // Clean up WebRTC resources
+      cleanupWebRTC();
+
       // Reset initialization flag and listening state when dependencies change
       roomInitializedRef.current = false;
       isListeningForGuestsRef.current = false;
@@ -1252,7 +1323,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       // Reset answer publication flag for fresh sessions
       hasPublishedAnswerRef.current = false;
     };
-  }, [initializeRoom]);
+  }, [initializeRoom, cleanupWebRTC]);
 
   // Dummy methods to keep UI functional (not implemented in this phase)
   const startGame = (): void => {
