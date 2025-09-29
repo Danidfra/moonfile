@@ -74,6 +74,7 @@ export default function MultiplayerRoomPage() {
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romPath, setRomPath] = useState<string | null>(null);
   const [shouldStartEmulator, setShouldStartEmulator] = useState(false);
+  const [startEmulatorRequested, setStartEmulatorRequested] = useState(false);
   const [isRomReady, setIsRomReady] = useState(false);
 
   // Debug log for shouldStartEmulator changes
@@ -91,17 +92,7 @@ export default function MultiplayerRoomPage() {
     console.log('[MultiplayerRoomPage] 📀 isRomReady changed to:', isRomReady, 'at:', new Date().toISOString());
   }, [isRomReady]);
 
-  // Auto-start emulator when both ROM is ready and WebRTC is connected (for host)
-  useEffect(() => {
-    if (isHost && isRomReady && isWebRTCConnected && !shouldStartEmulator) {
-      console.log('[MultiplayerRoomPage] 🚀 Auto-starting emulator (all conditions met) at:', new Date().toISOString());
-      // Use setTimeout with 0 delay to ensure this runs in the next event loop
-      setTimeout(() => {
-        console.log('[MultiplayerRoomPage] ⚡ Executing auto-start emulator');
-        setShouldStartEmulator(true);
-      }, 0);
-    }
-  }, [isHost, isRomReady, isWebRTCConnected, shouldStartEmulator]);
+
   const gameAreaRef = useRef<HTMLDivElement>(null);
 
   /**
@@ -234,9 +225,9 @@ export default function MultiplayerRoomPage() {
       setEmulatorStartCallback(() => {
         console.log('[MultiplayerRoomPage] 🔥 Emulator start callback triggered (host) at:', new Date().toISOString());
 
-        // Only start emulator if ROM is ready
-        if (isRomReady) {
-          console.log('[MultiplayerRoomPage] ✅ ROM is ready, starting emulator immediately');
+        // Only start emulator if ROM is ready and play button was clicked
+        if (isRomReady && startEmulatorRequested) {
+          console.log('[MultiplayerRoomPage] ✅ ROM is ready and play button clicked, starting emulator immediately');
           setShouldStartEmulator(true);
 
           // Force immediate render by triggering a re-render
@@ -244,12 +235,14 @@ export default function MultiplayerRoomPage() {
             console.log('[MultiplayerRoomPage] ⚡ Forced re-render after emulator start callback');
             setShouldStartEmulator(prev => prev); // Force re-render
           }, 0);
+        } else if (!startEmulatorRequested) {
+          console.log('[MultiplayerRoomPage] ⏳ Play button not clicked yet, waiting for user input');
         } else {
           console.log('[MultiplayerRoomPage] ⏳ ROM not ready yet, will start when ready');
           // Set up a watcher to start emulator when ROM is ready
           const checkRomReady = setInterval(() => {
-            if (isRomReady) {
-              console.log('[MultiplayerRoomPage] ✅ ROM now ready, starting emulator');
+            if (isRomReady && startEmulatorRequested) {
+              console.log('[MultiplayerRoomPage] ✅ ROM now ready and play button clicked, starting emulator');
               setShouldStartEmulator(true);
               clearInterval(checkRomReady);
             }
@@ -257,7 +250,7 @@ export default function MultiplayerRoomPage() {
         }
       });
     }
-  }, [isHost, setEmulatorStartCallback, isRomReady]);
+  }, [isHost, setEmulatorStartCallback, isRomReady, startEmulatorRequested]);
 
   /**
    * Auto-scroll to game area when all players are connected
@@ -374,7 +367,7 @@ export default function MultiplayerRoomPage() {
                 Back to Games
               </Button>
 
-              <div className="flex items-center gap-3">
+              <div className="flex flex-col gap-3">
                 {gameMeta.assets?.cover && (
                   <img
                     src={gameMeta.assets.cover}
@@ -392,6 +385,16 @@ export default function MultiplayerRoomPage() {
                     <span className="text-xs">Room: {roomId}</span>
                   </div>
                 </div>
+
+                {/* Play button - only show for host when WebRTC connected and emulator not started */}
+                {isHost && isWebRTCConnected && !startEmulatorRequested && (
+                  <button
+                    onClick={() => setStartEmulatorRequested(true)}
+                    className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded mt-4"
+                  >
+                    ▶️ Play
+                  </button>
+                )}
               </div>
             </div>
 
@@ -441,7 +444,7 @@ export default function MultiplayerRoomPage() {
             ) : (
               /* Show emulator or stream view based on role */
               <div>
-                {shouldStartEmulator ? (
+                {startEmulatorRequested && isRomReady ? (
                   /* Host: Show actual emulator */
                   (() => {
                     console.log('[MultiplayerRoomPage] 🎮 Rendering NesPlayer component at:', new Date().toISOString());
@@ -454,29 +457,18 @@ export default function MultiplayerRoomPage() {
                     );
                   })()
                 ) : isHost && isWebRTCConnected ? (
-                  /* Host: WebRTC connected but emulator not started yet - show ultra-minimal delay */
-                  (() => {
-                    console.log('[MultiplayerRoomPage] ⚡ WebRTC connected, starting emulator immediately at:', new Date().toISOString());
-
-                    // Start emulator immediately if ROM is ready
-                    if (isRomReady && !shouldStartEmulator) {
-                      console.log('[MultiplayerRoomPage] 🚀 Auto-starting emulator (ROM ready, WebRTC connected)');
-                      setTimeout(() => setShouldStartEmulator(true), 0);
-                    }
-
-                    return (
-                      <Card className="border-gray-800 bg-gray-900">
-                        <CardContent className="py-2 px-8 text-center">
-                          <div className="max-w-sm mx-auto space-y-1">
-                            <div className="text-green-400 text-xl mb-1">✅</div>
-                            <p className="text-gray-400 text-sm">
-                              Starting emulator...
-                            </p>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    );
-                  })()
+                  /* Host: WebRTC connected but emulator not started yet */
+                  <Card className="border-gray-800 bg-gray-900">
+                    <CardContent className="py-12 px-8 text-center">
+                      <div className="max-w-sm mx-auto space-y-4">
+                        <div className="text-green-400 text-4xl mb-4">✅</div>
+                        <h3 className="text-lg font-semibold text-white">WebRTC Connected!</h3>
+                        <p className="text-gray-400">
+                          Click the Play button to start the emulator.
+                        </p>
+                      </div>
+                    </CardContent>
+                  </Card>
                 ) : isHost ? (
                   /* Host: WebRTC connected but emulator not started yet */
                   <Card className="border-gray-800 bg-gray-900">
@@ -511,7 +503,7 @@ export default function MultiplayerRoomPage() {
             )}
 
             {/* Game Info Card below emulator (only show when emulator is running) */}
-            {shouldStartEmulator && (
+            {startEmulatorRequested && isRomReady && (
               <div className="mt-8">
                 <Card className="border-gray-800 bg-gray-900">
                   <CardHeader>

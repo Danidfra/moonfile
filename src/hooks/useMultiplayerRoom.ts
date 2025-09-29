@@ -61,7 +61,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const hostDataChannelRef = useRef<RTCDataChannel | null>(null); // Store host's data channel
   const guestDataChannelRef = useRef<RTCDataChannel | null>(null); // Store guest's data channel
   const emulatorStartCallbackRef = useRef<(() => void) | null>(null); // Store emulator start callback
-  const hasStartedEmulatorRef = useRef(false);
   const hasPublishedAnswerRef = useRef(false); // Track whether guest has already published WebRTC answer
 
   // Generate shareable link
@@ -133,18 +132,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       dataChannel.onopen = () => {
         console.log('[MultiplayerRoom] 📡 Host data channel opened with guest at:', new Date().toISOString());
 
-        // Trigger emulator callback immediately BEFORE state update for maximum speed
-        if (isHost && emulatorStartCallbackRef.current && !hasStartedEmulatorRef.current) {
-          console.log('[MultiplayerRoom] 🎮 Emulator start callback triggered IMMEDIATELY (host) from dataChannel.onopen at:', new Date().toISOString());
-          hasStartedEmulatorRef.current = true;
-          const callback = emulatorStartCallbackRef.current;
-          emulatorStartCallbackRef.current = null;
-
-          // Execute callback synchronously for immediate response
-          callback();
-        }
-
-        // Then update state
+        // Update state
         setRoomState(prev => {
           const nextState = { ...prev, isWebRTCConnected: true };
           console.log('[MultiplayerRoom] 🔥 set isWebRTCConnected: true (data channel open) at:', new Date().toISOString(), nextState);
@@ -506,17 +494,6 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
 
           if (peerConnection.connectionState === 'connected') {
             console.log('[MultiplayerRoom] ✅ WebRTC connection established with guest:', guestPubkey);
-
-            // Only trigger if data channel hasn't already opened and callback exists
-            if (!hasStartedEmulatorRef.current && isHost && emulatorStartCallbackRef.current) {
-              console.log('[MultiplayerRoom] 🎮 Calling emulatorStartCallback IMMEDIATELY from connectionState handler...');
-              hasStartedEmulatorRef.current = true;
-              const callback = emulatorStartCallbackRef.current;
-              emulatorStartCallbackRef.current = null;
-
-              // Execute callback synchronously for immediate response
-              callback();
-            }
 
             setRoomState(prev => {
               const nextState = { ...prev, isWebRTCConnected: true };
