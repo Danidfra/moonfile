@@ -67,7 +67,8 @@ export default function MultiplayerRoomPage() {
     isWebRTCConnected,
     hasConnectionTimedOut,
     retryConnection,
-    peerConnectionRef
+    peerConnectionRef,
+    addVideoTrackToPeerConnection
   } = useMultiplayerRoom(roomId || '', gameId || '');
 
   // Game state
@@ -523,6 +524,7 @@ useEffect(() => {
                         className="w-full"
                         isHost={isHost}
                         peerConnectionRef={peerConnectionRef}
+                        addVideoTrackToPeerConnection={addVideoTrackToPeerConnection}
                       />
                     );
                   })()

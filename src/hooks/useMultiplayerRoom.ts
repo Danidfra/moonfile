@@ -106,106 +106,101 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, [nostr, user, roomId, config.relayUrl]);
 
-  // Generate WebRTC offer and return base64-encoded string
+  // Create WebRTC peer connection and data channel (without creating offer yet)
+  const createWebRTCPeerConnection = useCallback((): RTCPeerConnection => {
+    console.log('[MultiplayerRoom] Creating WebRTC peer connection...');
+
+    const peerConnection = new RTCPeerConnection({
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' },
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
+    });
+
+    // Store peer connection in ref for reuse
+    hostPeerConnectionRef.current = peerConnection;
+
+    // Create a data channel for game communication
+    const dataChannel = peerConnection.createDataChannel('game-data');
+
+    // Store data channel in ref for reuse and chat functionality
+    hostDataChannelRef.current = dataChannel;
+
+    // Set up data channel event handlers
+    dataChannel.onopen = () => {
+      console.log('[MultiplayerRoom] 📡 Host data channel opened with guest at:', new Date().toISOString());
+
+      // Update state
+      setRoomState(prev => {
+        const nextState = { ...prev, isWebRTCConnected: true };
+        console.log('[MultiplayerRoom] 🔥 set isWebRTCConnected: true (data channel open) at:', new Date().toISOString(), nextState);
+        return nextState;
+      });
+    };
+
+    dataChannel.onmessage = (event) => {
+      console.log('[MultiplayerRoom] Host received message from guest:', event.data);
+
+      try {
+        // Parse the incoming message
+        const messageData = JSON.parse(event.data);
+
+        if (messageData.type === 'chat' && messageData.data) {
+          console.log('[Chat][recv] 📥 Host received chat message:', messageData.data);
+
+          // Add to chat messages
+          setRoomState(prev => {
+            const updatedMessages = [...(prev.chatMessages || []), messageData.data];
+            console.log('[Chat][recv] ✅ Added received message to state:', messageData.data);
+            return {
+              ...prev,
+              chatMessages: updatedMessages
+            };
+          });
+        } else {
+          console.log('[MultiplayerRoom] Host received non-chat message:', messageData.type);
+        }
+      } catch (error) {
+        console.error('[MultiplayerRoom] Error parsing message from guest:', error);
+      }
+    };
+
+    dataChannel.onclose = () => {
+      console.log('[MultiplayerRoom] Host data channel closed with guest');
+      setRoomState(prev => {
+        const nextState = { ...prev, isWebRTCConnected: false };
+        console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false (data channel close)', nextState);
+        return nextState;
+      });
+    };
+
+    dataChannel.onerror = (error) => {
+      console.error('[MultiplayerRoom] Host data channel error:', error);
+    };
+
+    console.log('[MultiplayerRoom] ✅ WebRTC peer connection and data channel created');
+    return peerConnection;
+  }, []);
+
+  // Generate WebRTC offer and return base64-encoded string (must be called after video track is added)
   const generateWebRTCOffer = useCallback(async (): Promise<string> => {
     console.log('[MultiplayerRoom] Generating WebRTC offer...');
 
+    const peerConnection = hostPeerConnectionRef.current;
+    if (!peerConnection) {
+      throw new Error('Peer connection not created. Call createWebRTCPeerConnection() first.');
+    }
+
     try {
-      // Create a new RTCPeerConnection
-      const peerConnection = new RTCPeerConnection({
-        iceServers: [
-          { urls: 'stun:stun.l.google.com:19302' },
-          { urls: 'stun:stun1.l.google.com:19302' }
-        ]
-      });
+      // Verify that video track has been added
+      const senders = peerConnection.getSenders();
+      const videoSenders = senders.filter(sender => sender.track && sender.track.kind === 'video');
 
-      // Store peer connection in ref for reuse
-      hostPeerConnectionRef.current = peerConnection;
-
-      // Create a data channel for game communication
-      const dataChannel = peerConnection.createDataChannel('game-data');
-
-      // Store data channel in ref for reuse and chat functionality
-      hostDataChannelRef.current = dataChannel;
-
-      // Set up data channel event handlers
-      dataChannel.onopen = () => {
-        console.log('[MultiplayerRoom] 📡 Host data channel opened with guest at:', new Date().toISOString());
-
-        // Update state
-        setRoomState(prev => {
-          const nextState = { ...prev, isWebRTCConnected: true };
-          console.log('[MultiplayerRoom] 🔥 set isWebRTCConnected: true (data channel open) at:', new Date().toISOString(), nextState);
-          return nextState;
-        });
-      };
-
-      dataChannel.onmessage = (event) => {
-        console.log('[MultiplayerRoom] Host received message from guest:', event.data);
-
-        try {
-          // Parse the incoming message
-          const messageData = JSON.parse(event.data);
-
-          if (messageData.type === 'chat' && messageData.data) {
-            console.log('[Chat][recv] 📥 Host received chat message:', messageData.data);
-
-            // Add to chat messages
-            setRoomState(prev => {
-              const updatedMessages = [...(prev.chatMessages || []), messageData.data];
-              console.log('[Chat][recv] ✅ Added received message to state:', messageData.data);
-              return {
-                ...prev,
-                chatMessages: updatedMessages
-              };
-            });
-          } else {
-            console.log('[MultiplayerRoom] Host received non-chat message:', messageData.type);
-          }
-        } catch (error) {
-          console.error('[MultiplayerRoom] Error parsing message from guest:', error);
-        }
-      };
-
-      dataChannel.onclose = () => {
-        console.log('[MultiplayerRoom] Host data channel closed with guest');
-        setRoomState(prev => {
-          const nextState = { ...prev, isWebRTCConnected: false };
-          console.log('[MultiplayerRoom] ❌ set isWebRTCConnected: false (data channel close)', nextState);
-          return nextState;
-        });
-      };
-
-      dataChannel.onerror = (error) => {
-        console.error('[MultiplayerRoom] Host data channel error:', error);
-      };
-
-      // Wait for the video track from the emulator to be added
-      console.log('[MultiplayerRoom] ⏳ Waiting for video track to be added before creating offer...');
-
-      await new Promise<void>((resolve, reject) => {
-        const timeout = setTimeout(() => {
-          console.warn('[MultiplayerRoom] ⏰ Timeout waiting for video track, creating offer without video');
-          resolve();
-        }, 5000); // 5 second timeout
-
-        const checkForVideoTrack = () => {
-          const senders = peerConnection.getSenders();
-          const videoSenders = senders.filter(sender => sender.track && sender.track.kind === 'video');
-
-          if (videoSenders.length > 0) {
-            console.log('[MultiplayerRoom] ✅ Video track detected, proceeding to create offer');
-            clearTimeout(timeout);
-            resolve();
-          } else {
-            // Check again in 100ms
-            setTimeout(checkForVideoTrack, 100);
-          }
-        };
-
-        // Start checking for video track
-        checkForVideoTrack();
-      });
+      if (videoSenders.length === 0) {
+        console.warn('[MultiplayerRoom] ⚠️ No video track found in peer connection - creating offer without video');
+      } else {
+        console.log('[MultiplayerRoom] ✅ Video track found in peer connection, proceeding with offer creation');
+      }
 
       // Create offer
       const offer = await peerConnection.createOffer({
@@ -259,6 +254,34 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     }
   }, []);
 
+  // Add video track to peer connection (called by NesPlayer when canvas stream is ready)
+  const addVideoTrackToPeerConnection = useCallback((videoTrack: MediaStreamTrack, stream: MediaStream): void => {
+    console.log('[MultiplayerRoom] 📹 Adding video track to peer connection...');
+
+    const peerConnection = hostPeerConnectionRef.current;
+    if (!peerConnection) {
+      console.error('[MultiplayerRoom] ❌ Peer connection not created yet');
+      return;
+    }
+
+    try {
+      const sender = peerConnection.addTrack(videoTrack, stream);
+      console.log('[MultiplayerRoom] ✅ Video track added to peer connection:', {
+        trackId: videoTrack.id,
+        senderTrackId: sender?.track?.id,
+        connectionState: peerConnection.connectionState
+      });
+
+      // Set up track event handlers
+      videoTrack.onended = () => console.log('[MultiplayerRoom] 📹 Video track ended');
+      videoTrack.onmute = () => console.log('[MultiplayerRoom] 📹 Video track muted');
+      videoTrack.onunmute = () => console.log('[MultiplayerRoom] 📹 Video track unmuted');
+
+    } catch (error) {
+      console.error('[MultiplayerRoom] ❌ Error adding video track to peer connection:', error);
+    }
+  }, []);
+
   // Publish host room event
   const publishHostRoomEvent = useCallback(async (): Promise<void> => {
     if (!user || !roomId || !gameId) {
@@ -270,10 +293,46 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     try {
       const requiredPlayers = roomState.requiredPlayers || 2;
 
-      // Generate WebRTC offer
+      // Step 1: Create WebRTC peer connection and data channel
+      createWebRTCPeerConnection();
+
+      // Step 2: Wait for video track to be added (by NesPlayer) before creating offer
+      console.log('[MultiplayerRoom] ⏳ Waiting for video track to be added...');
+
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => {
+          console.warn('[MultiplayerRoom] ⏰ Timeout waiting for video track, proceeding without video');
+          resolve();
+        }, 10000); // 10 second timeout
+
+        const checkForVideoTrack = () => {
+          const peerConnection = hostPeerConnectionRef.current;
+          if (!peerConnection) {
+            console.error('[MultiplayerRoom] ❌ Peer connection not available');
+            return;
+          }
+
+          const senders = peerConnection.getSenders();
+          const videoSenders = senders.filter(sender => sender.track && sender.track.kind === 'video');
+
+          if (videoSenders.length > 0) {
+            console.log('[MultiplayerRoom] ✅ Video track detected, proceeding to create offer');
+            clearTimeout(timeout);
+            resolve();
+          } else {
+            // Check again in 200ms
+            setTimeout(checkForVideoTrack, 200);
+          }
+        };
+
+        // Start checking for video track
+        checkForVideoTrack();
+      });
+
+      // Step 3: Generate WebRTC offer (now with video track included)
       const webRTCOffer = await generateWebRTCOffer();
 
-      // Publish only to the currently connected relay
+      // Step 4: Publish room event with the offer
       const connectedRelays = [config.relayUrl];
 
       const event = await publishEvent({
@@ -315,7 +374,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
       }));
       throw error;
     }
-  }, [user, roomId, gameId, publishEvent, generateShareableLink, roomState.requiredPlayers, config.relayUrl]);
+  }, [user, roomId, gameId, publishEvent, generateShareableLink, roomState.requiredPlayers, config.relayUrl, createWebRTCPeerConnection, generateWebRTCOffer]);
 
   // Host: Subscribe to room events and listen for guest responses using proper Nostr subscription
   const subscribeToHostGuestEvents = useCallback((): void => {
@@ -1416,6 +1475,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     isWebRTCConnected: roomState.isWebRTCConnected || false,
     hasConnectionTimedOut: roomState.status === 'waiting_to_retry',
     retryConnection,
-    peerConnectionRef: hostPeerConnectionRef
+    peerConnectionRef: hostPeerConnectionRef,
+    addVideoTrackToPeerConnection
   };
 }

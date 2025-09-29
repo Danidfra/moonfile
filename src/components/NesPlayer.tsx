@@ -17,6 +17,7 @@ interface NesPlayerProps {
   className?: string;
   isHost?: boolean;
   peerConnectionRef?: React.MutableRefObject<RTCPeerConnection | null>;
+  addVideoTrackToPeerConnection?: (videoTrack: MediaStreamTrack, stream: MediaStream) => void;
 }
 
 export interface NesPlayerRef {
@@ -28,7 +29,8 @@ const NesPlayer = forwardRef<NesPlayerRef, NesPlayerProps>(({
   title = "NES Game",
   className = "",
   isHost = false,
-  peerConnectionRef
+  peerConnectionRef,
+  addVideoTrackToPeerConnection
 }: NesPlayerProps, ref) => {
   const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
@@ -182,16 +184,27 @@ const NesPlayer = forwardRef<NesPlayerRef, NesPlayerProps>(({
     console.log('[NesPlayer] 🎥 Canvas streaming effect triggered:', {
       isHost,
       hasEmulatorRef: !!emulatorRef.current,
-      hasPeerConnectionRef: !!peerConnectionRef?.current,
+      hasAddVideoTrackFn: !!addVideoTrackToPeerConnection,
       romPathLength: romPath?.length || 0,
       timestamp: new Date().toISOString()
     });
 
-    const setupCanvasStreaming = () => {
-      const emulator = emulatorRef.current;
-      const peer = peerConnectionRef?.current;
+    if (!isHost || !addVideoTrackToPeerConnection) {
+      console.log('[NesPlayer] ⏭️ Canvas streaming skipped - not host or missing function');
+      return;
+    }
 
-      if (isHost && emulator && peer) {
+    let isTrackAdded = false;
+
+    const setupCanvasStreaming = () => {
+      if (isTrackAdded) {
+        console.log('[NesPlayer] ✅ Video track already added, skipping setup');
+        return;
+      }
+
+      const emulator = emulatorRef.current;
+
+      if (emulator) {
         console.log('[NesPlayer] 🎥 Starting canvas streaming setup...');
 
         try {
@@ -225,15 +238,12 @@ const NesPlayer = forwardRef<NesPlayerRef, NesPlayerProps>(({
             readyState: videoTrack.readyState
           });
 
-          // Add video track to peer connection
-          console.log('[NesPlayer] 🔗 Adding video track to WebRTC peer connection...');
-          const sender = peer.addTrack(videoTrack, canvasStream);
+          // Add video track to peer connection using the provided function
+          console.log('[NesPlayer] 🔗 Adding video track via addVideoTrackToPeerConnection...');
+          addVideoTrackToPeerConnection(videoTrack, canvasStream);
 
-          console.log('[NesPlayer] ✅ Video track added to peer connection:', {
-            senderTrackId: sender?.track?.id,
-            connectionState: peer.connectionState,
-            iceConnectionState: peer.iceConnectionState
-          });
+          console.log('[NesPlayer] ✅ Video track successfully added to peer connection');
+          isTrackAdded = true;
 
           videoTrack.onended = () => console.log('[NesPlayer] 📹 Video track ended');
           videoTrack.onmute = () => console.log('[NesPlayer] 📹 Video track muted');
@@ -245,11 +255,7 @@ const NesPlayer = forwardRef<NesPlayerRef, NesPlayerProps>(({
           setError(error instanceof Error ? error.message : 'Failed to setup canvas streaming');
         }
       } else {
-        console.log('[NesPlayer] ⏭️ Canvas streaming skipped - conditions not met:', {
-          isHost,
-          hasEmulatorRef: !!emulatorRef.current,
-          hasPeerConnectionRef: !!peerConnectionRef?.current
-        });
+        console.log('[NesPlayer] ⏭️ Canvas streaming setup skipped - emulator not ready yet');
       }
     };
 
@@ -258,35 +264,21 @@ const NesPlayer = forwardRef<NesPlayerRef, NesPlayerProps>(({
 
     // Set up polling to check for emulator readiness
     const pollInterval = setInterval(() => {
-      if (emulatorRef.current && peerConnectionRef?.current && isHost) {
-        const senders = peerConnectionRef.current.getSenders();
-        const videoSenders = senders.filter(sender => sender.track && sender.track.kind === 'video');
-
-        if (videoSenders.length === 0) {
-          console.log('[NesPlayer] 🔄 Retrying canvas streaming setup...');
-          setupCanvasStreaming();
-        } else {
-          console.log('[NesPlayer] ✅ Video track already added, stopping polling');
-          clearInterval(pollInterval);
-        }
+      if (!isTrackAdded && emulatorRef.current) {
+        console.log('[NesPlayer] 🔄 Retrying canvas streaming setup...');
+        setupCanvasStreaming();
+      } else if (isTrackAdded) {
+        console.log('[NesPlayer] ✅ Video track added, stopping polling');
+        clearInterval(pollInterval);
       }
     }, 100); // Check every 100ms
 
     return () => {
       clearInterval(pollInterval);
-      console.log('[NesPlayer] 🧹 Cleaning up canvas streaming...');
-      const peer = peerConnectionRef?.current;
-      if (peer) {
-        const senders = peer.getSenders();
-        senders
-          .filter(sender => sender.track && sender.track.kind === 'video')
-          .forEach(sender => {
-            console.log('[NesPlayer] 🗑️ Removing video sender:', sender.track?.id);
-            peer.removeTrack(sender);
-          });
-      }
+      console.log('[NesPlayer] 🧹 Cleaning up canvas streaming effect...');
+      // Note: Video track cleanup is handled by useMultiplayerRoom hook
     };
-  }, [isHost, romPath, peerConnectionRef, emulatorRef]);
+  }, [isHost, romPath, addVideoTrackToPeerConnection, emulatorRef]);
 
   // Toggle fullscreen function
   const toggleFullscreen = () => {
