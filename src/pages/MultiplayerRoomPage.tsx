@@ -57,7 +57,6 @@ export default function MultiplayerRoomPage() {
     startGame,
     isHost,
     sendChatMessage,
-    setEmulatorStartCallback,
     joinGame,
     isJoining,
     connectionState,
@@ -217,40 +216,14 @@ export default function MultiplayerRoomPage() {
   }, [gameId, nostr]);
 
   /**
-   * Set up emulator start callback for host
+   * Direct emulator start when Play button is clicked and ROM is ready
    */
   useEffect(() => {
-    if (isHost) {
-      console.log('[MultiplayerRoomPage] 📋 Setting up emulator start callback for host at:', new Date().toISOString());
-      setEmulatorStartCallback(() => {
-        console.log('[MultiplayerRoomPage] 🔥 Emulator start callback triggered (host) at:', new Date().toISOString());
-
-        // Only start emulator if ROM is ready and play button was clicked
-        if (isRomReady && startEmulatorRequested) {
-          console.log('[MultiplayerRoomPage] ✅ ROM is ready and play button clicked, starting emulator immediately');
-          setShouldStartEmulator(true);
-
-          // Force immediate render by triggering a re-render
-          setTimeout(() => {
-            console.log('[MultiplayerRoomPage] ⚡ Forced re-render after emulator start callback');
-            setShouldStartEmulator(prev => prev); // Force re-render
-          }, 0);
-        } else if (!startEmulatorRequested) {
-          console.log('[MultiplayerRoomPage] ⏳ Play button not clicked yet, waiting for user input');
-        } else {
-          console.log('[MultiplayerRoomPage] ⏳ ROM not ready yet, will start when ready');
-          // Set up a watcher to start emulator when ROM is ready
-          const checkRomReady = setInterval(() => {
-            if (isRomReady && startEmulatorRequested) {
-              console.log('[MultiplayerRoomPage] ✅ ROM now ready and play button clicked, starting emulator');
-              setShouldStartEmulator(true);
-              clearInterval(checkRomReady);
-            }
-          }, 50); // Check every 50ms
-        }
-      });
+    if (isHost && startEmulatorRequested && isRomReady && !shouldStartEmulator) {
+      console.log('[MultiplayerRoomPage] 🚀 Starting emulator immediately (Play clicked + ROM ready) at:', new Date().toISOString());
+      setShouldStartEmulator(true);
     }
-  }, [isHost, setEmulatorStartCallback, isRomReady, startEmulatorRequested]);
+  }, [isHost, startEmulatorRequested, isRomReady, shouldStartEmulator]);
 
   /**
    * Auto-scroll to game area when all players are connected
@@ -389,7 +362,26 @@ export default function MultiplayerRoomPage() {
                 {/* Play button - only show for host when WebRTC connected and emulator not started */}
                 {isHost && isWebRTCConnected && !startEmulatorRequested && (
                   <button
-                    onClick={() => setStartEmulatorRequested(true)}
+                    onClick={() => {
+                      console.log('[MultiplayerRoomPage] 🎮 Play button clicked at:', new Date().toISOString());
+                      setStartEmulatorRequested(true);
+
+                      // Start emulator immediately if ROM is ready
+                      if (isRomReady) {
+                        console.log('[MultiplayerRoomPage] ⚡ ROM ready, starting emulator immediately');
+                        setShouldStartEmulator(true);
+                      } else {
+                        console.log('[MultiplayerRoomPage] ⏳ ROM not ready yet, will start when ready');
+                        // Set up a watcher to start emulator when ROM is ready
+                        const checkRomReady = setInterval(() => {
+                          if (isRomReady) {
+                            console.log('[MultiplayerRoomPage] ✅ ROM now ready, starting emulator');
+                            setShouldStartEmulator(true);
+                            clearInterval(checkRomReady);
+                          }
+                        }, 50); // Check every 50ms
+                      }
+                    }}
                     className="bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-4 rounded mt-4"
                   >
                     ▶️ Play

@@ -60,7 +60,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   const hostPeerConnectionRef = useRef<RTCPeerConnection | null>(null); // Store host's peer connection
   const hostDataChannelRef = useRef<RTCDataChannel | null>(null); // Store host's data channel
   const guestDataChannelRef = useRef<RTCDataChannel | null>(null); // Store guest's data channel
-  const emulatorStartCallbackRef = useRef<(() => void) | null>(null); // Store emulator start callback
+  const emulatorStartCallbackRef = useRef<(() => void) | null>(null); // Store emulator start callback (deprecated)
   const hasPublishedAnswerRef = useRef(false); // Track whether guest has already published WebRTC answer
 
   // Generate shareable link
@@ -1319,9 +1319,10 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
   };
 
   const setEmulatorStartCallback = (callback: () => void): void => {
-    console.log('[MultiplayerRoom] 🔧 setEmulatorStartCallback called at:', new Date().toISOString());
+    console.log('[MultiplayerRoom] 🔧 setEmulatorStartCallback called (deprecated) at:', new Date().toISOString());
+    // This method is deprecated but kept for compatibility
     emulatorStartCallbackRef.current = callback;
-    console.log('[MultiplayerRoom] ✅ Emulator start callback registered');
+    console.log('[MultiplayerRoom] ⚠️ setEmulatorStartCallback is deprecated - emulator is now started directly');
   };
 
   const joinGame = (): void => {
