@@ -5,7 +5,7 @@
  * Loads ROM data and provides play/pause controls.
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
@@ -15,9 +15,21 @@ interface NesPlayerProps {
   romPath: string; // Now this is the actual binary string data, not a URL
   title?: string;
   className?: string;
+  isHost?: boolean;
+  peerConnectionRef?: React.MutableRefObject<RTCPeerConnection | null>;
 }
 
-export default function NesPlayer({ romPath, title = "NES Game", className = "" }: NesPlayerProps) {
+export interface NesPlayerRef {
+  getCanvasStream: () => MediaStream | null;
+}
+
+const NesPlayer = forwardRef<NesPlayerRef, NesPlayerProps>(({
+  romPath,
+  title = "NES Game",
+  className = "",
+  isHost = false,
+  peerConnectionRef
+}: NesPlayerProps, ref) => {
   const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -26,13 +38,29 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
   const [emulatorKey, setEmulatorKey] = useState(0); // For forcing re-mount
 
   const emulatorContainerRef = React.useRef<HTMLDivElement>(null);
+  const emulatorRef = useRef<any>(null);
+
+  // Expose methods via ref
+  useImperativeHandle(ref, () => ({
+    getCanvasStream: () => {
+      console.log('[NesPlayer] 📹 getCanvasStream called via ref at:', new Date().toISOString());
+      if (emulatorRef.current) {
+        return emulatorRef.current.getCanvasStream();
+      } else {
+        console.warn('[NesPlayer] ❌ Emulator ref not available for stream capture');
+        return null;
+      }
+    }
+  }));
 
   // Debug log for component mount
   useEffect(() => {
     console.log('[NesPlayer] 🎮 Component mounted at:', new Date().toISOString(), 'with props:', {
       title,
       romPathLength: romPath?.length || 0,
-      className
+      className,
+      isHost,
+      hasPeerConnectionRef: !!peerConnectionRef
     });
   }, []);
 
@@ -149,6 +177,117 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
     };
   }, []);
 
+  // Canvas streaming effect for host mode
+  useEffect(() => {
+    console.log('[NesPlayer] 🎥 Canvas streaming effect triggered:', {
+      isHost,
+      hasEmulatorRef: !!emulatorRef.current,
+      hasPeerConnectionRef: !!peerConnectionRef?.current,
+      romPathLength: romPath?.length || 0,
+      timestamp: new Date().toISOString()
+    });
+
+    if (isHost && emulatorRef.current && peerConnectionRef?.current) {
+      console.log('[NesPlayer] 🎥 Starting canvas streaming setup...');
+
+      const setupCanvasStreaming = async () => {
+        try {
+          console.log('[NesPlayer] 📹 Getting canvas stream from emulator...');
+
+          // Get canvas stream from emulator
+          const canvasStream = emulatorRef.current.getCanvasStream();
+
+          if (!canvasStream) {
+            console.error('[NesPlayer] ❌ Failed to get canvas stream from emulator');
+            return;
+          }
+
+          console.log('[NesPlayer] ✅ Canvas stream obtained:', {
+            streamId: canvasStream.id,
+            videoTracks: canvasStream.getVideoTracks().length,
+            audioTracks: canvasStream.getAudioTracks().length
+          });
+
+          // Get video track from the stream
+          const videoTracks = canvasStream.getVideoTracks();
+          if (videoTracks.length === 0) {
+            console.error('[NesPlayer] ❌ No video tracks found in canvas stream');
+            return;
+          }
+
+          const videoTrack = videoTracks[0];
+          console.log('[NesPlayer] 📹 Video track found:', {
+            trackId: videoTrack.id,
+            kind: videoTrack.kind,
+            label: videoTrack.label,
+            enabled: videoTrack.enabled,
+            muted: videoTrack.muted,
+            readyState: videoTrack.readyState
+          });
+
+          // Add video track to peer connection
+          console.log('[NesPlayer] 🔗 Adding video track to WebRTC peer connection...');
+          if (peerConnectionRef.current) {
+            const sender = peerConnectionRef.current.addTrack(videoTrack, canvasStream);
+
+            console.log('[NesPlayer] ✅ Video track added to peer connection:', {
+              senderTrackId: sender?.track?.id,
+              connectionState: peerConnectionRef.current.connectionState,
+              iceConnectionState: peerConnectionRef.current.iceConnectionState
+            });
+          }
+
+          // Set up track event handlers for debugging
+          videoTrack.onended = () => {
+            console.log('[NesPlayer] 📹 Video track ended');
+          };
+
+          videoTrack.onmute = () => {
+            console.log('[NesPlayer] 📹 Video track muted');
+          };
+
+          videoTrack.onunmute = () => {
+            console.log('[NesPlayer] 📹 Video track unmuted');
+          };
+
+          console.log('[NesPlayer] 🎥 Canvas streaming setup completed successfully');
+
+        } catch (error) {
+          console.error('[NesPlayer] ❌ Error setting up canvas streaming:', error);
+
+          // Show user-friendly error message
+          setError(error instanceof Error ? error.message : 'Failed to setup canvas streaming');
+        }
+      };
+
+      setupCanvasStreaming();
+
+      // Cleanup function
+      return () => {
+        console.log('[NesPlayer] 🧹 Cleaning up canvas streaming...');
+
+        if (peerConnectionRef?.current) {
+          // Get senders and remove video tracks
+          const senders = peerConnectionRef.current.getSenders();
+          const videoSenders = senders.filter(sender =>
+            sender.track && sender.track.kind === 'video'
+          );
+
+          videoSenders.forEach(sender => {
+            console.log('[NesPlayer] 🗑️ Removing video sender:', sender.track?.id);
+            peerConnectionRef.current?.removeTrack(sender);
+          });
+        }
+      };
+    } else {
+      console.log('[NesPlayer] ⏭️ Canvas streaming skipped - conditions not met:', {
+        isHost,
+        hasEmulatorRef: !!emulatorRef.current,
+        hasPeerConnectionRef: !!peerConnectionRef?.current
+      });
+    }
+  }, [isHost, romPath]); // Re-run when romPath changes (emulator re-mounts)
+
   // Toggle fullscreen function
   const toggleFullscreen = () => {
     if (!emulatorContainerRef.current) return;
@@ -258,6 +397,7 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
             <Emulator
+              ref={emulatorRef}
               key={emulatorKey}
               romData={romPath}
               paused={isPaused}
@@ -340,4 +480,6 @@ export default function NesPlayer({ romPath, title = "NES Game", className = "" 
       )}
     </div>
   );
-}
+});
+
+export default NesPlayer;

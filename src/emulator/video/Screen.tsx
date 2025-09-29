@@ -8,6 +8,7 @@ type ScreenProps = {
   onGenerateFrame?: () => void;
   onMouseDown?: (x: number, y: number) => void;
   onMouseUp?: () => void;
+  canvasRef?: React.RefObject<HTMLCanvasElement>;
 };
 
 export default class Screen extends Component<ScreenProps> {
@@ -29,6 +30,9 @@ export default class Screen extends Component<ScreenProps> {
         onMouseUp={this.props.onMouseUp}
         ref={(canvas) => {
           this.canvas = canvas;
+          if (this.props.canvasRef) {
+            (this.props.canvasRef as React.MutableRefObject<HTMLCanvasElement | null>).current = canvas;
+          }
         }}
       />
     );

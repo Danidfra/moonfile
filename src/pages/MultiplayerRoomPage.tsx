@@ -51,6 +51,9 @@ export default function MultiplayerRoomPage() {
   const navigate = useNavigate();
   const { nostr } = useNostr();
 
+  // Ref for remote video element (guest stream)
+  const remoteVideoRef = useRef<HTMLVideoElement>(null);
+
   // Multiplayer room state
   const {
     roomState,
@@ -63,7 +66,8 @@ export default function MultiplayerRoomPage() {
     iceConnectionState,
     isWebRTCConnected,
     hasConnectionTimedOut,
-    retryConnection
+    retryConnection,
+    peerConnectionRef
   } = useMultiplayerRoom(roomId || '', gameId || '');
 
   // Game state
@@ -111,6 +115,41 @@ export default function MultiplayerRoomPage() {
     }
   }, [startEmulatorRequested, isRomReady]);
 
+  /**
+   * Handle incoming WebRTC stream for guests
+   */
+  useEffect(() => {
+    if (!isHost && peerConnectionRef.current && remoteVideoRef.current) {
+      console.log('[Guest] 🔧 Setting up ontrack handler for remote stream');
+
+      peerConnectionRef.current.ontrack = (event) => {
+        console.log('[Guest] 📥 ontrack fired');
+
+        if (event.streams && event.streams.length > 0) {
+          console.log('[Guest] 🎬 Attaching remote stream');
+
+          if (remoteVideoRef.current) {
+            remoteVideoRef.current.srcObject = event.streams[0];
+            console.log('[Guest] ✅ Remote stream attached to video element');
+          } else {
+            console.error('[Guest] ❌ remoteVideoRef.current is null');
+          }
+        } else {
+          console.warn('[Guest] ⚠️ No streams found in ontrack event');
+        }
+      };
+
+      console.log('[Guest] 🔌 ontrack handler configured');
+    }
+
+    return () => {
+      // Cleanup ontrack handler when component unmounts
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.ontrack = null;
+        console.log('[Guest] 🧹 ontrack handler cleaned up');
+      }
+    };
+  }, [isHost, peerConnectionRef]);
 
   const gameAreaRef = useRef<HTMLDivElement>(null);
 
@@ -478,6 +517,8 @@ export default function MultiplayerRoomPage() {
                         romPath={romPath}
                         title={gameMeta.title}
                         className="w-full"
+                        isHost={isHost}
+                        peerConnectionRef={peerConnectionRef}
                       />
                     );
                   })()
@@ -508,17 +549,23 @@ export default function MultiplayerRoomPage() {
                     </CardContent>
                   </Card>
                 ) : (
-                  /* Guest: Show stream placeholder */
+                  /* Guest: Show actual video stream */
                   <Card className="border-gray-800 bg-gray-900">
-                    <CardContent className="py-12 px-8 text-center">
+                    <CardContent className="py-8 px-8">
                       <div className="max-w-sm mx-auto space-y-4">
-                        <div className="text-blue-400 text-4xl mb-4">📺</div>
-                        <h3 className="text-lg font-semibold text-white">Receiving Stream</h3>
-                        <p className="text-gray-400">
+                        <h3 className="text-lg font-semibold text-white text-center">Receiving Stream</h3>
+                        <p className="text-gray-400 text-center">
                           You're connected! The host will stream the game to you.
                         </p>
-                        <div className="aspect-video bg-gray-800 rounded-lg flex items-center justify-center">
-                          <span className="text-gray-500">Game stream will appear here</span>
+                        <div className="aspect-video bg-gray-800 rounded-lg overflow-hidden">
+                          <video
+                            ref={remoteVideoRef}
+                            autoPlay
+                            playsInline
+                            muted={false}
+                            className="w-full h-full object-contain bg-black"
+                            style={{ transform: 'scaleY(-1)' }} // Fix upside down video
+                          />
                         </div>
                       </div>
                     </CardContent>

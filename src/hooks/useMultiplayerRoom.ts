@@ -1344,6 +1344,7 @@ export function useMultiplayerRoom(roomId: string, gameId: string) {
     iceConnectionState: 'new' as RTCIceConnectionState,
     isWebRTCConnected: roomState.isWebRTCConnected || false,
     hasConnectionTimedOut: roomState.status === 'waiting_to_retry',
-    retryConnection
+    retryConnection,
+    peerConnectionRef: hostPeerConnectionRef
   };
 }

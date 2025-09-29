@@ -46,7 +46,12 @@ interface EmulatorProps {
   muted?: boolean;
 }
 
+interface EmulatorMethods {
+  getCanvasStream: () => MediaStream | null;
+}
+
 class Emulator extends Component<EmulatorProps> {
+  private canvasRef: React.RefObject<HTMLCanvasElement> = React.createRef();
   screen: ScreenRef | null;
   speakers: unknown | null;
   nes: NES;
@@ -62,6 +67,7 @@ class Emulator extends Component<EmulatorProps> {
         ref={(screen: Screen) => {
           this.screen = screen;
         }}
+        canvasRef={this.canvasRef}
         onGenerateFrame={() => {
           this.nes.frame();
         }}
@@ -218,6 +224,29 @@ class Emulator extends Component<EmulatorProps> {
       this.screen.fitInParent();
     }
   }
+
+  getCanvasStream = (): MediaStream | null => {
+    console.log('[Emulator] 📹 getCanvasStream called at:', new Date().toISOString());
+
+    if (this.canvasRef.current) {
+      try {
+        console.log('[Emulator] 📹 Canvas found, capturing stream at 30 FPS');
+        const stream = this.canvasRef.current.captureStream(30);
+        console.log('[Emulator] ✅ Canvas stream captured successfully:', {
+          id: stream.id,
+          videoTracks: stream.getVideoTracks().length,
+          audioTracks: stream.getAudioTracks().length
+        });
+        return stream;
+      } catch (error) {
+        console.error('[Emulator] ❌ Failed to capture canvas stream:', error);
+        return null;
+      }
+    } else {
+      console.warn('[Emulator] ❌ Canvas ref not available for stream capture');
+      return null;
+    }
+  };
 }
 
 export default Emulator;
