@@ -6,8 +6,6 @@ import GamesPage from "./pages/GamesPage";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
 import Publish from "./pages/Publish";
-import TestPage from "./pages/TestPage";
-import TestMario from "./pages/TestMario";
 import RetroPlay from "./pages/RetroPlay";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
@@ -23,8 +21,6 @@ export function AppRouter() {
         <Route path="/about" element={<About />} />
         <Route path="/contact" element={<Contact />} />
         <Route path="/publish" element={<Publish />} />
-        <Route path="/test" element={<TestPage />} />
-        <Route path="/test-mario" element={<TestMario />} />
         {/* Game player routes */}
         <Route path="/game/:id" element={<GamePage />} />
         <Route path="/retro/:gameId/play" element={<RetroPlay />} />
