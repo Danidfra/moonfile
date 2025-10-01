@@ -364,83 +364,8 @@ export default function MultiplayerGuestRoom() {
               )}
             </div>
 
-            {/* Session Info moved below video */}
-            <div className="grid md:grid-cols-2 gap-6">
-              {/* Session Info Card */}
-              <Card className="border-gray-800 bg-gray-900">
-                <CardContent className="p-4 space-y-4">
-                  <h3 className="text-lg font-semibold text-white">Session Info</h3>
-
-                  {gameMeta?.assets?.cover && (
-                    <div className="aspect-video rounded-lg overflow-hidden">
-                      <img
-                        src={gameMeta.assets.cover}
-                        alt={gameMeta.title}
-                        className="w-full h-full object-cover"
-                      />
-                    </div>
-                  )}
-
-                  {gameMeta?.summary && (
-                    <div>
-                      <span className="text-gray-500">Description:</span>
-                      <p className="text-gray-300 text-sm mt-1">{gameMeta.summary}</p>
-                    </div>
-                  )}
-
-                  <div className="space-y-2 text-sm">
-                    {gameMeta?.genres?.length && gameMeta.genres.length > 0 && (
-                      <div>
-                        <span className="text-gray-500">Genre:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {gameMeta.genres.slice(0, 3).map((genre: string) => (
-                            <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
-                              {genre}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {gameMeta?.platforms?.length && gameMeta.platforms.length > 0 && (
-                      <div>
-                        <span className="text-gray-500">Platform:</span>
-                        <div className="flex flex-wrap gap-1 mt-1">
-                          {gameMeta.platforms.slice(0, 2).map((platform: string) => (
-                            <span key={platform} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
-                              {platform}
-                            </span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="pt-2 border-t border-gray-800">
-                      <span className="text-gray-500">Session:</span>
-                      <div className="text-xs text-gray-400 mt-1 space-y-1">
-                        <div>Mode: Guest (View Only)</div>
-                        <div>Session ID: {sessionId?.substring(0, 8)}...</div>
-                        <div>Status: {connectionInfo.text}</div>
-                      </div>
-                    </div>
-
-                    <div className="pt-4 border-t border-gray-800 mt-4">
-                      <Link
-                        to="https://soapbox.pub/mkstack"
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
-                      >
-                        Vibed with MKStack
-                      </Link>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-
-              {/* Game Controls */}
-              <GameControls />
-            </div>
+            {/* Game Controls below video */}
+            <GameControls />
 
             {/* Connection Controls */}
             <Card className="border-gray-800 bg-gray-900">
@@ -470,13 +395,86 @@ export default function MultiplayerGuestRoom() {
             </Card>
           </div>
 
-          {/* Right side - Player Chat */}
-          <div className="lg:col-span-1">
+          {/* Right side - Player Chat and Session Info */}
+          <div className="lg:col-span-1 space-y-6">
+            {/* Player Chat */}
             <MultiplayerChat
               onlineCount={connectedPlayers}
               currentUser="Guest"
               isHost={false}
             />
+
+            {/* Session Info Card */}
+            <Card className="border-gray-800 bg-gray-900">
+              <CardContent className="p-4 space-y-4">
+                <h3 className="text-lg font-semibold text-white">Session Info</h3>
+
+                {gameMeta?.assets?.cover && (
+                  <div className="aspect-video rounded-lg overflow-hidden">
+                    <img
+                      src={gameMeta.assets.cover}
+                      alt={gameMeta.title}
+                      className="w-full h-full object-cover"
+                    />
+                  </div>
+                )}
+
+                {gameMeta?.summary && (
+                  <div>
+                    <span className="text-gray-500">Description:</span>
+                    <p className="text-gray-300 text-sm mt-1">{gameMeta.summary}</p>
+                  </div>
+                )}
+
+                <div className="space-y-2 text-sm">
+                  {gameMeta?.genres?.length && gameMeta.genres.length > 0 && (
+                    <div>
+                      <span className="text-gray-500">Genre:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {gameMeta.genres.slice(0, 3).map((genre: string) => (
+                          <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                            {genre}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  {gameMeta?.platforms?.length && gameMeta.platforms.length > 0 && (
+                    <div>
+                      <span className="text-gray-500">Platform:</span>
+                      <div className="flex flex-wrap gap-1 mt-1">
+                        {gameMeta.platforms.slice(0, 2).map((platform: string) => (
+                          <span key={platform} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                            {platform}
+                          </span>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+
+                  <div className="pt-2 border-t border-gray-800">
+                    <span className="text-gray-500">Session:</span>
+                    <div className="text-xs text-gray-400 mt-1 space-y-1">
+                      <div>Mode: Guest (View Only)</div>
+                      <div>Session ID: {sessionId?.substring(0, 8)}...</div>
+                      <div>Status: {connectionInfo.text}</div>
+                    </div>
+                  </div>
+
+                  <div className="pt-4 border-t border-gray-800 mt-4">
+                    <Link
+                      to="https://soapbox.pub/mkstack"
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                    >
+                      Vibed with MKStack
+                    </Link>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
           </div>
         </div>
       </div>
