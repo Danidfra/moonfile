@@ -53,7 +53,10 @@ export function useMultiplayerSession(gameId: string) {
   const generateSessionId = (gameId: string): string => {
     const randomId = 'session_' + Math.random().toString(36).substring(2, 15) +
                      Math.random().toString(36).substring(2, 15);
-    return `game:${gameId}:room:${randomId}`;
+    // gameId should be the raw game slug like "tetris-2-usa-nintendo:v1.0"
+    // If it already has "game:" prefix, remove it
+    const cleanGameId = gameId.startsWith('game:') ? gameId.substring(5) : gameId;
+    return `game:${cleanGameId}:room:${randomId}`;
   };
 
   /**

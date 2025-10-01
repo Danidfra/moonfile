@@ -85,12 +85,14 @@ export default function MultiplayerGuestRoom() {
 
         // Parse session ID to extract game ID
         // Expected format: game:<gameId>:room:<actualSessionId>
-        const sessionParts = sessionId.split(':');
-        if (sessionParts.length < 4 || sessionParts[0] !== 'game' || sessionParts[2] !== 'room') {
+        // Note: gameId itself can contain colons (e.g., "tetris-2-usa-nintendo:v1.0")
+        if (!sessionId.startsWith('game:') || !sessionId.includes(':room:')) {
           throw new Error('Invalid session ID format. Expected: game:gameId:room:sessionId');
         }
 
-        const extractedGameId = sessionParts[1];
+        // Find the ':room:' delimiter and extract gameId
+        const roomIndex = sessionId.indexOf(':room:');
+        const extractedGameId = sessionId.substring(5, roomIndex); // Remove "game:" prefix
         setGameId(extractedGameId);
 
         // 1. Fetch the game event to get game info

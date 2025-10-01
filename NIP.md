@@ -97,7 +97,7 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `d` | Session identifier (game:gameId:room:sessionId) | `"game:super-mario-bros:room:session_abc123xyz"` |
+| `d` | Session identifier (game:gameId:room:sessionId) | `"game:tetris-2-usa-nintendo:v1.0:room:session_abc123xyz"` |
 | `host` | Host's public key (hex) | `"<host-pubkey-hex>"` |
 | `players` | Expected number of players (string) | `"2"` |
 | `status` | Current room status | `"available"` |
@@ -153,7 +153,7 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
      "kind": 31997,
      "content": "",
      "tags": [
-       ["d", "game:super-mario-bros:room:session_abc123xyz"],
+       ["d", "game:super-mario-bros:v1.0:room:session_abc123xyz"],
        ["host", "<host-pubkey-hex>"],
        ["players", "2"],
        ["status", "available"],
@@ -165,9 +165,9 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
 ### 3. Player Discovery
 
 Players discover rooms by:
-- Direct session URL: `/multiplayer/guest/game:super-mario-bros:room:session_abc123xyz`
-- Querying events: `{"kinds": [31997], "#d": ["game:super-mario-bros:room:session_abc123xyz"]}`
-- Game-specific queries: `{"kinds": [31997], "#d": ["game:super-mario-bros:*"]}`
+- Direct session URL: `/multiplayer/guest/game:super-mario-bros:v1.0:room:session_abc123xyz`
+- Querying events: `{"kinds": [31997], "#d": ["game:super-mario-bros:v1.0:room:session_abc123xyz"]}`
+- Game-specific queries: `{"kinds": [31997], "#d": ["game:super-mario-bros:v1.0:room:*"]}`
 
 ### 4. Player Joining
 
@@ -181,7 +181,7 @@ Players discover rooms by:
      "kind": 31997,
      "content": "",
      "tags": [
-       ["d", "game:super-mario-bros:room:session_abc123xyz"],
+       ["d", "game:super-mario-bros:v1.0:room:session_abc123xyz"],
        ["host", "<host-pubkey-hex>"],
        ["guest", "<guest-pubkey-hex>"],
        ["signal", "<base64-webrtc-answer>"]
@@ -200,7 +200,7 @@ Players discover rooms by:
      "kind": 31997,
      "content": "",
      "tags": [
-       ["d", "game:super-mario-bros:room:session_abc123xyz"],
+       ["d", "game:super-mario-bros:v1.0:room:session_abc123xyz"],
        ["host", "<host-pubkey-hex>"],
        ["guest", "<guest-pubkey-hex>"],
        ["connected", "<guest-pubkey-hex>"],
@@ -292,7 +292,7 @@ Once connected, peers use WebRTC data channels for:
 ```json
 {
   "kinds": [31997],
-  "#d": ["game:super-mario-bros:room:*"],
+  "#d": ["game:super-mario-bros:v1.0:room:*"],
   "#status": ["available"],
   "limit": 10
 }
@@ -313,7 +313,7 @@ Once connected, peers use WebRTC data channels for:
 ```json
 {
   "kinds": [31997],
-  "#d": ["game:super-mario-bros:room:session_abc123xyz"],
+  "#d": ["game:super-mario-bros:v1.0:room:session_abc123xyz"],
   "limit": 50
 }
 ```
