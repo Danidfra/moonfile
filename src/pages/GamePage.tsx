@@ -19,10 +19,13 @@ import { isMultiplayerGame } from '@/lib/gameUtils';
 import NesPlayer from '@/components/NesPlayer';
 import GameInteractionCard from '@/components/GameInteractionCard';
 import MultiplayerCard from '@/components/MultiplayerCard';
+import MultiplayerChat from '@/components/MultiplayerChat';
+import GameControls from '@/components/GameControls';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 type PlayerState = 'loading' | 'ready' | 'error';
+type SessionStatus = 'idle' | 'creating' | 'waiting' | 'active' | 'error';
 
 interface GameMetadata {
   id: string;
@@ -64,6 +67,7 @@ export default function GamePage() {
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romPath, setRomPath] = useState<string | null>(null);
   const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
+  const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
 
   /**
    * Fetch game event and prepare ROM
@@ -267,6 +271,9 @@ export default function GamePage() {
   // Detect if this is a multiplayer game
   const isMultiplayer = isMultiplayerGame(gameEvent);
 
+  // Show chat when session is active or waiting
+  const showMultiplayerChat = isMultiplayer && ['waiting', 'active'].includes(multiplayerSessionStatus);
+
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Header */}
@@ -320,9 +327,26 @@ export default function GamePage() {
             <div className="space-y-6">
               {/* Conditional rendering: MultiplayerCard for multiplayer games, GameInteractionCard for single-player */}
               {isMultiplayer ? (
-                <MultiplayerCard gameMeta={gameMeta} />
+                <MultiplayerCard
+                  gameMeta={gameMeta}
+                  onSessionStatusChange={setMultiplayerSessionStatus}
+                />
               ) : (
                 <GameInteractionCard />
+              )}
+
+              {/* Show chat panel for multiplayer when session is active */}
+              {showMultiplayerChat && (
+                <MultiplayerChat
+                  onlineCount={3}
+                  currentUser="You"
+                  isHost={true}
+                />
+              )}
+
+              {/* Game controls for multiplayer games */}
+              {isMultiplayer && (
+                <GameControls />
               )}
 
               {/* Game info */}

@@ -107,4 +107,22 @@ describe('MultiplayerCard', () => {
     // Verify navigation was called with correct path
     expect(mockNavigate).toHaveBeenCalledWith('/multiplayer/guest/test123');
   });
+
+  it('can be collapsed and expanded', () => {
+    render(
+      <TestApp>
+        <MultiplayerCard gameMeta={mockGameMeta} />
+      </TestApp>
+    );
+
+    // Should be expanded by default - check for content
+    expect(screen.getByText('Start Session')).toBeInTheDocument();
+
+    // Find and click the collapse button
+    const collapseButton = screen.getByRole('button', { name: '' }); // Chevron button
+    fireEvent.click(collapseButton);
+
+    // Content should be hidden after collapse
+    expect(screen.queryByText('Start Session')).not.toBeInTheDocument();
+  });
 });

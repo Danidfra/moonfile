@@ -18,6 +18,8 @@ import {
   GamepadIcon,
   Copy,
   ArrowLeft,
+  ChevronDown,
+  ChevronUp,
 } from 'lucide-react';
 
 interface GameMetadata {
@@ -39,12 +41,17 @@ interface ConnectedPlayer {
 interface MultiplayerCardProps {
   gameMeta: GameMetadata;
   className?: string;
+  onSessionStatusChange?: (status: SessionStatus) => void;
 }
 
 type SessionStatus = 'idle' | 'creating' | 'waiting' | 'active' | 'error';
 type InteractionMode = 'idle' | 'starting' | 'joining';
 
-export default function MultiplayerCard({ gameMeta, className }: MultiplayerCardProps) {
+export default function MultiplayerCard({
+  gameMeta,
+  className,
+  onSessionStatusChange
+}: MultiplayerCardProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
 
@@ -54,6 +61,7 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
   const [isHost, setIsHost] = useState(false);
   const [sessionId, setSessionId] = useState<string>('');
   const [joinSessionId, setJoinSessionId] = useState<string>('');
+  const [isExpanded, setIsExpanded] = useState(true);
 
   // Mock connected players for demo
   const mockPlayers: ConnectedPlayer[] = [
@@ -104,7 +112,9 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
    */
   const handleCreateSession = async () => {
     try {
-      setSessionStatus('creating');
+      const newStatus: SessionStatus = 'creating';
+      setSessionStatus(newStatus);
+      onSessionStatusChange?.(newStatus);
 
       // TODO: Implement actual multiplayer session creation
       // This would typically involve:
@@ -115,7 +125,10 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
       // Simulate session creation
       await new Promise(resolve => setTimeout(resolve, 1500));
 
-      setSessionStatus('waiting');
+      const waitingStatus: SessionStatus = 'waiting';
+      setSessionStatus(waitingStatus);
+      onSessionStatusChange?.(waitingStatus);
+
       setConnectedPlayers([{
         id: 'host',
         name: 'You (Host)',
@@ -129,7 +142,9 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
 
     } catch (error) {
       console.error('Failed to start session:', error);
-      setSessionStatus('error');
+      const errorStatus: SessionStatus = 'error';
+      setSessionStatus(errorStatus);
+      onSessionStatusChange?.(errorStatus);
     }
   };
 
@@ -159,7 +174,9 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
   };
 
   const handleStartGame = () => {
-    setSessionStatus('active');
+    const activeStatus: SessionStatus = 'active';
+    setSessionStatus(activeStatus);
+    onSessionStatusChange?.(activeStatus);
     // TODO: Signal all peers to start the game
     console.log('Starting multiplayer game...');
   };
@@ -190,7 +207,9 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
    */
   const handleGoBack = () => {
     setInteractionMode('idle');
-    setSessionStatus('idle');
+    const idleStatus: SessionStatus = 'idle';
+    setSessionStatus(idleStatus);
+    onSessionStatusChange?.(idleStatus);
     setConnectedPlayers([]);
     setIsHost(false);
     setSessionId('');
@@ -237,17 +256,32 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
   return (
     <Card className={`border-gray-800 bg-gray-900 ${className}`}>
       <CardHeader className="pb-3">
-        <CardTitle className="text-white flex items-center gap-2 text-lg">
-          <GamepadIcon className="w-5 h-5" />
-          Multiplayer Session
-        </CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle className="text-white flex items-center gap-2 text-lg">
+            <GamepadIcon className="w-5 h-5" />
+            Multiplayer Session
+          </CardTitle>
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setIsExpanded(!isExpanded)}
+            className="text-gray-400 hover:text-white p-1 h-auto"
+          >
+            {isExpanded ? (
+              <ChevronUp className="w-4 h-4" />
+            ) : (
+              <ChevronDown className="w-4 h-4" />
+            )}
+          </Button>
+        </div>
         <div className="flex items-center gap-2">
           {getStatusIcon()}
           <span className="text-sm text-gray-400">{getStatusText()}</span>
         </div>
       </CardHeader>
 
-      <CardContent className="p-4 pt-0 space-y-4">
+      {isExpanded && (
+        <CardContent className="p-4 pt-0 space-y-4">
         {/* Game Cover */}
         {gameMeta.assets?.cover && (
           <div className="aspect-video rounded-lg overflow-hidden">
@@ -481,7 +515,8 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
             </p>
           </div>
         )}
-      </CardContent>
+        </CardContent>
+      )}
     </Card>
   );
 }

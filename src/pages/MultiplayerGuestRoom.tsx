@@ -13,6 +13,8 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, RefreshCw, Users, Wifi, WifiOff, Play } from 'lucide-react';
+import MultiplayerChat from '@/components/MultiplayerChat';
+import GameControls from '@/components/GameControls';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
@@ -318,7 +320,8 @@ export default function MultiplayerGuestRoom() {
       <div className="container mx-auto px-4 py-8">
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main video area */}
-          <div className="lg:col-span-3">
+          <div className="lg:col-span-3 space-y-6">
+            {/* Video Stream */}
             <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
               {/* Video element - hidden until stream is received */}
               <video
@@ -360,11 +363,9 @@ export default function MultiplayerGuestRoom() {
                 </div>
               )}
             </div>
-          </div>
 
-          {/* Side panel */}
-          <div className="lg:col-span-1">
-            <div className="space-y-6">
+            {/* Session Info moved below video */}
+            <div className="grid md:grid-cols-2 gap-6">
               {/* Session Info Card */}
               <Card className="border-gray-800 bg-gray-900">
                 <CardContent className="p-4 space-y-4">
@@ -437,13 +438,16 @@ export default function MultiplayerGuestRoom() {
                 </CardContent>
               </Card>
 
-              {/* Connection Controls */}
-              <Card className="border-gray-800 bg-gray-900">
-                <CardContent className="p-4 space-y-3">
-                  <h3 className="text-lg font-semibold text-white">Controls</h3>
+              {/* Game Controls */}
+              <GameControls />
+            </div>
 
+            {/* Connection Controls */}
+            <Card className="border-gray-800 bg-gray-900">
+              <CardContent className="p-4">
+                <div className="flex flex-wrap gap-3">
                   {(connectionState === 'error' || connectionState === 'disconnected') && (
-                    <Button onClick={handleRetry} className="w-full bg-purple-600 hover:bg-purple-700">
+                    <Button onClick={handleRetry} className="bg-purple-600 hover:bg-purple-700">
                       <RefreshCw className="w-4 h-4 mr-2" />
                       Reconnect
                     </Button>
@@ -452,18 +456,27 @@ export default function MultiplayerGuestRoom() {
                   <Button
                     onClick={handleLeave}
                     variant="outline"
-                    className="w-full bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+                    className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
                   >
                     <ArrowLeft className="w-4 h-4 mr-2" />
                     Leave Session
                   </Button>
 
-                  <div className="text-xs text-gray-500 mt-3">
+                  <div className="flex-1 text-xs text-gray-500 flex items-center">
                     <p>You are viewing this game session as a guest. The host controls the gameplay.</p>
                   </div>
-                </CardContent>
-              </Card>
-            </div>
+                </div>
+              </CardContent>
+            </Card>
+          </div>
+
+          {/* Right side - Player Chat */}
+          <div className="lg:col-span-1">
+            <MultiplayerChat
+              onlineCount={connectedPlayers}
+              currentUser="Guest"
+              isHost={false}
+            />
           </div>
         </div>
       </div>
