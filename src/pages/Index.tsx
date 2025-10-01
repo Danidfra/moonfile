@@ -47,12 +47,6 @@ const Index = () => {
       accentColor: 'purple' as const
     },
     {
-      title: "Multiplayer",
-      description: "Play with or against other users from around the world, with optional sats betting for competitive matches.",
-      icon: <Users className="w-6 h-6 text-white" />,
-      accentColor: 'cyan' as const
-    },
-    {
       title: "Casual Games",
       description: "Quick and fun iframe-embedded games perfect for casual gaming sessions and instant entertainment.",
       icon: <Zap className="w-6 h-6 text-white" />,

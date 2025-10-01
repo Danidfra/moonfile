@@ -4,7 +4,6 @@ import { Badge } from "@/components/ui/badge";
 import { Play, Image as ImageIcon } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
-import GamePlayModeModal from "@/components/GamePlayModeModal";
 import type { Game31996 } from "@/types/game";
 
 interface GameCardNostrProps {
@@ -14,7 +13,6 @@ interface GameCardNostrProps {
 export function GameCardNostr({ game }: GameCardNostrProps) {
   const navigate = useNavigate();
   const [imageError, setImageError] = useState(false);
-  const [showPlayModeModal, setShowPlayModeModal] = useState(false);
 
   // Get cover image with fallbacks -优先级: cover > icon > banner
   const coverImage = game.assets.cover || game.assets.icon || game.assets.banner;
@@ -59,33 +57,8 @@ export function GameCardNostr({ game }: GameCardNostrProps) {
 
   const shouldShowImage = hasImage && isValidImageUrl(coverImage);
 
-  // Check if game supports multiplayer
-  const isMultiplayer = game.modes.some(mode =>
-    ['multiplayer', 'co-op', 'competitive'].includes(mode.toLowerCase())
-  );
-
-  // Generate temporary room ID
-  const generateRoomId = () => {
-    return `room_${Math.random().toString(36).substr(2, 9)}_${Date.now().toString(36).substr(6, 4)}`;
-  };
-
   const handlePlayClick = () => {
-    if (isMultiplayer) {
-      setShowPlayModeModal(true);
-    } else {
-      navigate(`/game/${game.id}`);
-    }
-  };
-
-  const handleSinglePlayer = () => {
-    setShowPlayModeModal(false);
     navigate(`/game/${game.id}`);
-  };
-
-  const handleMultiplayer = () => {
-    setShowPlayModeModal(false);
-    const roomId = generateRoomId();
-    navigate(`/multiplayer/${game.id}/${roomId}`);
   };
 
   return (
@@ -199,15 +172,6 @@ export function GameCardNostr({ game }: GameCardNostrProps) {
           Play
         </Button>
       </CardFooter>
-
-      {/* Play Mode Modal */}
-      <GamePlayModeModal
-        isOpen={showPlayModeModal}
-        onClose={() => setShowPlayModeModal(false)}
-        onSinglePlayer={handleSinglePlayer}
-        onMultiplayer={handleMultiplayer}
-        gameTitle={game.title}
-      />
     </Card>
   );
 }

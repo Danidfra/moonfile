@@ -12,7 +12,6 @@ import RetroPlay from "./pages/RetroPlay";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
 import GamePage from "./pages/GamePage";
-import MultiplayerRoomPage from "./pages/MultiplayerRoomPage";
 
 export function AppRouter() {
   return (
@@ -29,8 +28,6 @@ export function AppRouter() {
         {/* Game player routes */}
         <Route path="/game/:id" element={<GamePage />} />
         <Route path="/retro/:gameId/play" element={<RetroPlay />} />
-        {/* Multiplayer room routes */}
-        <Route path="/multiplayer/:gameId/:roomId" element={<MultiplayerRoomPage />} />
         {/* NIP-19 route for npub1, note1, naddr1, nevent1, nprofile1 */}
         <Route path="/:nip19" element={<NIP19Page />} />
         {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
