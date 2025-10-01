@@ -15,8 +15,10 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 // Import ROM utilities for parsing Nostr events
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
+import { isMultiplayerGame } from '@/lib/gameUtils';
 import NesPlayer from '@/components/NesPlayer';
 import GameInteractionCard from '@/components/GameInteractionCard';
+import MultiplayerCard from '@/components/MultiplayerCard';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
@@ -61,6 +63,7 @@ export default function GamePage() {
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romPath, setRomPath] = useState<string | null>(null);
+  const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
 
   /**
    * Fetch game event and prepare ROM
@@ -89,6 +92,9 @@ export default function GamePage() {
 
         const event = events[0] as NostrEvent;
         console.log('[GamePage] Event fetched successfully, id:', event.id);
+
+        // Store the event for multiplayer detection
+        setGameEvent(event);
 
         // Parse game metadata from event
         const meta = parseGameMetadata(event);
@@ -240,7 +246,7 @@ export default function GamePage() {
     );
   }
 
-  if (!gameMeta || !romPath) {
+  if (!gameMeta || !romPath || !gameEvent) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <Card className="w-full max-w-2xl border-gray-800 bg-gray-900">
@@ -257,6 +263,9 @@ export default function GamePage() {
       </div>
     );
   }
+
+  // Detect if this is a multiplayer game
+  const isMultiplayer = isMultiplayerGame(gameEvent);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -309,8 +318,12 @@ export default function GamePage() {
           {/* Side panel */}
           <div className="lg:col-span-1">
             <div className="space-y-6">
-              {/* Game Interaction Card */}
-              <GameInteractionCard />
+              {/* Conditional rendering: MultiplayerCard for multiplayer games, GameInteractionCard for single-player */}
+              {isMultiplayer ? (
+                <MultiplayerCard gameMeta={gameMeta} />
+              ) : (
+                <GameInteractionCard />
+              )}
 
               {/* Game info */}
               <Card className="border-gray-800 bg-gray-900">

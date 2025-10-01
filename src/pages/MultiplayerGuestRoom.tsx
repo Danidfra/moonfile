@@ -1,0 +1,472 @@
+/**
+ * Multiplayer Guest Room Page
+ *
+ * For guests joining multiplayer sessions. Uses a video element instead of NesPlayer
+ * to receive the host's game stream via WebRTC. Maintains visual consistency with
+ * the host room while providing a spectator/guest experience.
+ */
+
+import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate, Link } from 'react-router-dom';
+import { useNostr } from '@jsr/nostrify__react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { ArrowLeft, RefreshCw, Users, Wifi, WifiOff, Play } from 'lucide-react';
+
+import type { NostrEvent } from '@jsr/nostrify__nostrify';
+
+type ConnectionState = 'connecting' | 'connected' | 'receiving' | 'error' | 'disconnected';
+
+interface GameMetadata {
+  id: string;
+  title: string;
+  summary?: string;
+  genres: string[];
+  modes: string[];
+  status?: string;
+  version?: string;
+  credits?: string;
+  platforms: string[];
+  assets: {
+    cover?: string;
+    icon?: string;
+    banner?: string;
+    screenshots: string[];
+  };
+}
+
+export default function MultiplayerGuestRoom() {
+  const { sessionId } = useParams<{ sessionId: string }>();
+  const navigate = useNavigate();
+  const { nostr } = useNostr();
+  const videoRef = useRef<HTMLVideoElement>(null);
+
+  // State management
+  const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
+  const [error, setError] = useState<string | null>(null);
+  const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
+  const [isStreamActive, setIsStreamActive] = useState(false);
+  const [connectedPlayers, setConnectedPlayers] = useState(0);
+
+  // WebRTC connection ref
+  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
+
+  /**
+   * Initialize WebRTC connection and set up event handlers
+   */
+  useEffect(() => {
+    const initializeWebRTC = async () => {
+      try {
+        console.log('[GuestRoom] Initializing WebRTC connection...');
+        setConnectionState('connecting');
+
+        // Create RTCPeerConnection
+        const peerConnection = new RTCPeerConnection({
+          iceServers: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' }
+          ]
+        });
+
+        peerConnectionRef.current = peerConnection;
+
+        // Handle incoming stream
+        peerConnection.ontrack = (event) => {
+          console.log('[GuestRoom] Received remote stream');
+          const [remoteStream] = event.streams;
+
+          if (videoRef.current) {
+            videoRef.current.srcObject = remoteStream;
+            setIsStreamActive(true);
+            setConnectionState('receiving');
+          }
+        };
+
+        // Handle connection state changes
+        peerConnection.onconnectionstatechange = () => {
+          const state = peerConnection.connectionState;
+          console.log('[GuestRoom] Connection state:', state);
+
+          switch (state) {
+            case 'connected':
+              setConnectionState('connected');
+              break;
+            case 'disconnected':
+            case 'failed':
+              setConnectionState('disconnected');
+              setIsStreamActive(false);
+              break;
+            case 'closed':
+              setConnectionState('disconnected');
+              setIsStreamActive(false);
+              break;
+          }
+        };
+
+        // Handle ICE connection state changes
+        peerConnection.oniceconnectionstatechange = () => {
+          console.log('[GuestRoom] ICE connection state:', peerConnection.iceConnectionState);
+        };
+
+        // TODO: Implement actual session joining logic
+        // This would involve:
+        // 1. Fetching session info from Nostr using sessionId
+        // 2. Creating WebRTC answer to host's offer
+        // 3. Exchanging ICE candidates via Nostr
+
+        // Simulate connection process
+        setTimeout(() => {
+          setConnectionState('connected');
+          setConnectedPlayers(3);
+
+          // Simulate receiving game metadata
+          setGameMeta({
+            id: 'demo-game',
+            title: 'Super Mario Bros.',
+            summary: 'Classic platformer game',
+            genres: ['platformer', 'action'],
+            modes: ['multiplayer'],
+            status: 'released',
+            platforms: ['NES'],
+            assets: {
+              cover: 'https://via.placeholder.com/400x300?text=Game+Cover',
+              screenshots: []
+            }
+          });
+
+          // Simulate stream starting
+          setTimeout(() => {
+            setIsStreamActive(true);
+            setConnectionState('receiving');
+          }, 1500);
+        }, 2000);
+
+      } catch (err) {
+        console.error('[GuestRoom] WebRTC initialization failed:', err);
+        setError(err instanceof Error ? err.message : 'Failed to initialize connection');
+        setConnectionState('error');
+      }
+    };
+
+    if (sessionId) {
+      initializeWebRTC();
+    }
+
+    // Cleanup function
+    return () => {
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+    };
+  }, [sessionId]);
+
+  /**
+   * Retry connection
+   */
+  const handleRetry = () => {
+    setError(null);
+    setIsStreamActive(false);
+    setConnectionState('connecting');
+    // Re-trigger the effect by updating a dependency or manually call initializeWebRTC
+  };
+
+  /**
+   * Leave session and go back
+   */
+  const handleLeave = () => {
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+    }
+    navigate('/games');
+  };
+
+  /**
+   * Get connection status info
+   */
+  const getConnectionInfo = () => {
+    switch (connectionState) {
+      case 'connecting':
+        return {
+          icon: <div className="animate-spin rounded-full h-4 w-4 border-b-2 border-purple-500"></div>,
+          text: 'Connecting to session...',
+          color: 'text-gray-400'
+        };
+      case 'connected':
+        return {
+          icon: <Wifi className="w-4 h-4 text-green-400" />,
+          text: 'Connected - Waiting for stream',
+          color: 'text-green-400'
+        };
+      case 'receiving':
+        return {
+          icon: <Play className="w-4 h-4 text-green-400" />,
+          text: 'Receiving game stream',
+          color: 'text-green-400'
+        };
+      case 'error':
+        return {
+          icon: <WifiOff className="w-4 h-4 text-red-400" />,
+          text: 'Connection failed',
+          color: 'text-red-400'
+        };
+      case 'disconnected':
+        return {
+          icon: <WifiOff className="w-4 h-4 text-gray-400" />,
+          text: 'Disconnected',
+          color: 'text-gray-400'
+        };
+      default:
+        return {
+          icon: <WifiOff className="w-4 h-4 text-gray-400" />,
+          text: 'Unknown status',
+          color: 'text-gray-400'
+        };
+    }
+  };
+
+  const connectionInfo = getConnectionInfo();
+
+  // Loading state
+  if (connectionState === 'connecting' && !error) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Card className="w-full max-w-2xl border-gray-800 bg-gray-900">
+          <CardContent className="p-8 text-center">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-purple-500 mx-auto mb-4"></div>
+            <h3 className="text-lg font-semibold text-white mb-2">Joining Session</h3>
+            <p className="text-gray-400">Connecting to multiplayer session...</p>
+            <div className="mt-4">
+              <Button onClick={handleLeave} variant="outline" size="sm">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Cancel
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  // Error state
+  if (connectionState === 'error') {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Card className="w-full max-w-2xl border-red-500 bg-gray-900">
+          <CardContent className="p-8 text-center">
+            <div className="text-red-400 text-6xl mb-4">⚠️</div>
+            <h3 className="text-xl font-semibold text-white mb-2">Connection Failed</h3>
+            <p className="text-gray-400 mb-4">{error}</p>
+            <div className="space-y-2">
+              <Button onClick={handleRetry} className="w-full">
+                <RefreshCw className="w-4 h-4 mr-2" />
+                Try Again
+              </Button>
+              <Button onClick={handleLeave} variant="outline" className="w-full">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Leave Session
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-black text-white">
+      {/* Header */}
+      <div className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-4">
+              <Button variant="ghost" size="sm" onClick={handleLeave} className="text-gray-300 hover:text-white">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Leave Session
+              </Button>
+
+              <div>
+                <h1 className="text-xl font-bold text-white">
+                  {gameMeta?.title || 'Multiplayer Session'}
+                </h1>
+                <div className="flex items-center gap-2 text-sm text-gray-400">
+                  <Badge variant="secondary" className="bg-purple-900 text-purple-300 border-purple-700">
+                    Guest View
+                  </Badge>
+                  {connectedPlayers > 0 && (
+                    <span className="flex items-center gap-1">
+                      <Users className="w-3 h-3" />
+                      {connectedPlayers} players
+                    </span>
+                  )}
+                </div>
+              </div>
+            </div>
+
+            {/* Connection Status */}
+            <div className="flex items-center gap-2">
+              {connectionInfo.icon}
+              <span className={`text-sm ${connectionInfo.color}`}>
+                {connectionInfo.text}
+              </span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div className="container mx-auto px-4 py-8">
+        <div className="grid lg:grid-cols-4 gap-8">
+          {/* Main video area */}
+          <div className="lg:col-span-3">
+            <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
+              {/* Video element - hidden until stream is received */}
+              <video
+                ref={videoRef}
+                autoPlay
+                playsInline
+                muted={false}
+                className={`w-full h-full object-contain ${isStreamActive ? 'block' : 'hidden'}`}
+                style={{ display: isStreamActive ? 'block' : 'none' }}
+              />
+
+              {/* Placeholder when no stream */}
+              {!isStreamActive && (
+                <div className="absolute inset-0 flex items-center justify-center">
+                  <div className="text-center">
+                    <div className="w-16 h-16 bg-gray-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                      <Play className="w-8 h-8 text-gray-600" />
+                    </div>
+                    <h3 className="text-lg font-semibold text-white mb-2">Waiting for Stream</h3>
+                    <p className="text-gray-400 text-sm">
+                      {connectionState === 'connected'
+                        ? 'Connected to session. Waiting for host to start the game...'
+                        : 'Establishing connection...'
+                      }
+                    </p>
+                  </div>
+                </div>
+              )}
+
+              {/* Connection overlay */}
+              {connectionState !== 'receiving' && (
+                <div className="absolute top-4 left-4">
+                  <div className="flex items-center gap-2 bg-gray-900/80 backdrop-blur-sm rounded px-3 py-2">
+                    {connectionInfo.icon}
+                    <span className={`text-sm ${connectionInfo.color}`}>
+                      {connectionInfo.text}
+                    </span>
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          {/* Side panel */}
+          <div className="lg:col-span-1">
+            <div className="space-y-6">
+              {/* Session Info Card */}
+              <Card className="border-gray-800 bg-gray-900">
+                <CardContent className="p-4 space-y-4">
+                  <h3 className="text-lg font-semibold text-white">Session Info</h3>
+
+                  {gameMeta?.assets?.cover && (
+                    <div className="aspect-video rounded-lg overflow-hidden">
+                      <img
+                        src={gameMeta.assets.cover}
+                        alt={gameMeta.title}
+                        className="w-full h-full object-cover"
+                      />
+                    </div>
+                  )}
+
+                  {gameMeta?.summary && (
+                    <div>
+                      <span className="text-gray-500">Description:</span>
+                      <p className="text-gray-300 text-sm mt-1">{gameMeta.summary}</p>
+                    </div>
+                  )}
+
+                  <div className="space-y-2 text-sm">
+                    {gameMeta?.genres?.length && gameMeta.genres.length > 0 && (
+                      <div>
+                        <span className="text-gray-500">Genre:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {gameMeta.genres.slice(0, 3).map((genre: string) => (
+                            <span key={genre} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                              {genre}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {gameMeta?.platforms?.length && gameMeta.platforms.length > 0 && (
+                      <div>
+                        <span className="text-gray-500">Platform:</span>
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {gameMeta.platforms.slice(0, 2).map((platform: string) => (
+                            <span key={platform} className="text-xs bg-gray-800 text-gray-300 px-2 py-1 rounded">
+                              {platform}
+                            </span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    <div className="pt-2 border-t border-gray-800">
+                      <span className="text-gray-500">Session:</span>
+                      <div className="text-xs text-gray-400 mt-1 space-y-1">
+                        <div>Mode: Guest (View Only)</div>
+                        <div>Session ID: {sessionId?.substring(0, 8)}...</div>
+                        <div>Status: {connectionInfo.text}</div>
+                      </div>
+                    </div>
+
+                    <div className="pt-4 border-t border-gray-800 mt-4">
+                      <Link
+                        to="https://soapbox.pub/mkstack"
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-xs text-gray-500 hover:text-purple-400 transition-colors"
+                      >
+                        Vibed with MKStack
+                      </Link>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Connection Controls */}
+              <Card className="border-gray-800 bg-gray-900">
+                <CardContent className="p-4 space-y-3">
+                  <h3 className="text-lg font-semibold text-white">Controls</h3>
+
+                  {(connectionState === 'error' || connectionState === 'disconnected') && (
+                    <Button onClick={handleRetry} className="w-full bg-purple-600 hover:bg-purple-700">
+                      <RefreshCw className="w-4 h-4 mr-2" />
+                      Reconnect
+                    </Button>
+                  )}
+
+                  <Button
+                    onClick={handleLeave}
+                    variant="outline"
+                    className="w-full bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+                  >
+                    <ArrowLeft className="w-4 h-4 mr-2" />
+                    Leave Session
+                  </Button>
+
+                  <div className="text-xs text-gray-500 mt-3">
+                    <p>You are viewing this game session as a guest. The host controls the gameplay.</p>
+                  </div>
+                </CardContent>
+              </Card>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
