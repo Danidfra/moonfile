@@ -1,9 +1,13 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Separator } from '@/components/ui/separator';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { useToast } from '@/hooks/useToast';
 import {
   Users,
   Play,
@@ -12,6 +16,8 @@ import {
   WifiOff,
   Clock,
   GamepadIcon,
+  Copy,
+  ArrowLeft,
 } from 'lucide-react';
 
 interface GameMetadata {
@@ -36,11 +42,18 @@ interface MultiplayerCardProps {
 }
 
 type SessionStatus = 'idle' | 'creating' | 'waiting' | 'active' | 'error';
+type InteractionMode = 'idle' | 'starting' | 'joining';
 
 export default function MultiplayerCard({ gameMeta, className }: MultiplayerCardProps) {
+  const navigate = useNavigate();
+  const { toast } = useToast();
+
   const [sessionStatus, setSessionStatus] = useState<SessionStatus>('idle');
+  const [interactionMode, setInteractionMode] = useState<InteractionMode>('idle');
   const [connectedPlayers, setConnectedPlayers] = useState<ConnectedPlayer[]>([]);
   const [isHost, setIsHost] = useState(false);
+  const [sessionId, setSessionId] = useState<string>('');
+  const [joinSessionId, setJoinSessionId] = useState<string>('');
 
   // Mock connected players for demo
   const mockPlayers: ConnectedPlayer[] = [
@@ -51,7 +64,7 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
       status: 'ready'
     },
     {
-      id: '2', 
+      id: '2',
       name: 'GamerPro',
       avatar: undefined,
       status: 'waiting'
@@ -64,71 +77,85 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
     }
   ];
 
-  const handleStartSession = async () => {
+  /**
+   * Generate a random session ID
+   */
+  const generateSessionId = (): string => {
+    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
+    let result = '';
+    for (let i = 0; i < 12; i++) {
+      result += chars.charAt(Math.floor(Math.random() * chars.length));
+    }
+    return result;
+  };
+
+  /**
+   * Handle clicking "Start Session" button
+   */
+  const handleStartSession = () => {
+    const newSessionId = generateSessionId();
+    setSessionId(newSessionId);
+    setInteractionMode('starting');
+    setIsHost(true);
+  };
+
+  /**
+   * Actually create the session after showing the invite link
+   */
+  const handleCreateSession = async () => {
     try {
       setSessionStatus('creating');
-      setIsHost(true);
-      
+
       // TODO: Implement actual multiplayer session creation
       // This would typically involve:
       // 1. Creating a WebRTC offer
       // 2. Publishing session info to Nostr
       // 3. Setting up peer connections
-      
+
       // Simulate session creation
       await new Promise(resolve => setTimeout(resolve, 1500));
-      
+
       setSessionStatus('waiting');
       setConnectedPlayers([{
         id: 'host',
         name: 'You (Host)',
         status: 'ready'
       }]);
-      
+
       // Simulate other players joining
       setTimeout(() => {
         setConnectedPlayers(prev => [...prev, ...mockPlayers.slice(0, 2)]);
       }, 2000);
-      
+
     } catch (error) {
       console.error('Failed to start session:', error);
       setSessionStatus('error');
     }
   };
 
-  const handleJoinSession = async () => {
-    try {
-      setSessionStatus('creating');
-      setIsHost(false);
-      
-      // TODO: Implement actual session joining
-      // This would typically involve:
-      // 1. Finding available sessions from Nostr
-      // 2. Creating WebRTC answer
-      // 3. Joining peer connections
-      
-      // Simulate joining
-      await new Promise(resolve => setTimeout(resolve, 1000));
-      
-      setSessionStatus('waiting');
-      setConnectedPlayers([
-        {
-          id: 'host',
-          name: 'Host Player',
-          status: 'ready'
-        },
-        {
-          id: 'you',
-          name: 'You',
-          status: 'ready'
-        },
-        ...mockPlayers.slice(0, 1)
-      ]);
-      
-    } catch (error) {
-      console.error('Failed to join session:', error);
-      setSessionStatus('error');
+  /**
+   * Handle clicking "Join Session" button
+   */
+  const handleJoinSession = () => {
+    setInteractionMode('joining');
+    setIsHost(false);
+  };
+
+  /**
+   * Handle joining a session with the entered session ID
+   */
+  const handleJoinWithId = () => {
+    if (!joinSessionId.trim()) {
+      toast({
+        title: "Session ID Required",
+        description: "Please enter a valid session ID",
+        variant: "destructive"
+      });
+      return;
     }
+
+    // Navigate to the guest room with the entered session ID
+    navigate(`/multiplayer/guest/${joinSessionId.trim()}`);
   };
 
   const handleStartGame = () => {
@@ -137,10 +164,41 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
     console.log('Starting multiplayer game...');
   };
 
-  const handleLeaveSession = () => {
+  /**
+   * Copy invite link to clipboard
+   */
+  const handleCopyLink = async () => {
+    const inviteLink = `/multiplayer/guest/${sessionId}`;
+    try {
+      await navigator.clipboard.writeText(window.location.origin + inviteLink);
+      toast({
+        title: "Link Copied!",
+        description: "Invite link has been copied to clipboard",
+      });
+    } catch (error) {
+      console.error('Failed to copy link:', error);
+      toast({
+        title: "Copy Failed",
+        description: "Could not copy link to clipboard",
+        variant: "destructive"
+      });
+    }
+  };
+
+  /**
+   * Go back to idle state
+   */
+  const handleGoBack = () => {
+    setInteractionMode('idle');
     setSessionStatus('idle');
     setConnectedPlayers([]);
     setIsHost(false);
+    setSessionId('');
+    setJoinSessionId('');
+  };
+
+  const handleLeaveSession = () => {
+    handleGoBack();
   };
 
   const getStatusIcon = () => {
@@ -212,7 +270,7 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
         <Separator className="bg-gray-800" />
 
         {/* Session Controls */}
-        {sessionStatus === 'idle' && (
+        {sessionStatus === 'idle' && interactionMode === 'idle' && (
           <div className="space-y-2">
             <Button
               onClick={handleStartSession}
@@ -229,6 +287,95 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
               <UserPlus className="w-4 h-4 mr-2" />
               Join Session
             </Button>
+          </div>
+        )}
+
+        {/* Start Session Mode - Show Invite Link */}
+        {interactionMode === 'starting' && sessionStatus === 'idle' && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="invite-link" className="text-sm font-medium text-gray-300">
+                Invite Link
+              </Label>
+              <div className="flex gap-2">
+                <Input
+                  id="invite-link"
+                  value={`/multiplayer/guest/${sessionId}`}
+                  readOnly
+                  className="flex-1 bg-gray-800 border-gray-700 text-gray-300 font-mono text-sm"
+                />
+                <Button
+                  onClick={handleCopyLink}
+                  size="sm"
+                  variant="outline"
+                  className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+                  aria-label="Copy invite link"
+                >
+                  <Copy className="w-4 h-4" />
+                </Button>
+              </div>
+              <p className="text-xs text-gray-500">
+                Share this link with other players to join your session
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleCreateSession}
+                className="flex-1 bg-green-600 hover:bg-green-700"
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Create Session
+              </Button>
+              <Button
+                onClick={handleGoBack}
+                variant="outline"
+                size="sm"
+                className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Join Session Mode - Show Session ID Input */}
+        {interactionMode === 'joining' && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="session-id" className="text-sm font-medium text-gray-300">
+                Enter Session ID
+              </Label>
+              <Input
+                id="session-id"
+                value={joinSessionId}
+                onChange={(e) => setJoinSessionId(e.target.value)}
+                placeholder="e.g. abc123xyz"
+                className="bg-gray-800 border-gray-700 text-white placeholder-gray-500"
+              />
+              <p className="text-xs text-gray-500">
+                Enter the session ID provided by the host
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleJoinWithId}
+                disabled={!joinSessionId.trim()}
+                className="flex-1 bg-purple-600 hover:bg-purple-700 disabled:opacity-50"
+              >
+                <UserPlus className="w-4 h-4 mr-2" />
+                Join
+              </Button>
+              <Button
+                onClick={handleGoBack}
+                variant="outline"
+                size="sm"
+                className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+            </div>
           </div>
         )}
 
@@ -290,7 +437,7 @@ export default function MultiplayerCard({ gameMeta, className }: MultiplayerCard
                   Start Game
                 </Button>
               )}
-              
+
               {sessionStatus === 'waiting' && !isHost && (
                 <div className="text-center py-2">
                   <p className="text-sm text-gray-400">Waiting for host to start...</p>
