@@ -5,7 +5,7 @@
  * Now uses the jsnes-based Emulator.tsx for game playback.
  */
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useNostr } from '@jsr/nostrify__react';
 import { Button } from '@/components/ui/button';
