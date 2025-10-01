@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback } from "react";
-import { useNostr } from "@nostrify/react";
+import { useNostr } from "@jsr/nostrify__react";
 import type { Game31996, NostrEvent } from "@/types/game";
 import { mergeByD } from "@/lib/gameParser";
 

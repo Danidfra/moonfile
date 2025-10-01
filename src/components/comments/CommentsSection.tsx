@@ -3,7 +3,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 import { MessageSquare } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import type { NostrEvent } from '@nostrify/nostrify';
+import type { NostrEvent } from '@jsr/nostrify__nostrify';
 import { CommentForm } from './CommentForm';
 import { Comment } from './Comment';
 

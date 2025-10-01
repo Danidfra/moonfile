@@ -272,7 +272,7 @@ Whenever new kinds are generated, the `NIP.md` file in the project must be creat
 The `useNostr` hook returns an object containing a `nostr` property, with `.query()` and `.event()` methods for querying and publishing Nostr events respectively.
 
 ```typescript
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 
 function useCustomHook() {
   const { nostr } = useNostr();
@@ -290,7 +290,7 @@ By default, the `nostr` object from `useNostr` uses a pool configuration that re
 To read and publish from one specific relay, use `nostr.relay()` with a WebSocket URL:
 
 ```typescript
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 
 function useSpecificRelay() {
   const { nostr } = useNostr();
@@ -311,7 +311,7 @@ function useSpecificRelay() {
 To read and publish from a specific set of relays, use `nostr.group()` with an array of relay URLs:
 
 ```typescript
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 
 function useRelayGroup() {
   const { nostr } = useNostr();
@@ -365,7 +365,7 @@ Both `relay` and `group` objects have the same API as the main `nostr` object, i
 When querying Nostr, the best practice is to create custom hooks that combine `useNostr` and `useQuery` to get the required data.
 
 ```typescript
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 import { useQuery } from '@tanstack/query';
 
 function usePosts() {
@@ -387,7 +387,7 @@ function usePosts() {
 For feed-like interfaces, implement infinite scroll using TanStack Query's `useInfiniteQuery` with Nostr's timestamp-based pagination:
 
 ```typescript
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 import { useInfiniteQuery } from '@tanstack/react-query';
 
 export function useGlobalFeed() {
@@ -542,7 +542,7 @@ function useCalendarEvents() {
 To display profile data for a user by their Nostr pubkey (such as an event author), use the `useAuthor` hook.
 
 ```tsx
-import type { NostrEvent, NostrMetadata } from '@nostrify/nostrify';
+import type { NostrEvent, NostrMetadata } from '@jsr/nostrify__nostrify';
 import { useAuthor } from '@/hooks/useAuthor';
 import { genUserName } from '@/lib/genUserName';
 

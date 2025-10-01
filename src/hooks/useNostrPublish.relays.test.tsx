@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
 import { useNostrPublish } from './useNostrPublish';
 import { TestApp } from '@/test/TestApp';
-import type { NostrEvent } from '@nostrify/nostrify';
+import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 // Mock dependencies
 const mockEvent = vi.fn();
@@ -13,7 +13,7 @@ const mockRelayGroup = {
   event: mockEvent
 };
 
-vi.mock('@nostrify/react', () => ({
+vi.mock('@jsr/nostrify__react', () => ({
   useNostr: () => ({
     nostr: {
       event: mockEvent,

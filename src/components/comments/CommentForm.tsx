@@ -5,7 +5,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { usePostComment } from '@/hooks/usePostComment';
 import { LoginArea } from '@/components/auth/LoginArea';
-import { NostrEvent } from '@nostrify/nostrify';
+import { NostrEvent } from '@jsr/nostrify__nostrify';
 import { MessageSquare, Send } from 'lucide-react';
 
 interface CommentFormProps {

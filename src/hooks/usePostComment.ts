@@ -1,6 +1,6 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
-import { NKinds, type NostrEvent } from '@nostrify/nostrify';
+import { NKinds, type NostrEvent } from '@jsr/nostrify__nostrify';
 
 interface PostCommentParams {
   root: NostrEvent | URL; // The root event to comment on

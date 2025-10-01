@@ -1,5 +1,5 @@
-import { NKinds, NostrEvent, NostrFilter } from '@nostrify/nostrify';
-import { useNostr } from '@nostrify/react';
+import { NKinds, NostrEvent, NostrFilter } from '@jsr/nostrify__nostrify';
+import { useNostr } from '@jsr/nostrify__react';
 import { useQuery } from '@tanstack/react-query';
 
 export function useComments(root: NostrEvent | URL, limit?: number) {

@@ -1,5 +1,5 @@
-import { type NLoginType, NUser, useNostrLogin } from '@nostrify/react/login';
-import { useNostr } from '@nostrify/react';
+import { type NLoginType, NUser, useNostrLogin } from '@jsr/nostrify__react/login';
+import { useNostr } from '@jsr/nostrify__react';
 import { useCallback, useMemo } from 'react';
 
 import { useAuthor } from './useAuthor.ts';

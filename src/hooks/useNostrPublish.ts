@@ -1,9 +1,9 @@
-import { useNostr } from "@nostrify/react";
+import { useNostr } from "@jsr/nostrify__react";
 import { useMutation, type UseMutationResult } from "@tanstack/react-query";
 
 import { useCurrentUser } from "./useCurrentUser";
 
-import type { NostrEvent } from "@nostrify/nostrify";
+import type { NostrEvent } from "@jsr/nostrify__nostrify";
 
 interface PublishEventParams {
   kind: number;

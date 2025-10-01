@@ -18,7 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Switch } from '@/components/ui/switch';
 import { Loader2, Upload } from 'lucide-react';
-import { NSchema as n, type NostrMetadata } from '@nostrify/nostrify';
+import { NSchema as n, type NostrMetadata } from '@jsr/nostrify__nostrify';
 import { useQueryClient } from '@tanstack/react-query';
 import { useUploadFile } from '@/hooks/useUploadFile';
 

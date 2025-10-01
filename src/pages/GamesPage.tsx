@@ -1,13 +1,13 @@
 import { useSeoMeta } from '@unhead/react';
 import { Header } from '@/components/Header';
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 import { useQuery } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { GameCardNostr } from '@/components/games/GameCardNostr';
 import { GamesEmptyState } from '@/components/games/GamesEmptyState';
 
 import { useNavigate } from 'react-router-dom';
-import type { NostrEvent } from '@nostrify/nostrify';
+import type { NostrEvent } from '@jsr/nostrify__nostrify';
 import type { Game31996 } from '@/types/game';
 
 const GamesPage = () => {

@@ -7,7 +7,7 @@
 
 import { useState, useEffect } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useNostr } from '@nostrify/react';
+import { useNostr } from '@jsr/nostrify__react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
@@ -18,7 +18,7 @@ import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/
 import NesPlayer from '@/components/NesPlayer';
 import GameInteractionCard from '@/components/GameInteractionCard';
 
-import type { NostrEvent } from '@nostrify/nostrify';
+import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 type PlayerState = 'loading' | 'ready' | 'error';
 

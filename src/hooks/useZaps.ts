@@ -9,8 +9,8 @@ import { nip57 } from 'nostr-tools';
 import type { Event } from 'nostr-tools';
 import type { WebLNProvider } from 'webln';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useNostr } from '@nostrify/react';
-import type { NostrEvent } from '@nostrify/nostrify';
+import { useNostr } from '@jsr/nostrify__react';
+import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 export function useZaps(
   target: Event | Event[],
