@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { useNostr } from '@jsr/nostrify__react';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useAppContext } from '@/hooks/useAppContext';
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 export type SessionStatus = 'idle' | 'creating' | 'available' | 'full' | 'error';
@@ -34,6 +35,7 @@ export function useMultiplayerSession(gameId: string) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const { mutate: publishEvent } = useNostrPublish();
+  const { config } = useAppContext();
 
   // Session state
   const [sessionId, setSessionId] = useState<string>('');
@@ -53,10 +55,9 @@ export function useMultiplayerSession(gameId: string) {
   const generateSessionId = (gameId: string): string => {
     const randomId = 'session_' + Math.random().toString(36).substring(2, 15) +
                      Math.random().toString(36).substring(2, 15);
-    // gameId should be the raw game slug like "tetris-2-usa-nintendo:v1.0"
-    // If it already has "game:" prefix, remove it
-    const cleanGameId = gameId.startsWith('game:') ? gameId.substring(5) : gameId;
-    return `game:${cleanGameId}:room:${randomId}`;
+    // gameId already includes "game:" prefix from the d tag
+    // Just append :room:sessionId to it
+    return `${gameId}:room:${randomId}`;
   };
 
   /**
@@ -142,7 +143,7 @@ export function useMultiplayerSession(gameId: string) {
       const offer = await peerConnection.createOffer();
       await peerConnection.setLocalDescription(offer);
 
-      // Publish initial session event
+      // Publish initial session event to main relay only
       publishEvent({
         kind: 31997,
         content: '',
@@ -152,7 +153,8 @@ export function useMultiplayerSession(gameId: string) {
           ['players', maxPlayers.toString()],
           ['status', 'available'],
           ['signal', btoa(JSON.stringify(offer))]
-        ]
+        ],
+        relays: [config.relayUrl]
       });
 
       setStatus('available');
@@ -215,7 +217,7 @@ export function useMultiplayerSession(gameId: string) {
       const answer = await peerConnection.createAnswer();
       await peerConnection.setLocalDescription(answer);
 
-      // Publish answer to join the session
+      // Publish answer to join the session to main relay only
       publishEvent({
         kind: 31997,
         content: '',
@@ -224,7 +226,8 @@ export function useMultiplayerSession(gameId: string) {
           ['host', hostPubkey],
           ['guest', user.pubkey],
           ['signal', btoa(JSON.stringify(answer))]
-        ]
+        ],
+        relays: [config.relayUrl]
       });
 
       setSessionId(sessionId);
@@ -279,7 +282,8 @@ export function useMultiplayerSession(gameId: string) {
               ['guest', guestPubkey],
               ...newConnected.map(g => ['connected', g]),
               ['status', newStatus]
-            ]
+            ],
+            relays: [config.relayUrl]
           });
 
           setStatus(newStatus);
@@ -297,7 +301,9 @@ export function useMultiplayerSession(gameId: string) {
   useEffect(() => {
     if (!sessionId || !nostr) return;
 
-    const subscription = nostr.req([{
+    // Use only the main relay for multiplayer session subscriptions
+    const mainRelay = nostr.relay(config.relayUrl);
+    const subscription = mainRelay.req([{
       kinds: [31997],
       '#d': [sessionId], // sessionId already includes the full format
       since: Math.floor(Date.now() / 1000) - 60 // Events from last minute

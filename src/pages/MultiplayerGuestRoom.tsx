@@ -18,6 +18,7 @@ import GameControls from '@/components/GameControls';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useAuthor } from '@/hooks/useAuthor';
+import { useAppContext } from '@/hooks/useAppContext';
 import { genUserName } from '@/lib/genUserName';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
@@ -48,6 +49,7 @@ export default function MultiplayerGuestRoom() {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
   const { mutate: publishEvent } = useNostrPublish();
+  const { config } = useAppContext();
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // State management
@@ -95,8 +97,9 @@ export default function MultiplayerGuestRoom() {
         const extractedGameId = sessionId.substring(5, roomIndex); // Remove "game:" prefix
         setGameId(extractedGameId);
 
-        // 1. Fetch the game event to get game info
-        const gameEvents = await nostr.query([{
+        // 1. Fetch the game event to get game info from main relay only
+        const mainRelay = nostr.relay(config.relayUrl);
+        const gameEvents = await mainRelay.query([{
           kinds: [31996],
           '#d': [`game:${extractedGameId}`],
           limit: 1
@@ -128,8 +131,8 @@ export default function MultiplayerGuestRoom() {
           }
         });
 
-        // 2. Fetch the latest session event
-        const sessionEvents = await nostr.query([{
+        // 2. Fetch the latest session event from main relay only
+        const sessionEvents = await mainRelay.query([{
           kinds: [31997],
           '#d': [sessionId], // Use the full sessionId as it includes the correct format
           limit: 1
@@ -214,7 +217,7 @@ export default function MultiplayerGuestRoom() {
         const answer = await peerConnection.createAnswer();
         await peerConnection.setLocalDescription(answer);
 
-        // 5. Publish answer to join session
+        // 5. Publish answer to join session to main relay only
         publishEvent({
           kind: 31997,
           content: '',
@@ -223,7 +226,8 @@ export default function MultiplayerGuestRoom() {
             ['host', hostTag[1]],
             ['guest', user.pubkey],
             ['signal', btoa(JSON.stringify(answer))]
-          ]
+          ],
+          relays: [config.relayUrl]
         });
 
         setConnectionState('connected');
