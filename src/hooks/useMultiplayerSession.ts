@@ -49,6 +49,147 @@ export function useMultiplayerSession(gameId: string) {
   const peerConnectionsRef = useRef<Map<string, PeerConnection>>(new Map());
   const hostVideoStreamRef = useRef<MediaStream | null>(null);
 
+  // Subscription ref for persistent guest response listening
+  const guestResponseSubscriptionRef = useRef<any>(null);
+
+  /**
+   * Subscribe to session updates
+   */
+  useEffect(() => {
+    if (!sessionId || !nostr) return;
+
+    // Use only</think> main relay for multiplayer session subscriptions
+    const mainRelay = nostr.relay(config.relayUrl);
+    const subscription = mainRelay.req([{
+      kinds: [31997],
+      '#d': [sessionId], // sessionId already includes full format
+      since: Math.floor(Date.now() / 1000) - 60 // Events from last minute
+    }], {
+      onevent: (event: NostrEvent) => {
+        console.log('[MultiplayerSession] Received session update:', event);
+
+        // Parse session data
+        const hostTag = event.tags.find(t => t[0] === 'host');
+        const playersTag = event.tags.find(t => t[0] === 'players');
+        const statusTag = event.tags.find(t => t[0] === 'status');
+        const signalTag = event.tags.find(t => t[0] === 'signal');
+        const guestTags = event.tags.filter(t => t[0] === 'guest');
+        const connectedTags = event.tags.filter(t => t[0] === 'connected');
+
+        if (hostTag && playersTag && statusTag) {
+          const sessionData: MultiplayerSession = {
+            sessionId,
+            gameId,
+            hostPubkey: hostTag[1],
+            maxPlayers: parseInt(playersTag[1]),
+            status: statusTag[1] as SessionStatus,
+            guests: guestTags.map(t => t[1]),
+            connected: connectedTags.map(t => t[1]),
+            signal: signalTag?.[1]
+          };
+
+          setSession(sessionData);
+          setStatus(sessionData.status);
+
+          // If we're the host and there's a new guest answer, handle it
+          if (isHost && user && event.pubkey !== user.pubkey && signalTag) {
+            try {
+              const signal = JSON.parse(atob(signalTag[1]));
+              if (signal.type === 'answer') {
+                handleGuestAnswer(event.pubkey, signal);
+              }
+            } catch (err) {
+              console.error('[MultiplayerSession] Failed to parse guest signal:', err);
+            }
+          }
+        }
+      },
+      oneose: () => {
+        console.log('[MultiplayerSession] Session subscription ended');
+      },
+      onclose: () => {
+        console.log('[MultiplayerSession] Session subscription closed');
+      }
+    });
+
+    return () => {
+      if (subscription) {
+        subscription.close();
+      }
+    };
+  }, [sessionId, gameId, nostr, isHost, user, config]);
+
+  /**
+   * Start listening for guest responses to the session
+   */
+  const startGuestResponseSubscription = useCallback((sessionIdToSubscribe: string) => {
+    if (!nostr || !config) {
+      console.error('[MultiplayerSession] Cannot start subscription - nostr or config not available');
+      return;
+    }
+
+    console.log('[MultiplayerSession] Starting guest response subscription for session:', sessionIdToSubscribe);
+
+    // Close any existing subscription
+    if (guestResponseSubscriptionRef.current) {
+      guestResponseSubscriptionRef.current.close();
+      guestResponseSubscriptionRef.current = null;
+    }
+
+    // Use only the main relay for subscription
+    const mainRelay = nostr.relay(config.relayUrl);
+
+    guestResponseSubscriptionRef.current = mainRelay.req([{
+      kinds: [31997],
+      '#d': [sessionIdToSubscribe],
+      since: Math.floor(Date.now() / 1000) // Only new events from now
+    }], {
+      onevent: (event: NostrEvent) => {
+        console.log('[MultiplayerSession] Received guest response:', event);
+
+        // Ignore events from the host (ourselves)
+        if (user && event.pubkey === user.pubkey) {
+          console.log('[MultiplayerSession] Ignoring own event');
+          return;
+        }
+
+        // Parse the guest response
+        const guestTag = event.tags.find(t => t[0] === 'guest');
+        const signalTag = event.tags.find(t => t[0] === 'signal');
+        const hostTag = event.tags.find(t => t[0] === 'host');
+
+        // Validate this is a response to our session
+        if (!guestTag || !signalTag || !hostTag || hostTag[1] !== user?.pubkey) {
+          console.log('[MultiplayerSession] Invalid guest response - missing required tags');
+          return;
+        }
+
+        const guestPubkey = guestTag[1];
+        console.log('[MultiplayerSession] Processing guest response from:', guestPubkey);
+
+        // Parse the WebRTC answer
+        try {
+          const answer = JSON.parse(atob(signalTag[1]));
+          if (answer.type === 'answer') {
+            handleGuestAnswer(guestPubkey, answer);
+          } else {
+            console.log('[MultiplayerSession] Ignoring non-answer signal type:', answer.type);
+          }
+        } catch (parseError) {
+          console.error('[MultiplayerSession] Failed to parse guest signal:', parseError);
+        }
+      },
+      oneose: () => {
+        console.log('[MultiplayerSession] Guest response subscription ended');
+      },
+      onclose: () => {
+        console.log('[MultiplayerSession] Guest response subscription closed');
+      }
+    });
+
+    console.log('[MultiplayerSession] Guest response subscription started successfully');
+  }, [nostr, config, user, handleGuestAnswer]);
+
   /**
    * Generate unique session ID in the format: game:gameId:room:sessionId
    */
@@ -160,6 +301,9 @@ export function useMultiplayerSession(gameId: string) {
       setStatus('available');
       console.log('[MultiplayerSession] Session started:', newSessionId);
 
+      // Start listening for guest responses immediately after publishing
+      startGuestResponseSubscription(newSessionId);
+
     } catch (err) {
       console.error('[MultiplayerSession] Failed to start session:', err);
       setError(err instanceof Error ? err.message : 'Failed to start session');
@@ -243,7 +387,10 @@ export function useMultiplayerSession(gameId: string) {
   }, [user, gameId, nostr, publishEvent, createPeerConnection]);
 
   /**
-   * Handle incoming guest connections (host only)
+   * Subscribe to session updates
+
+  /**
+   * Start listening for guest responses to the session
    */
   const handleGuestAnswer = useCallback(async (guestPubkey: string, answer: RTCSessionDescriptionInit) => {
     if (!isHost) return;
