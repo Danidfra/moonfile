@@ -20,6 +20,54 @@ Multiplayer gaming typically requires dedicated servers for matchmaking, game st
 4. Supports scalable multiplayer sessions
 5. Integrates with Nostr's identity and social features
 
+## Event Kind: 31996 - Game Definition
+
+This event kind defines NES/SNES games with metadata and ROM data.
+
+### Event Structure
+
+```json
+{
+  "kind": 31996,
+  "content": "<base64-encoded-rom-data>",
+  "tags": [
+    ["d", "game:super-mario-bros:v1.0"],
+    ["name", "Super Mario Bros."],
+    ["summary", "Classic platformer game"],
+    ["platform", "NES"],
+    ["mode", "singleplayer"],
+    ["mode", "multiplayer"],
+    ["players", "2"],
+    ["t", "platformer"],
+    ["t", "action"],
+    ["encoding", "base64"],
+    ["alt", "NES game: Super Mario Bros."]
+  ],
+  "pubkey": "<publisher-pubkey>",
+  "created_at": <timestamp>
+}
+```
+
+### Required Tags
+
+| Tag | Description | Example |
+|-----|-------------|---------|
+| `d` | Unique game identifier | `"game:super-mario-bros:v1.0"` |
+| `name` | Game title | `"Super Mario Bros."` |
+| `platform` | Console platform | `"NES"` |
+| `encoding` | ROM data encoding | `"base64"` |
+
+### Optional Tags
+
+| Tag | Description | Example |
+|-----|-------------|---------|
+| `summary` | Game description | `"Classic platformer game"` |
+| `mode` | Game modes supported | `"multiplayer"` |
+| `players` | Max players for multiplayer | `"2"` |
+| `t` | Genre/category tags | `"platformer"` |
+| `image` | Game assets | `["image", "cover", "https://..."]` |
+| `alt` | Human-readable description | `"NES game: Super Mario Bros."` |
+
 ## Event Kind: 31997 - Multiplayer Room Session
 
 This event kind is used to create, manage, and coordinate multiplayer gaming sessions.
@@ -31,17 +79,16 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
   "kind": 31997,
   "content": "",
   "tags": [
-    ["d", "room_q9k3ccg0p_ms"],
-    ["game", "game:tetris-2-usa-nintendo:v1.0"],
+    ["d", "game:super-mario-bros:room:session_abc123xyz"],
+    ["host", "<host-pubkey-hex>"],
     ["players", "2"],
-    ["host", "npub1..."],
-    ["status", "waiting"],
-    ["signal", "webrtc-offer-json"],
-    ["connected", "joining-pubkey"],
-    ["player", "joining-pubkey", "webrtc-answer-json"],
-    ["connected_count", "1"]
+    ["status", "available"],
+    ["signal", "<base64-webrtc-offer>"],
+    ["guest", "<guest-pubkey-hex>"],
+    ["connected", "<connected-pubkey-hex>"],
+    ["alt", "Multiplayer session for Super Mario Bros."]
   ],
-  "pubkey": "<host-pubkey>",
+  "pubkey": "<event-publisher-pubkey>",
   "created_at": <timestamp>
 }
 ```
@@ -50,100 +97,132 @@ This event kind is used to create, manage, and coordinate multiplayer gaming ses
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `d` | Unique room/session identifier | `"room_q9k3ccg0p_ms"` |
-| `game` | Game identifier matching the game's `d` tag | `"game:tetris-2-usa-nintendo:v1.0"` |
+| `d` | Session identifier (game:gameId:room:sessionId) | `"game:super-mario-bros:room:session_abc123xyz"` |
+| `host` | Host's public key (hex) | `"<host-pubkey-hex>"` |
 | `players` | Expected number of players (string) | `"2"` |
-| `host` | Host's public key (npub or hex) | `"npub1..."` |
-| `status` | Current room status | `"waiting"` |
+| `status` | Current room status | `"available"` |
 
 ### Optional Tags
 
 | Tag | Description | Example |
 |-----|-------------|---------|
-| `signal` | WebRTC offer/answer JSON (host only) | `"{"type":"offer",..."}` |
-| `player` | Player pubkey and their signal (for non-host players) | `["player", "npub1...", "answer-json"]` |
-| `alt` | Human-readable description | `"Multiplayer room for Tetris"` |
+| `signal` | WebRTC offer/answer (base64) | `"<base64-webrtc-signal>"` |
+| `guest` | Guest pubkey attempting to join | `"<guest-pubkey-hex>"` |
+| `connected` | Successfully connected player pubkey | `"<connected-pubkey-hex>"` |
+| `alt` | Human-readable description | `"Multiplayer session for Super Mario Bros."` |
 
 ### Status Values
 
 | Status | Description |
 |--------|-------------|
-| `waiting` | Waiting for players to join |
-| `active` | Players are connecting via WebRTC |
-| `full` | All expected players connected, ready to start |
-| `playing` | Game session is active |
+| `creating` | Session is being created |
+| `available` | Waiting for players to join |
+| `full` | All expected players connected |
 | `error` | Error state |
 
 ## Flow
 
-### 1. Room Creation (Host)
+### 1. Game Definition (Publisher)
 
-1. Host generates unique room ID
-2. Host creates WebRTC offer
-3. Host publishes kind 31997 event:
+1. Publisher uploads NES/SNES ROM
+2. Publisher creates metadata for the game
+3. Publisher publishes kind 31996 event with game data:
+   ```json
+   {
+     "kind": 31996,
+     "content": "<base64-rom-data>",
+     "tags": [
+       ["d", "game:super-mario-bros:v1.0"],
+       ["name", "Super Mario Bros."],
+       ["platform", "NES"],
+       ["mode", "multiplayer"],
+       ["players", "2"],
+       ["encoding", "base64"]
+     ]
+   }
+   ```
+
+### 2. Room Creation (Host)
+
+1. Host loads a multiplayer game (kind 31996 with mode "multiplayer")
+2. Host generates unique session ID
+3. Host creates WebRTC offer from game canvas stream
+4. Host publishes kind 31997 event:
    ```json
    {
      "kind": 31997,
      "content": "",
      "tags": [
-       ["d", "room_q9k3ccg0p_ms"],
-       ["game", "game:tetris-2-usa-nintendo:v1.0"],
+       ["d", "game:super-mario-bros:room:session_abc123xyz"],
+       ["host", "<host-pubkey-hex>"],
        ["players", "2"],
-       ["host", "<host-pubkey>"],
-       ["status", "waiting"],
-       ["signal", "<webrtc-offer-json>"]
+       ["status", "available"],
+       ["signal", "<base64-webrtc-offer>"]
      ]
    }
    ```
 
-### 2. Player Discovery
+### 3. Player Discovery
 
 Players discover rooms by:
-- Direct room URL: `/multiplayer/game:tetris-2-usa-nintendo:v1.0/room_q9k3ccg0p_ms`
-- Querying events: `{"kinds": [31997], "#d": ["room_q9k3ccg0p_ms"]}`
-- Game-specific queries: `{"kinds": [31997], "#game": ["game:tetris-2-usa-nintendo:v1.0"]}`
+- Direct session URL: `/multiplayer/guest/game:super-mario-bros:room:session_abc123xyz`
+- Querying events: `{"kinds": [31997], "#d": ["game:super-mario-bros:room:session_abc123xyz"]}`
+- Game-specific queries: `{"kinds": [31997], "#d": ["game:super-mario-bros:*"]}`
 
-### 3. Player Joining
+### 4. Player Joining
 
-1. Player navigates to room URL
-2. Player subscribes to room events
-3. Player receives host's WebRTC offer
-4. Player creates WebRTC answer
-5. Player publishes updated room event:
+1. Guest navigates to session URL
+2. Guest fetches game metadata (kind 31996) by game ID
+3. Guest fetches session data (kind 31997) by session ID
+4. Guest creates WebRTC answer to host's offer
+5. Guest publishes join event:
    ```json
    {
      "kind": 31997,
      "content": "",
      "tags": [
-       ["d", "room_q9k3ccg0p_ms"],
-       ["game", "game:tetris-2-usa-nintendo:v1.0"],
-       ["players", "2"],
-       ["host", "<host-pubkey>"],
-       ["status", "connecting"],
-       ["player", "<player-pubkey>", "<webrtc-answer-json>"]
+       ["d", "game:super-mario-bros:room:session_abc123xyz"],
+       ["host", "<host-pubkey-hex>"],
+       ["guest", "<guest-pubkey-hex>"],
+       ["signal", "<base64-webrtc-answer>"]
      ]
    }
    ```
 
-### 4. Connection Establishment
+### 5. Connection Establishment
 
-1. Host receives player's answer via Nostr event
-2. Host completes WebRTC connection
-3. Both peers establish data channels for game communication
-4. Host updates room status to "ready" when all players connected
+1. Host receives guest's answer via Nostr event subscription
+2. Host creates new peer connection for the guest
+3. Host sets guest's answer as remote description
+4. Host updates session with connected guest:
+   ```json
+   {
+     "kind": 31997,
+     "content": "",
+     "tags": [
+       ["d", "game:super-mario-bros:room:session_abc123xyz"],
+       ["host", "<host-pubkey-hex>"],
+       ["guest", "<guest-pubkey-hex>"],
+       ["connected", "<guest-pubkey-hex>"],
+       ["status", "full"]
+     ]
+   }
+   ```
 
-### 5. Game Session
+### 6. Game Session
 
-1. Host starts emulator/game instance
-2. Host streams game video/audio via WebRTC
-3. Players send input events via WebRTC data channels
-4. Host broadcasts game state updates to all players
+1. Host captures video stream from game canvas
+2. Host streams game video via WebRTC to all connected guests
+3. Guests receive and display the host's game stream
+4. Host maintains separate peer connections for each guest
+5. Host manages game state and controls
 
-### 6. Session End
+### 7. Session Management
 
-1. Any player can leave by publishing event with `status: "finished"`
-2. Room remains active for reconnecting within timeout period
-3. After timeout, room becomes inactive
+1. Guests can leave by closing connection
+2. Host can end session by closing all connections
+3. Session status is updated when players connect/disconnect
+4. Room becomes "full" when max players is reached
 
 ## WebRTC Signaling Format
 
@@ -188,13 +267,33 @@ Once connected, peers use WebRTC data channels for:
 
 ## Querying Rooms
 
+### Find Games by Platform
+
+```json
+{
+  "kinds": [31996],
+  "#platform": ["NES"],
+  "limit": 50
+}
+```
+
+### Find Multiplayer Games
+
+```json
+{
+  "kinds": [31996],
+  "#mode": ["multiplayer"],
+  "limit": 20
+}
+```
+
 ### Find Active Rooms for a Game
 
 ```json
 {
   "kinds": [31997],
-  "#game": ["game:tetris-2-usa-nintendo:v1.0"],
-  "#status": ["waiting", "ready"],
+  "#d": ["game:super-mario-bros:room:*"],
+  "#status": ["available"],
   "limit": 10
 }
 ```
@@ -204,17 +303,17 @@ Once connected, peers use WebRTC data channels for:
 ```json
 {
   "kinds": [31997],
-  "#host": ["<host-pubkey>"],
+  "#host": ["<host-pubkey-hex>"],
   "limit": 20
 }
 ```
 
-### Monitor Room Updates
+### Monitor Specific Session
 
 ```json
 {
   "kinds": [31997],
-  "#d": ["room_q9k3ccg0p_ms"],
+  "#d": ["game:super-mario-bros:room:session_abc123xyz"],
   "limit": 50
 }
 ```

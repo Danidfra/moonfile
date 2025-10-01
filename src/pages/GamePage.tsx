@@ -15,7 +15,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 // Import ROM utilities for parsing Nostr events
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
-import { isMultiplayerGame } from '@/lib/gameUtils';
+import { isMultiplayerGame, getMaxPlayers } from '@/lib/gameUtils';
 import NesPlayer from '@/components/NesPlayer';
 import GameInteractionCard from '@/components/GameInteractionCard';
 import MultiplayerCard from '@/components/MultiplayerCard';
@@ -68,6 +68,24 @@ export default function GamePage() {
   const [romPath, setRomPath] = useState<string | null>(null);
   const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
   const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
+
+  // Refs for multiplayer integration
+  const nesPlayerRef = useRef<any>(null);
+  const [gameStream, setGameStream] = useState<MediaStream | null>(null);
+
+  // Handle multiplayer stream start
+  const handleStreamStart = (stream: MediaStream) => {
+    setGameStream(stream);
+    console.log('[GamePage] Multiplayer stream started');
+  };
+
+  // Get canvas stream for multiplayer
+  const getGameCanvas = () => {
+    if (nesPlayerRef.current) {
+      return nesPlayerRef.current.getCanvasStream();
+    }
+    return null;
+  };
 
   /**
    * Fetch game event and prepare ROM
@@ -270,6 +288,7 @@ export default function GamePage() {
 
   // Detect if this is a multiplayer game
   const isMultiplayer = isMultiplayerGame(gameEvent);
+  const maxPlayers = getMaxPlayers(gameEvent);
 
   // Show chat when session is active or waiting
   const showMultiplayerChat = isMultiplayer && ['waiting', 'active'].includes(multiplayerSessionStatus);
@@ -319,6 +338,7 @@ export default function GamePage() {
               romPath={romPath}
               title={gameMeta.title}
               className="w-full"
+              ref={nesPlayerRef}
             />
           </div>
 
@@ -330,6 +350,9 @@ export default function GamePage() {
                 <MultiplayerCard
                   gameMeta={gameMeta}
                   onSessionStatusChange={setMultiplayerSessionStatus}
+                  onStreamStart={handleStreamStart}
+                  getGameStream={getGameCanvas}
+                  maxPlayers={maxPlayers}
                 />
               ) : (
                 <GameInteractionCard />

@@ -15,6 +15,10 @@ import { Badge } from '@/components/ui/badge';
 import { ArrowLeft, RefreshCw, Users, Wifi, WifiOff, Play } from 'lucide-react';
 import MultiplayerChat from '@/components/MultiplayerChat';
 import GameControls from '@/components/GameControls';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useAuthor } from '@/hooks/useAuthor';
+import { genUserName } from '@/lib/genUserName';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
@@ -42,6 +46,8 @@ export default function MultiplayerGuestRoom() {
   const { sessionId } = useParams<{ sessionId: string }>();
   const navigate = useNavigate();
   const { nostr } = useNostr();
+  const { user } = useCurrentUser();
+  const { mutate: publishEvent } = useNostrPublish();
   const videoRef = useRef<HTMLVideoElement>(null);
 
   // State management
@@ -50,20 +56,108 @@ export default function MultiplayerGuestRoom() {
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [isStreamActive, setIsStreamActive] = useState(false);
   const [connectedPlayers, setConnectedPlayers] = useState(0);
+  const [hostPubkey, setHostPubkey] = useState<string>('');
+  const [gameId, setGameId] = useState<string>('');
 
   // WebRTC connection ref
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
 
+  // Get host author info
+  const hostAuthor = useAuthor(hostPubkey);
+  const hostMetadata = hostAuthor.data?.metadata;
+  const hostDisplayName = hostMetadata?.name ?? genUserName(hostPubkey);
+
   /**
-   * Initialize WebRTC connection and set up event handlers
+   * Initialize WebRTC connection and join session
    */
   useEffect(() => {
-    const initializeWebRTC = async () => {
-      try {
-        console.log('[GuestRoom] Initializing WebRTC connection...');
-        setConnectionState('connecting');
+    const joinSession = async () => {
+      if (!sessionId || !user || !nostr) {
+        setError('Missing session ID, user login, or Nostr connection');
+        setConnectionState('error');
+        return;
+      }
 
-        // Create RTCPeerConnection
+      try {
+        console.log('[GuestRoom] Joining session:', sessionId);
+        setConnectionState('connecting');
+        setError(null);
+
+        // Parse session ID to extract game ID
+        // Expected format: game:<gameId>:room:<actualSessionId>
+        const sessionParts = sessionId.split(':');
+        if (sessionParts.length < 4 || sessionParts[0] !== 'game' || sessionParts[2] !== 'room') {
+          throw new Error('Invalid session ID format. Expected: game:gameId:room:sessionId');
+        }
+
+        const extractedGameId = sessionParts[1];
+        setGameId(extractedGameId);
+
+        // 1. Fetch the game event to get game info
+        const gameEvents = await nostr.query([{
+          kinds: [31996],
+          '#d': [extractedGameId],
+          limit: 1
+        }], { signal: AbortSignal.timeout(10000) });
+
+        if (gameEvents.length === 0) {
+          throw new Error(`Game "${extractedGameId}" not found`);
+        }
+
+        const gameEvent = gameEvents[0] as NostrEvent;
+
+        // Parse game metadata
+        const getTagValue = (tagName: string): string | undefined => {
+          const tag = gameEvent.tags.find(t => t[0] === tagName);
+          return tag?.[1];
+        };
+
+        setGameMeta({
+          id: extractedGameId,
+          title: getTagValue('name') || 'Unknown Game',
+          summary: getTagValue('summary'),
+          genres: gameEvent.tags.filter(t => t[0] === 't').map(t => t[1]).filter(Boolean),
+          modes: gameEvent.tags.filter(t => t[0] === 'mode').map(t => t[1]).filter(Boolean),
+          status: getTagValue('status'),
+          platforms: gameEvent.tags.filter(t => t[0] === 'platform').map(t => t[1]).filter(Boolean),
+          assets: {
+            cover: gameEvent.tags.find(t => t[0] === 'image' && t[1] === 'cover')?.[2],
+            screenshots: []
+          }
+        });
+
+        // 2. Fetch the latest session event
+        const sessionEvents = await nostr.query([{
+          kinds: [31997],
+          '#d': [sessionId], // Use the full sessionId as it includes the correct format
+          limit: 1
+        }], { signal: AbortSignal.timeout(10000) });
+
+        if (sessionEvents.length === 0) {
+          throw new Error('Session not found or expired');
+        }
+
+        const sessionEvent = sessionEvents[0] as NostrEvent;
+
+        // Parse session data
+        const hostTag = sessionEvent.tags.find(t => t[0] === 'host');
+        const statusTag = sessionEvent.tags.find(t => t[0] === 'status');
+        const signalTag = sessionEvent.tags.find(t => t[0] === 'signal');
+        const playersTag = sessionEvent.tags.find(t => t[0] === 'players');
+        const connectedTags = sessionEvent.tags.filter(t => t[0] === 'connected');
+
+        if (!hostTag || !signalTag) {
+          throw new Error('Invalid session data - missing host or signal');
+        }
+
+        if (statusTag?.[1] === 'full') {
+          throw new Error('Session is full');
+        }
+
+        setHostPubkey(hostTag[1]);
+        setConnectedPlayers(connectedTags.length + 1); // +1 for host
+
+        // 3. Set up WebRTC connection
         const peerConnection = new RTCPeerConnection({
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
@@ -73,7 +167,7 @@ export default function MultiplayerGuestRoom() {
 
         peerConnectionRef.current = peerConnection;
 
-        // Handle incoming stream
+        // Handle incoming video stream
         peerConnection.ontrack = (event) => {
           console.log('[GuestRoom] Received remote stream');
           const [remoteStream] = event.streams;
@@ -111,48 +205,37 @@ export default function MultiplayerGuestRoom() {
           console.log('[GuestRoom] ICE connection state:', peerConnection.iceConnectionState);
         };
 
-        // TODO: Implement actual session joining logic
-        // This would involve:
-        // 1. Fetching session info from Nostr using sessionId
-        // 2. Creating WebRTC answer to host's offer
-        // 3. Exchanging ICE candidates via Nostr
+        // 4. Parse host offer and create answer
+        const offer = JSON.parse(atob(signalTag[1]));
+        await peerConnection.setRemoteDescription(offer);
 
-        // Simulate connection process
-        setTimeout(() => {
-          setConnectionState('connected');
-          setConnectedPlayers(3);
+        const answer = await peerConnection.createAnswer();
+        await peerConnection.setLocalDescription(answer);
 
-          // Simulate receiving game metadata
-          setGameMeta({
-            id: 'demo-game',
-            title: 'Super Mario Bros.',
-            summary: 'Classic platformer game',
-            genres: ['platformer', 'action'],
-            modes: ['multiplayer'],
-            status: 'released',
-            platforms: ['NES'],
-            assets: {
-              cover: 'https://via.placeholder.com/400x300?text=Game+Cover',
-              screenshots: []
-            }
-          });
+        // 5. Publish answer to join session
+        publishEvent({
+          kind: 31997,
+          content: '',
+          tags: [
+            ['d', sessionId], // Use the full sessionId as it includes the correct format
+            ['host', hostTag[1]],
+            ['guest', user.pubkey],
+            ['signal', btoa(JSON.stringify(answer))]
+          ]
+        });
 
-          // Simulate stream starting
-          setTimeout(() => {
-            setIsStreamActive(true);
-            setConnectionState('receiving');
-          }, 1500);
-        }, 2000);
+        setConnectionState('connected');
+        console.log('[GuestRoom] Successfully joined session');
 
       } catch (err) {
-        console.error('[GuestRoom] WebRTC initialization failed:', err);
-        setError(err instanceof Error ? err.message : 'Failed to initialize connection');
+        console.error('[GuestRoom] Failed to join session:', err);
+        setError(err instanceof Error ? err.message : 'Failed to join session');
         setConnectionState('error');
       }
     };
 
     if (sessionId) {
-      initializeWebRTC();
+      joinSession();
     }
 
     // Cleanup function
@@ -162,7 +245,7 @@ export default function MultiplayerGuestRoom() {
         peerConnectionRef.current = null;
       }
     };
-  }, [sessionId]);
+  }, [sessionId, user, nostr, publishEvent]);
 
   /**
    * Retry connection
@@ -230,6 +313,27 @@ export default function MultiplayerGuestRoom() {
 
   const connectionInfo = getConnectionInfo();
 
+  // Check if user is logged in
+  if (!user) {
+    return (
+      <div className="min-h-screen bg-black text-white flex items-center justify-center">
+        <Card className="w-full max-w-2xl border-yellow-500 bg-gray-900">
+          <CardContent className="p-8 text-center">
+            <div className="text-yellow-400 text-6xl mb-4">🔐</div>
+            <h3 className="text-xl font-semibold text-white mb-2">Login Required</h3>
+            <p className="text-gray-400 mb-4">You must be logged in with Nostr to join multiplayer sessions</p>
+            <div className="space-y-2">
+              <Button onClick={handleLeave} variant="outline" className="w-full">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                Back to Games
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   // Loading state
   if (connectionState === 'connecting' && !error) {
     return (
@@ -296,6 +400,11 @@ export default function MultiplayerGuestRoom() {
                   <Badge variant="secondary" className="bg-purple-900 text-purple-300 border-purple-700">
                     Guest View
                   </Badge>
+                  {hostDisplayName && (
+                    <span className="text-xs">
+                      Host: {hostDisplayName}
+                    </span>
+                  )}
                   {connectedPlayers > 0 && (
                     <span className="flex items-center gap-1">
                       <Users className="w-3 h-3" />
@@ -364,8 +473,8 @@ export default function MultiplayerGuestRoom() {
               )}
             </div>
 
-            {/* Game Controls below video */}
-            <GameControls />
+            {/* Game Controls below video - for input if implemented */}
+            {isStreamActive && <GameControls />}
 
             {/* Connection Controls */}
             <Card className="border-gray-800 bg-gray-900">
@@ -388,7 +497,7 @@ export default function MultiplayerGuestRoom() {
                   </Button>
 
                   <div className="flex-1 text-xs text-gray-500 flex items-center">
-                    <p>You are viewing this game session as a guest. The host controls the gameplay.</p>
+                    <p>You are viewing this game session as a guest. The host ({hostDisplayName}) controls the gameplay.</p>
                   </div>
                 </div>
               </CardContent>
@@ -457,7 +566,8 @@ export default function MultiplayerGuestRoom() {
                     <span className="text-gray-500">Session:</span>
                     <div className="text-xs text-gray-400 mt-1 space-y-1">
                       <div>Mode: Guest (View Only)</div>
-                      <div>Session ID: {sessionId?.substring(0, 8)}...</div>
+                      <div>Game ID: {gameId}</div>
+                      <div>Host: {hostDisplayName}</div>
                       <div>Status: {connectionInfo.text}</div>
                     </div>
                   </div>

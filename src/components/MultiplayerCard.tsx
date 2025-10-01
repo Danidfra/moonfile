@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -8,6 +8,11 @@ import { Separator } from '@/components/ui/separator';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { useToast } from '@/hooks/useToast';
+import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
+import { useGameStream } from '@/hooks/useGameStream';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { useAuthor } from '@/hooks/useAuthor';
+import { genUserName } from '@/lib/genUserName';
 import {
   Users,
   Play,
@@ -31,120 +36,110 @@ interface GameMetadata {
   };
 }
 
-interface ConnectedPlayer {
-  id: string;
-  name: string;
-  avatar?: string;
-  status: 'ready' | 'waiting' | 'playing';
-}
-
 interface MultiplayerCardProps {
   gameMeta: GameMetadata;
   className?: string;
   onSessionStatusChange?: (status: SessionStatus) => void;
+  onStreamStart?: (stream: MediaStream) => void;
+  getGameStream?: () => MediaStream | null;
+  maxPlayers?: number;
 }
 
-type SessionStatus = 'idle' | 'creating' | 'waiting' | 'active' | 'error';
+type SessionStatus = 'idle' | 'creating' | 'available' | 'full' | 'error';
 type InteractionMode = 'idle' | 'starting' | 'joining';
 
 export default function MultiplayerCard({
   gameMeta,
   className,
-  onSessionStatusChange
+  onSessionStatusChange,
+  onStreamStart,
+  getGameStream,
+  maxPlayers = 2
 }: MultiplayerCardProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
+  const { user } = useCurrentUser();
 
-  const [sessionStatus, setSessionStatus] = useState<SessionStatus>('idle');
+  // Use the new multiplayer session hook
+  const {
+    sessionId,
+    session,
+    isHost,
+    status,
+    connectedPlayers,
+    error,
+    startSession,
+    joinSession,
+    leaveSession
+  } = useMultiplayerSession(gameMeta.id);
+
+  // Use game stream hook for video capture
+  const { startStream, stopStream, getStream } = useGameStream({
+    width: 256,
+    height: 240,
+    frameRate: 60
+  });
+
   const [interactionMode, setInteractionMode] = useState<InteractionMode>('idle');
-  const [connectedPlayers, setConnectedPlayers] = useState<ConnectedPlayer[]>([]);
-  const [isHost, setIsHost] = useState(false);
-  const [sessionId, setSessionId] = useState<string>('');
   const [joinSessionId, setJoinSessionId] = useState<string>('');
   const [isExpanded, setIsExpanded] = useState(true);
 
-  // Mock connected players for demo
-  const mockPlayers: ConnectedPlayer[] = [
-    {
-      id: '1',
-      name: 'Player1',
-      avatar: undefined,
-      status: 'ready'
-    },
-    {
-      id: '2',
-      name: 'GamerPro',
-      avatar: undefined,
-      status: 'waiting'
-    },
-    {
-      id: '3',
-      name: 'RetroKing',
-      avatar: undefined,
-      status: 'ready'
-    }
-  ];
+  // Set max players from props
+  const maxPlayersRef = useRef(maxPlayers);
+  maxPlayersRef.current = maxPlayers;
 
-  /**
-   * Generate a random session ID
-   */
-  const generateSessionId = (): string => {
-    const chars = 'abcdefghijklmnopqrstuvwxyz0123456789';
-    let result = '';
-    for (let i = 0; i < 12; i++) {
-      result += chars.charAt(Math.floor(Math.random() * chars.length));
-    }
-    return result;
-  };
+  // Sync status with parent component
+  useEffect(() => {
+    onSessionStatusChange?.(status);
+  }, [status, onSessionStatusChange]);
 
   /**
    * Handle clicking "Start Session" button
    */
   const handleStartSession = () => {
-    const newSessionId = generateSessionId();
-    setSessionId(newSessionId);
     setInteractionMode('starting');
-    setIsHost(true);
   };
 
   /**
    * Actually create the session after showing the invite link
    */
   const handleCreateSession = async () => {
+    if (!getGameStream) {
+      toast({
+        title: "Game Not Ready",
+        description: "Game streaming not available",
+        variant: "destructive"
+      });
+      return;
+    }
+
     try {
-      const newStatus: SessionStatus = 'creating';
-      setSessionStatus(newStatus);
-      onSessionStatusChange?.(newStatus);
+      // Get video stream from the game
+      const stream = getGameStream();
+      if (!stream) {
+        throw new Error('Failed to capture game stream - make sure the game is running');
+      }
 
-      // TODO: Implement actual multiplayer session creation
-      // This would typically involve:
-      // 1. Creating a WebRTC offer
-      // 2. Publishing session info to Nostr
-      // 3. Setting up peer connections
+      // Notify parent component about the stream
+      onStreamStart?.(stream);
 
-      // Simulate session creation
-      await new Promise(resolve => setTimeout(resolve, 1500));
+      // Start the multiplayer session
+      await startSession(stream, maxPlayersRef.current);
 
-      const waitingStatus: SessionStatus = 'waiting';
-      setSessionStatus(waitingStatus);
-      onSessionStatusChange?.(waitingStatus);
+      setInteractionMode('idle');
 
-      setConnectedPlayers([{
-        id: 'host',
-        name: 'You (Host)',
-        status: 'ready'
-      }]);
-
-      // Simulate other players joining
-      setTimeout(() => {
-        setConnectedPlayers(prev => [...prev, ...mockPlayers.slice(0, 2)]);
-      }, 2000);
+      toast({
+        title: "Session Created!",
+        description: "Your multiplayer session is now active and waiting for players",
+      });
 
     } catch (error) {
       console.error('Failed to start session:', error);
-      const errorStatus: SessionStatus = 'error';
-      setSessionStatus(errorStatus);
-      onSessionStatusChange?.(errorStatus);
+      toast({
+        title: "Session Failed",
+        description: error instanceof Error ? error.message : "Failed to create session",
+        variant: "destructive"
+      });
     }
   };
 
@@ -153,7 +148,6 @@ export default function MultiplayerCard({
    */
   const handleJoinSession = () => {
     setInteractionMode('joining');
-    setIsHost(false);
   };
 
   /**
@@ -174,11 +168,9 @@ export default function MultiplayerCard({
   };
 
   const handleStartGame = () => {
-    const activeStatus: SessionStatus = 'active';
-    setSessionStatus(activeStatus);
-    onSessionStatusChange?.(activeStatus);
-    // TODO: Signal all peers to start the game
-    console.log('Starting multiplayer game...');
+    // Game is automatically started when session is created
+    // This could be extended to signal specific game start events
+    console.log('Game is already running in multiplayer mode');
   };
 
   /**
@@ -207,27 +199,30 @@ export default function MultiplayerCard({
    */
   const handleGoBack = () => {
     setInteractionMode('idle');
-    const idleStatus: SessionStatus = 'idle';
-    setSessionStatus(idleStatus);
-    onSessionStatusChange?.(idleStatus);
-    setConnectedPlayers([]);
-    setIsHost(false);
-    setSessionId('');
     setJoinSessionId('');
   };
 
   const handleLeaveSession = () => {
-    handleGoBack();
+    leaveSession();
+    stopStream();
+    setInteractionMode('idle');
+    setJoinSessionId('');
+
+    toast({
+      title: "Left Session",
+      description: "You have left the multiplayer session",
+    });
   };
 
   const getStatusIcon = () => {
-    switch (sessionStatus) {
+    switch (status) {
       case 'idle':
         return <WifiOff className="w-4 h-4" />;
       case 'creating':
-      case 'waiting':
         return <Clock className="w-4 h-4 animate-pulse" />;
-      case 'active':
+      case 'available':
+        return <Wifi className="w-4 h-4 text-yellow-400" />;
+      case 'full':
         return <Wifi className="w-4 h-4 text-green-400" />;
       case 'error':
         return <WifiOff className="w-4 h-4 text-red-400" />;
@@ -237,20 +232,47 @@ export default function MultiplayerCard({
   };
 
   const getStatusText = () => {
-    switch (sessionStatus) {
+    if (error) return 'Connection Error';
+
+    switch (status) {
       case 'idle':
         return 'Not Connected';
       case 'creating':
         return 'Creating Session...';
-      case 'waiting':
-        return `Waiting for Players (${connectedPlayers.length}/4)`;
-      case 'active':
-        return 'Game Active';
+      case 'available':
+        return `Available (${connectedPlayers.length + (isHost ? 1 : 0)}/${maxPlayers})`;
+      case 'full':
+        return 'Room Full - Game Active';
       case 'error':
         return 'Connection Error';
       default:
         return 'Unknown';
     }
+  };
+
+  // Component to display connected players with profile info
+  const PlayerAvatar = ({ pubkey }: { pubkey: string }) => {
+    const author = useAuthor(pubkey);
+    const metadata = author.data?.metadata;
+    const displayName = metadata?.name ?? genUserName(pubkey);
+
+    return (
+      <div className="flex items-center gap-3 p-2 bg-gray-800 rounded">
+        <Avatar className="w-6 h-6">
+          <AvatarImage src={metadata?.picture} />
+          <AvatarFallback className="text-xs bg-gray-700 text-gray-300">
+            {displayName.charAt(0).toUpperCase()}
+          </AvatarFallback>
+        </Avatar>
+        <span className="text-sm text-gray-300 flex-1">{displayName}</span>
+        <Badge
+          variant="default"
+          className="text-xs bg-green-900 text-green-300 border-green-700"
+        >
+          connected
+        </Badge>
+      </div>
+    );
   };
 
   return (
@@ -304,28 +326,73 @@ export default function MultiplayerCard({
         <Separator className="bg-gray-800" />
 
         {/* Session Controls */}
-        {sessionStatus === 'idle' && interactionMode === 'idle' && (
+        {status === 'idle' && interactionMode === 'idle' && (
           <div className="space-y-2">
-            <Button
-              onClick={handleStartSession}
-              className="w-full bg-purple-600 hover:bg-purple-700"
-            >
-              <Play className="w-4 h-4 mr-2" />
-              Start Session
-            </Button>
-            <Button
-              onClick={handleJoinSession}
-              variant="outline"
-              className="w-full bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
-            >
-              <UserPlus className="w-4 h-4 mr-2" />
-              Join Session
-            </Button>
+            {user ? (
+              <>
+                <Button
+                  onClick={handleStartSession}
+                  className="w-full bg-purple-600 hover:bg-purple-700"
+                >
+                  <Play className="w-4 h-4 mr-2" />
+                  Start Session
+                </Button>
+                <Button
+                  onClick={handleJoinSession}
+                  variant="outline"
+                  className="w-full bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+                >
+                  <UserPlus className="w-4 h-4 mr-2" />
+                  Join Session
+                </Button>
+              </>
+            ) : (
+              <div className="text-center py-4">
+                <p className="text-sm text-gray-400 mb-2">Login required for multiplayer</p>
+                <Button disabled variant="outline" className="w-full">
+                  <Users className="w-4 h-4 mr-2" />
+                  Multiplayer Unavailable
+                </Button>
+              </div>
+            )}
           </div>
         )}
 
         {/* Start Session Mode - Show Invite Link */}
-        {interactionMode === 'starting' && sessionStatus === 'idle' && (
+        {interactionMode === 'starting' && status === 'idle' && (
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <Label className="text-sm font-medium text-gray-300">
+                Ready to Create Session
+              </Label>
+              <p className="text-xs text-gray-500">
+                This will start streaming your game to other players. Make sure your game is loaded and ready.
+              </p>
+            </div>
+
+            <div className="flex gap-2">
+              <Button
+                onClick={handleCreateSession}
+                className="flex-1 bg-green-600 hover:bg-green-700"
+                disabled={!getGameStream}
+              >
+                <Play className="w-4 h-4 mr-2" />
+                Create Session
+              </Button>
+              <Button
+                onClick={handleGoBack}
+                variant="outline"
+                size="sm"
+                className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
+              >
+                <ArrowLeft className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        )}
+
+        {/* Session Active - Show Invite Link */}
+        {(status === 'available' || status === 'full') && sessionId && (
           <div className="space-y-4">
             <div className="space-y-2">
               <Label htmlFor="invite-link" className="text-sm font-medium text-gray-300">
@@ -351,24 +418,6 @@ export default function MultiplayerCard({
               <p className="text-xs text-gray-500">
                 Share this link with other players to join your session
               </p>
-            </div>
-
-            <div className="flex gap-2">
-              <Button
-                onClick={handleCreateSession}
-                className="flex-1 bg-green-600 hover:bg-green-700"
-              >
-                <Play className="w-4 h-4 mr-2" />
-                Create Session
-              </Button>
-              <Button
-                onClick={handleGoBack}
-                variant="outline"
-                size="sm"
-                className="bg-gray-800 border-gray-700 text-gray-300 hover:bg-gray-700"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </Button>
             </div>
           </div>
         )}
@@ -414,7 +463,7 @@ export default function MultiplayerCard({
         )}
 
         {/* Loading State */}
-        {sessionStatus === 'creating' && (
+        {status === 'creating' && (
           <div className="text-center py-4">
             <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-purple-500 mx-auto mb-2"></div>
             <p className="text-sm text-gray-400">
@@ -424,7 +473,7 @@ export default function MultiplayerCard({
         )}
 
         {/* Connected Players */}
-        {(sessionStatus === 'waiting' || sessionStatus === 'active') && (
+        {(status === 'available' || status === 'full') && (
           <div className="space-y-3">
             <div className="flex items-center justify-between">
               <span className="text-sm font-medium text-gray-300">
@@ -432,52 +481,34 @@ export default function MultiplayerCard({
               </span>
               <Badge variant="outline" className="border-gray-600 text-gray-400">
                 <Users className="w-3 h-3 mr-1" />
-                {connectedPlayers.length}/4
+                {(connectedPlayers.length + (isHost ? 1 : 0))}/{maxPlayers}
               </Badge>
             </div>
 
             <div className="space-y-2 max-h-32 overflow-y-auto">
-              {connectedPlayers.map((player) => (
-                <div key={player.id} className="flex items-center gap-3 p-2 bg-gray-800 rounded">
+              {/* Show host */}
+              {isHost && user && (
+                <div className="flex items-center gap-3 p-2 bg-gray-800 rounded">
                   <Avatar className="w-6 h-6">
-                    <AvatarImage src={player.avatar} />
-                    <AvatarFallback className="text-xs bg-gray-700 text-gray-300">
-                      {player.name.charAt(0).toUpperCase()}
+                    <AvatarFallback className="text-xs bg-purple-700 text-purple-300">
+                      H
                     </AvatarFallback>
                   </Avatar>
-                  <span className="text-sm text-gray-300 flex-1">{player.name}</span>
-                  <Badge
-                    variant={player.status === 'ready' ? 'default' : 'secondary'}
-                    className={`text-xs ${
-                      player.status === 'ready'
-                        ? 'bg-green-900 text-green-300 border-green-700'
-                        : 'bg-yellow-900 text-yellow-300 border-yellow-700'
-                    }`}
-                  >
-                    {player.status}
+                  <span className="text-sm text-gray-300 flex-1">You (Host)</span>
+                  <Badge className="text-xs bg-purple-900 text-purple-300 border-purple-700">
+                    host
                   </Badge>
                 </div>
+              )}
+
+              {/* Show connected guests */}
+              {session?.connected.map((pubkey) => (
+                <PlayerAvatar key={pubkey} pubkey={pubkey} />
               ))}
             </div>
 
             {/* Session Actions */}
             <div className="space-y-2">
-              {sessionStatus === 'waiting' && isHost && connectedPlayers.length >= 2 && (
-                <Button
-                  onClick={handleStartGame}
-                  className="w-full bg-green-600 hover:bg-green-700"
-                >
-                  <Play className="w-4 h-4 mr-2" />
-                  Start Game
-                </Button>
-              )}
-
-              {sessionStatus === 'waiting' && !isHost && (
-                <div className="text-center py-2">
-                  <p className="text-sm text-gray-400">Waiting for host to start...</p>
-                </div>
-              )}
-
               <Button
                 onClick={handleLeaveSession}
                 variant="outline"
@@ -490,28 +521,28 @@ export default function MultiplayerCard({
         )}
 
         {/* Error State */}
-        {sessionStatus === 'error' && (
+        {status === 'error' && (
           <div className="text-center py-4">
             <div className="text-red-400 text-2xl mb-2">⚠️</div>
-            <p className="text-sm text-gray-400 mb-3">Failed to connect to session</p>
+            <p className="text-sm text-gray-400 mb-3">{error || "Failed to connect to session"}</p>
             <Button
-              onClick={() => setSessionStatus('idle')}
+              onClick={handleLeaveSession}
               variant="outline"
               size="sm"
               className="bg-gray-800 border-gray-700 text-gray-300"
             >
-              Try Again
+              Reset
             </Button>
           </div>
         )}
 
-        {/* Active Game State */}
-        {sessionStatus === 'active' && (
+        {/* Full Game State */}
+        {status === 'full' && (
           <div className="text-center py-4 bg-green-900/20 rounded border border-green-800">
             <Wifi className="w-8 h-8 text-green-400 mx-auto mb-2" />
-            <p className="text-sm text-green-300 font-medium">Game is live!</p>
+            <p className="text-sm text-green-300 font-medium">Room Full - Game Active!</p>
             <p className="text-xs text-gray-400 mt-1">
-              Playing with {connectedPlayers.length - 1} other player(s)
+              All players connected and ready to play
             </p>
           </div>
         )}
