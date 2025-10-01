@@ -98,7 +98,7 @@ export default function MultiplayerGuestRoom() {
         // 1. Fetch the game event to get game info
         const gameEvents = await nostr.query([{
           kinds: [31996],
-          '#d': [extractedGameId],
+          '#d': [`game:${extractedGameId}`],
           limit: 1
         }], { signal: AbortSignal.timeout(10000) });
 
