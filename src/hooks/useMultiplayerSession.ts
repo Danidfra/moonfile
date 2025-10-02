@@ -157,92 +157,13 @@ export function useMultiplayerSession(gameId: string) {
     return peerConnection;
   }, [isHost]);
 
-  /**
-   * Stable handle guest answer function using useRef to avoid subscription dependencies
-   */
-  const handleGuestAnswerRef = useRef<(guestPubkey: string, answer: RTCSessionDescriptionInit) => Promise<void>>();
 
-  handleGuestAnswerRef.current = async (guestPubkey: string, answer: RTCSessionDescriptionInit) => {
-    const { isHost, user, session, sessionId } = currentValuesRef.current;
-
-    if (!isHost || !user) return;
-
-    try {
-      console.log('[MultiplayerSession] Handling guest answer from:', guestPubkey);
-
-      // Create new peer connection for this guest
-      const peerConnection = createPeerConnection(guestPubkey);
-
-      // Create new offer for this specific guest
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      // Set the guest's answer
-      await peerConnection.setRemoteDescription(answer);
-
-      // Add guest to connected players
-      setConnectedPlayers(prev => [
-        ...prev.filter(p => p.pubkey !== guestPubkey),
-        { pubkey: guestPubkey, status: 'connecting' }
-      ]);
-
-      // Get current session data
-      const currentSession = session;
-      if (currentSession) {
-        // Deduplicate guest and connected lists
-        const existingGuests = currentSession.guests || [];
-        const existingConnected = currentSession.connected || [];
-
-        // Only add guest if not already present
-        const updatedGuests = existingGuests.includes(guestPubkey)
-          ? existingGuests
-          : [...existingGuests, guestPubkey];
-
-        // Only add to connected if not already present
-        const updatedConnected = existingConnected.includes(guestPubkey)
-          ? existingConnected
-          : [...existingConnected, guestPubkey];
-
-        const newStatus: SessionStatus = updatedConnected.length + 1 >= currentSession.maxPlayers ? 'full' : 'available';
-
-        console.log('[MultiplayerSession] Publishing session update with new connected guest:', guestPubkey);
-
-        // Publish updated session event with explicit created_at
-        publishEvent({
-          kind: 31997,
-          content: '',
-          created_at: Math.floor(Date.now() / 1000),
-          tags: [
-            ['d', sessionId],
-            ['host', user.pubkey],
-            ['players', currentSession.maxPlayers.toString()],
-            ...updatedGuests.map(g => ['guest', g]),
-            ...updatedConnected.map(g => ['connected', g]),
-            ['status', newStatus]
-          ]
-        });
-
-        // Update local session state immediately
-        const updatedSession: MultiplayerSession = {
-          ...currentSession,
-          guests: updatedGuests,
-          connected: updatedConnected,
-          status: newStatus
-        };
-
-        setSession(updatedSession);
-        setStatus(newStatus);
-      }
-
-    } catch (err) {
-      console.error('[MultiplayerSession] Failed to handle guest answer:', err);
-    }
-  };
 
   /**
-   * Stable subscription function that doesn't depend on changing references
+   * Unified subscription for all session events - handles session updates and guest responses
+   * This is the ONLY subscription handler for kind 31997 events
    */
-  const startSessionStateSubscription = useCallback((sessionIdToSubscribe: string, abortController: AbortController) => {
+  const startUnifiedSessionSubscription = useCallback((sessionIdToSubscribe: string, abortController: AbortController) => {
     if (!nostr || !config) {
       console.error('[MultiplayerSession] Cannot start session subscription - nostr or config not available');
       return;
@@ -289,7 +210,78 @@ export function useMultiplayerSession(gameId: string) {
                   const parsed = JSON.parse(atob(sessionData.signal));
                   if (parsed.type === 'answer') {
                     console.log('[MultiplayerSession] Processing guest answer from:', event.pubkey);
-                    handleGuestAnswerRef.current?.(event.pubkey, parsed);
+
+                    // Handle guest answer inline within the unified subscription
+                    try {
+                      console.log('[MultiplayerSession] Handling guest answer from:', event.pubkey);
+
+                      // Create new peer connection for this guest
+                      const peerConnection = createPeerConnection(event.pubkey);
+
+                      // Create new offer for this specific guest
+                      const offer = await peerConnection.createOffer();
+                      await peerConnection.setLocalDescription(offer);
+
+                      // Set the guest's answer
+                      await peerConnection.setRemoteDescription(parsed);
+
+                      // Add guest to connected players
+                      setConnectedPlayers(prev => [
+                        ...prev.filter(p => p.pubkey !== event.pubkey),
+                        { pubkey: event.pubkey, status: 'connecting' }
+                      ]);
+
+                      // Get current session data from current values
+                      const { session: currentSession, sessionId: currentSessionId } = currentValuesRef.current;
+                      if (currentSession) {
+                        // Deduplicate guest and connected lists
+                        const existingGuests = currentSession.guests || [];
+                        const existingConnected = currentSession.connected || [];
+
+                        // Only add guest if not already present
+                        const updatedGuests = existingGuests.includes(event.pubkey)
+                          ? existingGuests
+                          : [...existingGuests, event.pubkey];
+
+                        // Only add to connected if not already present
+                        const updatedConnected = existingConnected.includes(event.pubkey)
+                          ? existingConnected
+                          : [...existingConnected, event.pubkey];
+
+                        const newStatus: SessionStatus = updatedConnected.length + 1 >= currentSession.maxPlayers ? 'full' : 'available';
+
+                        console.log('[MultiplayerSession] Publishing session update with new connected guest:', event.pubkey);
+
+                        // Publish updated session event with explicit created_at
+                        publishEvent({
+                          kind: 31997,
+                          content: '',
+                          created_at: Math.floor(Date.now() / 1000),
+                          tags: [
+                            ['d', currentSessionId],
+                            ['host', currentUser.pubkey],
+                            ['players', currentSession.maxPlayers.toString()],
+                            ...updatedGuests.map(g => ['guest', g]),
+                            ...updatedConnected.map(g => ['connected', g]),
+                            ['status', newStatus]
+                          ]
+                        });
+
+                        // Update local session state immediately
+                        const updatedSession: MultiplayerSession = {
+                          ...currentSession,
+                          guests: updatedGuests,
+                          connected: updatedConnected,
+                          status: newStatus
+                        };
+
+                        setSession(updatedSession);
+                        setStatus(newStatus);
+                      }
+
+                    } catch (guestErr) {
+                      console.error('[MultiplayerSession] Failed to handle guest answer:', guestErr);
+                    }
                   }
                 } catch (err) {
                   console.error('[MultiplayerSession] Failed to parse guest signal:', err);
@@ -459,16 +451,16 @@ export function useMultiplayerSession(gameId: string) {
     // Create AbortController for subscription cancellation
     const controller = new AbortController();
 
-    // Start session state subscription
-    startSessionStateSubscription(sessionId, controller);
+    // Start unified session subscription (handles all session events and guest responses)
+    startUnifiedSessionSubscription(sessionId, controller);
     sessionSubscribedRef.current = true;
 
     return () => {
-      console.log('[MultiplayerSession] Cleaning up session subscription for:', sessionId);
+      console.log('[MultiplayerSession] Cleaning up unified session subscription for:', sessionId);
       controller.abort();
       sessionSubscribedRef.current = false;
     };
-  }, [sessionId, startSessionStateSubscription]);
+  }, [sessionId, startUnifiedSessionSubscription]);
 
   /**
    * Leave session
