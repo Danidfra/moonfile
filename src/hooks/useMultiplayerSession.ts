@@ -137,7 +137,83 @@ export function useMultiplayerSession(gameId: string) {
     return peerConnection;
   }, [isHost]);
 
+  /**
+   * Handle guest answer for WebRTC connection and update session
+   */
+  const handleGuestAnswer = useCallback(async (guestPubkey: string, answer: RTCSessionDescriptionInit) => {
+    if (!isHost || !user) return;
 
+    try {
+      console.log('[MultiplayerSession] Handling guest answer from:', guestPubkey);
+
+      // Create new peer connection for this guest
+      const peerConnection = createPeerConnection(guestPubkey);
+
+      // Create new offer for this specific guest
+      const offer = await peerConnection.createOffer();
+      await peerConnection.setLocalDescription(offer);
+
+      // Set the guest's answer
+      await peerConnection.setRemoteDescription(answer);
+
+      // Add guest to connected players
+      setConnectedPlayers(prev => [
+        ...prev.filter(p => p.pubkey !== guestPubkey),
+        { pubkey: guestPubkey, status: 'connecting' }
+      ]);
+
+      // Get current session data
+      const currentSession = session;
+      if (currentSession) {
+        // Deduplicate guest and connected lists
+        const existingGuests = currentSession.guests || [];
+        const existingConnected = currentSession.connected || [];
+
+        // Only add guest if not already present
+        const updatedGuests = existingGuests.includes(guestPubkey)
+          ? existingGuests
+          : [...existingGuests, guestPubkey];
+
+        // Only add to connected if not already present
+        const updatedConnected = existingConnected.includes(guestPubkey)
+          ? existingConnected
+          : [...existingConnected, guestPubkey];
+
+        const newStatus: SessionStatus = updatedConnected.length + 1 >= currentSession.maxPlayers ? 'full' : 'available';
+
+        console.log('[MultiplayerSession] Publishing session update with new connected guest:', guestPubkey);
+
+        // Publish updated session event with explicit created_at
+        publishEvent({
+          kind: 31997,
+          content: '',
+          created_at: Math.floor(Date.now() / 1000),
+          tags: [
+            ['d', sessionId],
+            ['host', user.pubkey],
+            ['players', currentSession.maxPlayers.toString()],
+            ...updatedGuests.map(g => ['guest', g]),
+            ...updatedConnected.map(g => ['connected', g]),
+            ['status', newStatus]
+          ]
+        });
+
+        // Update local session state immediately
+        const updatedSession: MultiplayerSession = {
+          ...currentSession,
+          guests: updatedGuests,
+          connected: updatedConnected,
+          status: newStatus
+        };
+
+        setSession(updatedSession);
+        setStatus(newStatus);
+      }
+
+    } catch (err) {
+      console.error('[MultiplayerSession] Failed to handle guest answer:', err);
+    }
+  }, [isHost, user, session, sessionId, publishEvent, createPeerConnection]);
 
   /**
    * Single subscription for all session events - handles both session state updates and guest responses
@@ -190,54 +266,7 @@ export function useMultiplayerSession(gameId: string) {
                   const parsed = JSON.parse(atob(sessionData.signal));
                   if (parsed.type === 'answer') {
                     console.log('[MultiplayerSession] Processing guest answer from:', event.pubkey);
-
-                    // Handle guest answer inline to avoid dependency issues
-                    try {
-                      console.log('[MultiplayerSession] Handling guest answer from:', event.pubkey);
-
-                      // Create new peer connection for this guest
-                      const peerConnection = createPeerConnection(event.pubkey);
-
-                      // Create new offer for this specific guest
-                      const offer = await peerConnection.createOffer();
-                      await peerConnection.setLocalDescription(offer);
-
-                      // Set the guest's answer
-                      await peerConnection.setRemoteDescription(parsed);
-
-                      // Add guest to connected players
-                      setConnectedPlayers(prev => [
-                        ...prev.filter(p => p.pubkey !== event.pubkey),
-                        { pubkey: event.pubkey, status: 'connecting' }
-                      ]);
-
-                      // Update session with connected guest if not already connected
-                      if (sessionData && !sessionData.connected.includes(event.pubkey)) {
-                        const newConnected = [...sessionData.connected, event.pubkey];
-                        const newStatus: SessionStatus = newConnected.length + 1 >= sessionData.maxPlayers ? 'full' : 'available';
-
-                        console.log('[MultiplayerSession] Publishing session update with new connected guest:', event.pubkey);
-
-                        publishEvent({
-                          kind: 31997,
-                          content: '',
-                          tags: [
-                            ['d', sessionIdToSubscribe],
-                            ['host', user.pubkey],
-                            ['players', sessionData.maxPlayers.toString()],
-                            ...sessionData.guests.map(g => ['guest', g]),
-                            ['guest', event.pubkey],
-                            ...newConnected.map(g => ['connected', g]),
-                            ['status', newStatus]
-                          ]
-                        });
-
-                        setStatus(newStatus);
-                      }
-
-                    } catch (guestErr) {
-                      console.error('[MultiplayerSession] Failed to handle guest answer:', guestErr);
-                    }
+                    handleGuestAnswer(event.pubkey, parsed);
                   }
                 } catch (err) {
                   console.error('[MultiplayerSession] Failed to parse guest signal:', err);
@@ -260,7 +289,7 @@ export function useMultiplayerSession(gameId: string) {
     handleSubscription();
 
     console.log('[MultiplayerSession] Unified session subscription started successfully');
-  }, [nostr, config, isHost, user, createPeerConnection, publishEvent, parseSessionData, gameId]);
+  }, [nostr, config, isHost, user, handleGuestAnswer, parseSessionData, gameId]);
 
 
   /**
