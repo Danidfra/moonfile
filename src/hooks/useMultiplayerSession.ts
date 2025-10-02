@@ -211,72 +211,77 @@ export function useMultiplayerSession(gameId: string) {
                   if (parsed.type === 'answer') {
                     console.log('[MultiplayerSession] Processing guest answer from:', event.pubkey);
 
-                    // Handle guest answer inline within the unified subscription
+                    // Handle guest answer - do not create new offer, just process the answer
                     try {
-                      console.log('[MultiplayerSession] Handling guest answer from:', event.pubkey);
+                      console.log('[MultiplayerSession] Processing guest answer from:', event.pubkey);
 
-                      // Create new peer connection for this guest
+                      // Create peer connection for this guest (without creating new offer)
                       const peerConnection = createPeerConnection(event.pubkey);
 
-                      // Create new offer for this specific guest
-                      const offer = await peerConnection.createOffer();
-                      await peerConnection.setLocalDescription(offer);
-
-                      // Set the guest's answer
+                      // Set the guest's answer as remote description (offer was already created in initial host event)
                       await peerConnection.setRemoteDescription(parsed);
 
-                      // Add guest to connected players
+                      // Add guest to connected players UI
                       setConnectedPlayers(prev => [
                         ...prev.filter(p => p.pubkey !== event.pubkey),
                         { pubkey: event.pubkey, status: 'connecting' }
                       ]);
 
-                      // Get current session data from current values
-                      const { session: currentSession, sessionId: currentSessionId } = currentValuesRef.current;
-                      if (currentSession) {
-                        // Deduplicate guest and connected lists
-                        const existingGuests = currentSession.guests || [];
-                        const existingConnected = currentSession.connected || [];
+                      // Use the most current session data from sessionData (not from ref to avoid stale state)
+                      const mostCurrentSession = sessionData;
+                      if (mostCurrentSession) {
+                        // Deduplicate guest and connected lists using current session data
+                        const existingGuests = mostCurrentSession.guests || [];
+                        const existingConnected = mostCurrentSession.connected || [];
 
-                        // Only add guest if not already present
+                        // Only add guest if not already present (deduplication)
                         const updatedGuests = existingGuests.includes(event.pubkey)
                           ? existingGuests
                           : [...existingGuests, event.pubkey];
 
-                        // Only add to connected if not already present
+                        // Only add to connected if not already present (deduplication)
                         const updatedConnected = existingConnected.includes(event.pubkey)
                           ? existingConnected
                           : [...existingConnected, event.pubkey];
 
-                        const newStatus: SessionStatus = updatedConnected.length + 1 >= currentSession.maxPlayers ? 'full' : 'available';
+                        // Only proceed if there are actual changes (avoid duplicate publications)
+                        const hasGuestChanges = !existingGuests.includes(event.pubkey);
+                        const hasConnectedChanges = !existingConnected.includes(event.pubkey);
 
-                        console.log('[MultiplayerSession] Publishing session update with new connected guest:', event.pubkey);
+                        if (hasGuestChanges || hasConnectedChanges) {
+                          const newStatus: SessionStatus = updatedConnected.length + 1 >= mostCurrentSession.maxPlayers ? 'full' : 'available';
 
-                        // Publish updated session event with explicit created_at
-                        publishEvent({
-                          kind: 31997,
-                          content: '',
-                          created_at: Math.floor(Date.now() / 1000),
-                          tags: [
-                            ['d', currentSessionId],
-                            ['host', currentUser.pubkey],
-                            ['players', currentSession.maxPlayers.toString()],
-                            ...updatedGuests.map(g => ['guest', g]),
-                            ...updatedConnected.map(g => ['connected', g]),
-                            ['status', newStatus]
-                          ]
-                        });
+                          console.log('[MultiplayerSession] Publishing host session update with new guest:', event.pubkey);
 
-                        // Update local session state immediately
-                        const updatedSession: MultiplayerSession = {
-                          ...currentSession,
-                          guests: updatedGuests,
-                          connected: updatedConnected,
-                          status: newStatus
-                        };
+                          // Publish updated host session event retaining original signal
+                          publishEvent({
+                            kind: 31997,
+                            content: '',
+                            created_at: Math.floor(Date.now() / 1000),
+                            tags: [
+                              ['d', mostCurrentSession.sessionId],
+                              ['host', currentUser.pubkey],
+                              ['players', mostCurrentSession.maxPlayers.toString()],
+                              ['signal', mostCurrentSession.signal || ''], // Retain original signal (offer)
+                              ...updatedGuests.map(g => ['guest', g]),
+                              ...updatedConnected.map(g => ['connected', g]),
+                              ['status', newStatus]
+                            ]
+                          });
 
-                        setSession(updatedSession);
-                        setStatus(newStatus);
+                          // Update local session state immediately with most current data
+                          const updatedSession: MultiplayerSession = {
+                            ...mostCurrentSession,
+                            guests: updatedGuests,
+                            connected: updatedConnected,
+                            status: newStatus
+                          };
+
+                          setSession(updatedSession);
+                          setStatus(newStatus);
+                        } else {
+                          console.log('[MultiplayerSession] Guest already exists, skipping duplicate publication');
+                        }
                       }
 
                     } catch (guestErr) {
