@@ -8,7 +8,8 @@
 import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize, AlertTriangle } from 'lucide-react';
+import NesPlayer from '@/components/NesPlayer';
 
 interface EmulatorJSPlayerProps {
   romData: string; // Base64 ROM data
@@ -74,6 +75,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [emulatorKey, setEmulatorKey] = useState(0);
+  const [useFallback, setUseFallback] = useState(false);
 
   const emulatorContainerRef = useRef<HTMLDivElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
@@ -131,6 +133,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
       try {
         console.log('[EmulatorJSPlayer] Initializing EmulatorJS...');
         setError(null);
+        setUseFallback(false);
 
         if (!romData) {
           throw new Error('No ROM data provided');
@@ -153,40 +156,72 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           gameContainerRef.current.innerHTML = '';
         }
 
+        // Check if EmulatorJS files exist before trying to load them
+        const loaderResponse = await fetch('/emulatorjs/loader.js');
+        if (!loaderResponse.ok) {
+          throw new Error('EmulatorJS loader.js not found');
+        }
+
         // Set up EmulatorJS configuration
         (window as any).EJS_player = `#game-${emulatorKey}`;
         (window as any).EJS_gameName = title;
         (window as any).EJS_biosUrl = "";
         (window as any).EJS_gameUrl = gameUrl;
         (window as any).EJS_core = core;
-        (window as any).EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/";
+        (window as any).EJS_pathtodata = "/emulatorjs/";
         (window as any).EJS_startOnLoaded = true;
         (window as any).EJS_DEBUG_XX = false;
         (window as any).EJS_disableDatabases = true;
         (window as any).EJS_threads = false;
 
-        // Load EmulatorJS script
+        // Load EmulatorJS CSS first
+        const cssLink = document.createElement('link');
+        cssLink.rel = 'stylesheet';
+        cssLink.href = '/emulatorjs/emulator.css';
+        document.head.appendChild(cssLink);
+
+        // Load EmulatorJS script with timeout
         const script = document.createElement('script');
-        script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
-        script.onload = () => {
-          console.log('[EmulatorJSPlayer] EmulatorJS script loaded');
-          setIsReady(true);
-        };
-        script.onerror = () => {
-          throw new Error('Failed to load EmulatorJS script');
-        };
+        script.src = '/emulatorjs/loader.js';
+
+        const loadPromise = new Promise<void>((resolve, reject) => {
+          script.onload = () => {
+            console.log('[EmulatorJSPlayer] EmulatorJS script loaded');
+            resolve();
+          };
+          script.onerror = (error) => {
+            console.error('[EmulatorJSPlayer] Script load error:', error);
+            reject(new Error('Failed to load EmulatorJS script'));
+          };
+
+          // Timeout after 10 seconds
+          setTimeout(() => {
+            reject(new Error('EmulatorJS script load timeout'));
+          }, 10000);
+        });
 
         document.head.appendChild(script);
+
+        await loadPromise;
+        setIsReady(true);
 
         // Cleanup function
         return () => {
           URL.revokeObjectURL(gameUrl);
-          document.head.removeChild(script);
+          // Note: We don't remove the script/css as they might be used by other instances
         };
 
       } catch (err) {
         console.error('[EmulatorJSPlayer] Error initializing emulator:', err);
-        setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
+
+        // If it's a NES ROM, try falling back to the original NES player
+        if (getCore(mimeType) === 'nes') {
+          console.log('[EmulatorJSPlayer] Attempting fallback to NES player');
+          setUseFallback(true);
+          setIsReady(true);
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
+        }
       }
     };
 
@@ -270,6 +305,36 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
             </p>
           </CardContent>
         </Card>
+      </div>
+    );
+  }
+
+  // Use fallback NES player if EmulatorJS failed to load and it's a NES ROM
+  if (useFallback && getCore(mimeType) === 'nes') {
+    // Convert base64 back to binary string for NES player
+    const binaryString = atob(romData);
+
+    return (
+      <div className={className}>
+        <Card className="w-full max-w-4xl mb-4 border-yellow-500">
+          <CardContent className="p-4">
+            <div className="flex items-center gap-2 text-yellow-600">
+              <AlertTriangle className="w-4 h-4" />
+              <span className="text-sm">
+                Using fallback NES emulator (EmulatorJS unavailable)
+              </span>
+            </div>
+          </CardContent>
+        </Card>
+        <NesPlayer
+          romPath={binaryString}
+          title={title}
+          className="w-full"
+          ref={ref}
+          isHost={isHost}
+          peerConnectionRef={peerConnectionRef}
+          addVideoTrackToPeerConnection={addVideoTrackToPeerConnection}
+        />
       </div>
     );
   }

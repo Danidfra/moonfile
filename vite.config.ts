@@ -13,22 +13,35 @@ export default defineConfig(() => ({
       allow: ['..']
     },
     middlewareMode: false,
-    // Configure headers for WASM files
+    // Configure headers for WASM files and CSP
     headers: {
       'Cache-Control': 'no-store',
+      // CSP that allows local scripts and WASM
+      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' wss: ws:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' blob:;",
     }
   },
   plugins: [
     react(),
-    // Custom plugin to handle WASM files properly
+    // Custom plugin to handle WASM files and EmulatorJS assets properly
     {
-      name: 'wasm-headers',
+      name: 'emulator-assets',
       configureServer(server) {
-        server.middlewares.use('/wasm', (req, res, next) => {
+        server.middlewares.use((req, res, next) => {
+          // Handle WASM files
           if (req.url?.endsWith('.wasm')) {
             res.setHeader('Content-Type', 'application/wasm');
             res.setHeader('Cache-Control', 'no-store');
-            res.setHeader('Content-Encoding', 'identity'); // Disable compression
+            res.setHeader('Content-Encoding', 'identity');
+          }
+          // Handle EmulatorJS JavaScript files
+          else if (req.url?.includes('/emulatorjs/') && req.url?.endsWith('.js')) {
+            res.setHeader('Content-Type', 'application/javascript');
+            res.setHeader('Cache-Control', 'no-store');
+          }
+          // Handle EmulatorJS CSS files
+          else if (req.url?.includes('/emulatorjs/') && req.url?.endsWith('.css')) {
+            res.setHeader('Content-Type', 'text/css');
+            res.setHeader('Cache-Control', 'no-store');
           }
           next();
         });

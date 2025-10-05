@@ -19,3 +19,4 @@ To install a specific core, run the following command:
 ```bash
 npm install @emulatorjs/core-<core-name>
 ```
+
