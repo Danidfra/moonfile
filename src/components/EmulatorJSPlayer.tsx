@@ -156,103 +156,112 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           gameContainerRef.current.innerHTML = '';
         }
 
-        // Check if EmulatorJS files exist before trying to load them
-        const loaderResponse = await fetch('/emulatorjs/loader.js');
-        if (!loaderResponse.ok) {
-          throw new Error('EmulatorJS loader.js not found');
+        // Check if required EmulatorJS files exist
+        const requiredFiles = [
+          '/emulatorjs/emulator.min.js',
+          '/emulatorjs/loader.js'
+        ];
+
+        for (const file of requiredFiles) {
+          const response = await fetch(file, { method: 'HEAD' });
+          if (!response.ok) {
+            throw new Error(`Required EmulatorJS file not found: ${file}`);
+          }
         }
 
-        // Load EmulatorJS initialization script first
-        const initScript = document.createElement('script');
-        initScript.src = '/emulatorjs/init.js';
-        initScript.type = 'text/javascript';
+        // Load EmulatorJS CSS
+        if (!document.querySelector('link[href="/emulatorjs/emulator.min.css"]')) {
+          const cssLink = document.createElement('link');
+          cssLink.rel = 'stylesheet';
+          cssLink.href = '/emulatorjs/emulator.min.css';
+          document.head.appendChild(cssLink);
+        }
 
-        const initPromise = new Promise<void>((resolve, reject) => {
-          const handleInitLoad = () => {
-            initScript.removeEventListener('load', handleInitLoad);
-            initScript.removeEventListener('error', handleInitError);
+        // Load EmulatorJS main script first
+        if (!(window as any).EmulatorJS) {
+          await new Promise<void>((resolve, reject) => {
+            const mainScript = document.createElement('script');
+            mainScript.src = '/emulatorjs/emulator.min.js';
+            mainScript.type = 'text/javascript';
 
-            // Set up EmulatorJS configuration using the helper function
-            const config = {
-              player: `#game-${emulatorKey}`,
-              gameName: title,
-              biosUrl: "",
-              gameUrl: gameUrl,
-              core: core,
-              pathtodata: "/emulatorjs/",
-              startOnLoaded: true,
-              debug: false,
-              disableDatabases: true,
-              threads: false
+            const handleMainLoad = () => {
+              console.log('[EmulatorJSPlayer] EmulatorJS main script loaded');
+              mainScript.removeEventListener('load', handleMainLoad);
+              mainScript.removeEventListener('error', handleMainError);
+              resolve();
             };
 
-            if ((window as any).initEmulatorJS) {
-              (window as any).initEmulatorJS(config);
-              resolve();
-            } else {
-              reject(new Error('EmulatorJS init function not available'));
-            }
-          };
+            const handleMainError = (error: Event) => {
+              console.error('[EmulatorJSPlayer] Main script load error:', error);
+              mainScript.removeEventListener('load', handleMainLoad);
+              mainScript.removeEventListener('error', handleMainError);
+              reject(new Error('Failed to load EmulatorJS main script'));
+            };
 
-          const handleInitError = (error: Event) => {
-            initScript.removeEventListener('load', handleInitLoad);
-            initScript.removeEventListener('error', handleInitError);
-            reject(new Error('Failed to load EmulatorJS init script'));
-          };
+            mainScript.addEventListener('load', handleMainLoad);
+            mainScript.addEventListener('error', handleMainError);
 
-          initScript.addEventListener('load', handleInitLoad);
-          initScript.addEventListener('error', handleInitError);
-        });
+            document.head.appendChild(mainScript);
 
-        document.head.appendChild(initScript);
-        await initPromise;
+            // Timeout after 10 seconds
+            setTimeout(() => {
+              mainScript.removeEventListener('load', handleMainLoad);
+              mainScript.removeEventListener('error', handleMainError);
+              reject(new Error('EmulatorJS main script load timeout'));
+            }, 10000);
+          });
+        }
 
-        // Load EmulatorJS CSS
-        const cssLink = document.createElement('link');
-        cssLink.rel = 'stylesheet';
-        cssLink.href = '/emulatorjs/emulator.css';
-        document.head.appendChild(cssLink);
+        // Set up EmulatorJS configuration
+        (window as any).EJS_player = `#game-${emulatorKey}`;
+        (window as any).EJS_gameName = title;
+        (window as any).EJS_biosUrl = "";
+        (window as any).EJS_gameUrl = gameUrl;
+        (window as any).EJS_core = core;
+        (window as any).EJS_pathtodata = "https://cdn.emulatorjs.org/stable/data/"; // Use CDN for cores
+        (window as any).EJS_startOnLoaded = true;
+        (window as any).EJS_DEBUG_XX = true; // Enable debug for troubleshooting
+        (window as any).EJS_disableDatabases = true;
+        (window as any).EJS_threads = false;
 
-        // Load EmulatorJS script with timeout
-        const script = document.createElement('script');
-        script.src = '/emulatorjs/loader.js';
-        script.type = 'text/javascript';
+        // Load EmulatorJS loader script
+        await new Promise<void>((resolve, reject) => {
+          const loaderScript = document.createElement('script');
+          loaderScript.src = '/emulatorjs/loader.js';
+          loaderScript.type = 'text/javascript';
 
-        const loadPromise = new Promise<void>((resolve, reject) => {
-          const handleLoad = () => {
-            console.log('[EmulatorJSPlayer] EmulatorJS script loaded');
-            script.removeEventListener('load', handleLoad);
-            script.removeEventListener('error', handleError);
+          const handleLoaderLoad = () => {
+            console.log('[EmulatorJSPlayer] EmulatorJS loader script loaded');
+            loaderScript.removeEventListener('load', handleLoaderLoad);
+            loaderScript.removeEventListener('error', handleLoaderError);
             resolve();
           };
 
-          const handleError = (error: Event) => {
-            console.error('[EmulatorJSPlayer] Script load error:', error);
-            script.removeEventListener('load', handleLoad);
-            script.removeEventListener('error', handleError);
-            reject(new Error('Failed to load EmulatorJS script'));
+          const handleLoaderError = (error: Event) => {
+            console.error('[EmulatorJSPlayer] Loader script load error:', error);
+            loaderScript.removeEventListener('load', handleLoaderLoad);
+            loaderScript.removeEventListener('error', handleLoaderError);
+            reject(new Error('Failed to load EmulatorJS loader script'));
           };
 
-          script.addEventListener('load', handleLoad);
-          script.addEventListener('error', handleError);
+          loaderScript.addEventListener('load', handleLoaderLoad);
+          loaderScript.addEventListener('error', handleLoaderError);
+
+          document.head.appendChild(loaderScript);
 
           // Timeout after 10 seconds
           setTimeout(() => {
-            script.removeEventListener('load', handleLoad);
-            script.removeEventListener('error', handleError);
-            reject(new Error('EmulatorJS script load timeout'));
+            loaderScript.removeEventListener('load', handleLoaderLoad);
+            loaderScript.removeEventListener('error', handleLoaderError);
+            reject(new Error('EmulatorJS loader script load timeout'));
           }, 10000);
         });
 
-        document.head.appendChild(script);
-
-        await loadPromise;
         setIsReady(true);
 
         // Cleanup function
         return () => {
           URL.revokeObjectURL(gameUrl);
-          // Note: We don't remove the script/css as they might be used by other instances
         };
 
       } catch (err) {

@@ -31,7 +31,7 @@ export default defineConfig(({ command, mode }) => ({
               'Content-Security-Policy',
               [
                 "default-src 'self'",
-                "script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval'", // Allow Vite HMR and inline scripts
+                "script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.emulatorjs.org", // Allow EmulatorJS CDN for cores
                 "style-src 'self' 'unsafe-inline'",
                 "img-src 'self' data: blob: https:",
                 "font-src 'self' data:",
