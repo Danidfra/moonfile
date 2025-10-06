@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vitest/config";
 
 // https://vitejs.dev/config/
-export default defineConfig(() => ({
+export default defineConfig(({ command, mode }) => ({
   server: {
     host: "::",
     port: 8080,
@@ -13,20 +13,38 @@ export default defineConfig(() => ({
       allow: ['..']
     },
     middlewareMode: false,
-    // Configure headers for WASM files and CSP
+    // Configure headers - CSP handled separately for dev vs prod
     headers: {
       'Cache-Control': 'no-store',
-      // CSP that allows local scripts and WASM
-      'Content-Security-Policy': "default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; object-src 'none'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self' wss: ws:; worker-src 'self' blob:; child-src 'self' blob:; frame-src 'self' blob:;",
     }
   },
   plugins: [
     react(),
-    // Custom plugin to handle WASM files and EmulatorJS assets properly
+    // Custom plugin to handle assets and CSP
     {
-      name: 'emulator-assets',
+      name: 'csp-and-assets',
       configureServer(server) {
         server.middlewares.use((req, res, next) => {
+          // Set relaxed CSP for development to allow Vite HMR
+          if (command === 'serve') {
+            res.setHeader(
+              'Content-Security-Policy',
+              [
+                "default-src 'self'",
+                "script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval'", // Allow Vite HMR and inline scripts
+                "style-src 'self' 'unsafe-inline'",
+                "img-src 'self' data: blob: https:",
+                "font-src 'self' data:",
+                "connect-src 'self' ws: wss: https:",
+                "worker-src 'self' blob:",
+                "media-src 'self' blob: data:",
+                "object-src 'none'",
+                "base-uri 'self'"
+                // Note: frame-ancestors removed from meta tag as it's ignored there
+              ].join('; ')
+            );
+          }
+
           // Handle WASM files
           if (req.url?.endsWith('.wasm')) {
             res.setHeader('Content-Type', 'application/wasm');
@@ -54,6 +72,8 @@ export default defineConfig(() => ({
     rollupOptions: {
       external: ['/lib/fceux/fceux-web.js'],
     },
+    // Generate a _headers file for production CSP (Netlify/Vercel)
+    outDir: 'dist',
   },
   test: {
     globals: true,

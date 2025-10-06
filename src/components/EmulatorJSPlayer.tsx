@@ -162,19 +162,52 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           throw new Error('EmulatorJS loader.js not found');
         }
 
-        // Set up EmulatorJS configuration
-        (window as any).EJS_player = `#game-${emulatorKey}`;
-        (window as any).EJS_gameName = title;
-        (window as any).EJS_biosUrl = "";
-        (window as any).EJS_gameUrl = gameUrl;
-        (window as any).EJS_core = core;
-        (window as any).EJS_pathtodata = "/emulatorjs/";
-        (window as any).EJS_startOnLoaded = true;
-        (window as any).EJS_DEBUG_XX = false;
-        (window as any).EJS_disableDatabases = true;
-        (window as any).EJS_threads = false;
+        // Load EmulatorJS initialization script first
+        const initScript = document.createElement('script');
+        initScript.src = '/emulatorjs/init.js';
+        initScript.type = 'text/javascript';
 
-        // Load EmulatorJS CSS first
+        const initPromise = new Promise<void>((resolve, reject) => {
+          const handleInitLoad = () => {
+            initScript.removeEventListener('load', handleInitLoad);
+            initScript.removeEventListener('error', handleInitError);
+
+            // Set up EmulatorJS configuration using the helper function
+            const config = {
+              player: `#game-${emulatorKey}`,
+              gameName: title,
+              biosUrl: "",
+              gameUrl: gameUrl,
+              core: core,
+              pathtodata: "/emulatorjs/",
+              startOnLoaded: true,
+              debug: false,
+              disableDatabases: true,
+              threads: false
+            };
+
+            if ((window as any).initEmulatorJS) {
+              (window as any).initEmulatorJS(config);
+              resolve();
+            } else {
+              reject(new Error('EmulatorJS init function not available'));
+            }
+          };
+
+          const handleInitError = (error: Event) => {
+            initScript.removeEventListener('load', handleInitLoad);
+            initScript.removeEventListener('error', handleInitError);
+            reject(new Error('Failed to load EmulatorJS init script'));
+          };
+
+          initScript.addEventListener('load', handleInitLoad);
+          initScript.addEventListener('error', handleInitError);
+        });
+
+        document.head.appendChild(initScript);
+        await initPromise;
+
+        // Load EmulatorJS CSS
         const cssLink = document.createElement('link');
         cssLink.rel = 'stylesheet';
         cssLink.href = '/emulatorjs/emulator.css';
@@ -183,19 +216,30 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         // Load EmulatorJS script with timeout
         const script = document.createElement('script');
         script.src = '/emulatorjs/loader.js';
+        script.type = 'text/javascript';
 
         const loadPromise = new Promise<void>((resolve, reject) => {
-          script.onload = () => {
+          const handleLoad = () => {
             console.log('[EmulatorJSPlayer] EmulatorJS script loaded');
+            script.removeEventListener('load', handleLoad);
+            script.removeEventListener('error', handleError);
             resolve();
           };
-          script.onerror = (error) => {
+
+          const handleError = (error: Event) => {
             console.error('[EmulatorJSPlayer] Script load error:', error);
+            script.removeEventListener('load', handleLoad);
+            script.removeEventListener('error', handleError);
             reject(new Error('Failed to load EmulatorJS script'));
           };
 
+          script.addEventListener('load', handleLoad);
+          script.addEventListener('error', handleError);
+
           // Timeout after 10 seconds
           setTimeout(() => {
+            script.removeEventListener('load', handleLoad);
+            script.removeEventListener('error', handleError);
             reject(new Error('EmulatorJS script load timeout'));
           }, 10000);
         });

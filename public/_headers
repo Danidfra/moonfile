@@ -1,0 +1,15 @@
+# Production CSP headers for EmulatorJS and Nostr
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; font-src 'self' data:; connect-src 'self' wss: ws: https:; worker-src 'self' blob:; media-src 'self' blob: data:; object-src 'none'; base-uri 'self'; frame-ancestors 'none'
+  X-Frame-Options: DENY
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+
+# WASM files need specific headers
+/*.wasm
+  Content-Type: application/wasm
+  Cache-Control: public, max-age=31536000
+
+# EmulatorJS assets
+/emulatorjs/*
+  Cache-Control: public, max-age=86400
