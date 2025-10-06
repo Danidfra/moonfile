@@ -222,7 +222,9 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           throw new Error(`Failed to decode ROM data: ${decodeError instanceof Error ? decodeError.message : 'Invalid data'}`);
         }
 
-        // Wait for container to be ready
+        // Wait for container to be ready with a small delay to ensure DOM is rendered
+        await new Promise(resolve => setTimeout(resolve, 100));
+
         if (!emulatorContainerRef.current) {
           throw new Error('Emulator container not ready');
         }
@@ -383,7 +385,13 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
     if (!emulatorContainerRef.current) return;
 
     if (!document.fullscreenElement) {
-      emulatorContainerRef.current.requestFullscreen?.();
+      // Target the parent card for fullscreen to include proper styling
+      const card = emulatorContainerRef.current.closest('.bg-black');
+      if (card) {
+        card.requestFullscreen?.();
+      } else {
+        emulatorContainerRef.current.requestFullscreen?.();
+      }
     } else {
       document.exitFullscreen?.();
     }
@@ -456,7 +464,6 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
 
   return (
     <div
-      ref={emulatorContainerRef}
       className={`flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
     >
       {/* Game Title - Hidden in fullscreen */}
@@ -477,6 +484,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
       <Card className={`w-full max-w-4xl bg-black border-2 ${isFullscreen ? 'fullscreen-card' : ''}`}>
         <CardContent className={`p-4 ${isFullscreen ? 'fullscreen-content' : ''}`}>
           <div
+            ref={emulatorContainerRef}
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
