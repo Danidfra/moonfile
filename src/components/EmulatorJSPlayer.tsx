@@ -152,6 +152,14 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
   peerConnectionRef,
   addVideoTrackToPeerConnection
 }: EmulatorJSPlayerProps, ref) => {
+  // Log every render
+  console.log('[EmulatorJSPlayer:Render] 🔍 Component function running', {
+    title,
+    mimeType,
+    romDataLength: romData?.length || 0,
+    timestamp: new Date().toISOString()
+  });
+
   const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(false);
@@ -162,26 +170,74 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
   const emulatorContainerRef = useRef<HTMLDivElement>(null);
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null);
   const isInitializedRef = useRef(false);
+  const renderCountRef = useRef(0);
 
   // Get the appropriate core for this MIME type
   const coreType = MIME_TO_CORE[mimeType];
   const systemName = MIME_TO_SYSTEM_NAME[mimeType] || 'Unknown System';
 
+  // Detect StrictMode and track render cycles
+  useEffect(() => {
+    // Check if we're in StrictMode by looking for React's __REACT_DEVTOOLS_GLOBAL_HOOK__
+    const isStrictMode = typeof window !== 'undefined' &&
+      (window as any).__REACT_DEVTOOLS_GLOBAL_HOOK__?.renderers?.size > 0;
+
+    console.log('[EmulatorJSPlayer:StrictMode] 🔍 Environment check', {
+      isStrictMode,
+      renderCount: renderCountRef.current + 1,
+      timestamp: new Date().toISOString()
+    });
+  }, []);
+
+  // Track container element appearance with useLayoutEffect
+  useLayoutEffect(() => {
+    renderCountRef.current++;
+    console.log('[EmulatorJSPlayer:LayoutEffect] 📐 Layout effect running', {
+      renderCount: renderCountRef.current,
+      containerRef: emulatorContainerRef.current ? {
+        exists: true,
+        offsetWidth: emulatorContainerRef.current.offsetWidth,
+        offsetHeight: emulatorContainerRef.current.offsetHeight,
+        className: emulatorContainerRef.current.className
+      } : {
+        exists: false,
+        value: emulatorContainerRef.current
+      },
+      timestamp: new Date().toISOString()
+    });
+  }, [emulatorContainerRef.current]);
+
+  // Track state changes for debugging
+  useEffect(() => {
+    console.log('[EmulatorJSPlayer:State] 📊 State changed', {
+      isReady,
+      isPaused,
+      isMuted,
+      isFullscreen,
+      hasError: !!error,
+      hasEmulatorInstance: !!emulatorInstance,
+      timestamp: new Date().toISOString()
+    });
+  }, [isReady, isPaused, isMuted, isFullscreen, error, emulatorInstance]);
+
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
     getCanvasStream: () => {
-      console.log('[EmulatorJSPlayer] 📹 getCanvasStream called via ref at:', new Date().toISOString());
+      console.log('[EmulatorJSPlayer:Stream] 📹 getCanvasStream called via ref', {
+        hasCanvasElement: !!canvasElement,
+        timestamp: new Date().toISOString()
+      });
       if (canvasElement) {
         try {
           const stream = canvasElement.captureStream(60); // 60 FPS
-          console.log('[EmulatorJSPlayer] ✅ Canvas stream captured successfully');
+          console.log('[EmulatorJSPlayer:Stream] ✅ Canvas stream captured successfully');
           return stream;
         } catch (error) {
-          console.error('[EmulatorJSPlayer] ❌ Failed to capture canvas stream:', error);
+          console.error('[EmulatorJSPlayer:Stream] ❌ Failed to capture canvas stream:', error);
           return null;
         }
       } else {
-        console.warn('[EmulatorJSPlayer] ❌ Canvas element not available for stream capture');
+        console.warn('[EmulatorJSPlayer:Stream] ❌ Canvas element not available for stream capture');
         return null;
       }
     }
@@ -189,10 +245,26 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
 
   // Initialize EmulatorJS
   useEffect(() => {
+    console.log('[EmulatorJSPlayer:InitEffect] 🚀 Effect scheduled', {
+      isInitialized: isInitializedRef.current,
+      hasRomData: !!romData,
+      hasMimeType: !!mimeType,
+      romDataLength: romData?.length || 0,
+      timestamp: new Date().toISOString()
+    });
+
     // Skip if already initialized or missing required props
     if (isInitializedRef.current || !romData || !mimeType) {
+      console.log('[EmulatorJSPlayer:InitEffect] ⏭️ Skipping initialization', {
+        reason: isInitializedRef.current ? 'Already initialized' : 'Missing required props',
+        timestamp: new Date().toISOString()
+      });
       return;
     }
+
+    console.log('[EmulatorJSPlayer:InitEffect] ▶️ Effect running - starting initialization', {
+      timestamp: new Date().toISOString()
+    });
 
     const initializeEmulator = async () => {
       try {
@@ -233,31 +305,78 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           const maxAttempts = 20; // 2 seconds max wait (20 * 100ms)
           let attempts = 0;
 
+          console.log('[EmulatorJSPlayer:ContainerWait] 🎯 Starting container wait', {
+            initialValue: emulatorContainerRef.current ? 'EXISTS' : 'NULL',
+            timestamp: new Date().toISOString()
+          });
+
           while (attempts < maxAttempts) {
-            if (emulatorContainerRef.current) {
-              return emulatorContainerRef.current;
+            const currentContainer = emulatorContainerRef.current;
+
+            if (currentContainer) {
+              console.log('[EmulatorJSPlayer:ContainerWait] ✅ Container found!', {
+                attempt: attempts + 1,
+                offsetWidth: currentContainer.offsetWidth,
+                offsetHeight: currentContainer.offsetHeight,
+                className: currentContainer.className,
+                innerHTML: currentContainer.innerHTML.substring(0, 100) + '...',
+                timestamp: new Date().toISOString()
+              });
+              return currentContainer;
             }
+
+            console.log('[EmulatorJSPlayer:ContainerWait] ⏳ Container not ready', {
+              attempt: attempts + 1,
+              currentRefValue: currentContainer,
+              maxAttempts,
+              timestamp: new Date().toISOString()
+            });
 
             // Wait for next animation frame or timeout
             await new Promise(resolve => {
               if (attempts === 0) {
                 // First attempt: wait for next animation frame
+                console.log('[EmulatorJSPlayer:ContainerWait] 🎬 Waiting for next animation frame...');
                 requestAnimationFrame(resolve);
               } else {
                 // Subsequent attempts: use timeout
+                console.log(`[EmulatorJSPlayer:ContainerWait] ⏰ Waiting 100ms (attempt ${attempts + 1})...`);
                 setTimeout(resolve, 100);
               }
             });
 
             attempts++;
-            console.log(`[EmulatorJSPlayer] ⏳ Waiting for container... attempt ${attempts}/${maxAttempts}`);
           }
 
+          console.error('[EmulatorJSPlayer:ContainerWait] ❌ Container wait timeout', {
+            finalRefValue: emulatorContainerRef.current,
+            totalAttempts: attempts,
+            timestamp: new Date().toISOString()
+          });
           throw new Error('Emulator container not ready after timeout');
         };
 
+        console.log('[EmulatorJSPlayer:ContainerWait] 📋 About to call waitForContainer()', {
+          currentRefState: emulatorContainerRef.current ? {
+            exists: true,
+            offsetWidth: emulatorContainerRef.current.offsetWidth,
+            offsetHeight: emulatorContainerRef.current.offsetHeight
+          } : {
+            exists: false,
+            value: emulatorContainerRef.current
+          },
+          timestamp: new Date().toISOString()
+        });
+
         const container = await waitForContainer();
-        console.log('[EmulatorJSPlayer] ✅ Container is ready');
+        console.log('[EmulatorJSPlayer:ContainerWait] 🎉 Container wait completed successfully', {
+          container: {
+            offsetWidth: container.offsetWidth,
+            offsetHeight: container.offsetHeight,
+            className: container.className
+          },
+          timestamp: new Date().toISOString()
+        });
 
         // For now, create a placeholder that shows the system information
         // TODO: Implement actual EmulatorJS integration once we have proper documentation
@@ -335,14 +454,28 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
 
     // Cleanup function
     return () => {
+      console.log('[EmulatorJSPlayer:Cleanup] 🧹 Cleanup function called', {
+        hasEmulatorInstance: !!emulatorInstance,
+        wasInitialized: isInitializedRef.current,
+        timestamp: new Date().toISOString()
+      });
+
       if (emulatorInstance) {
         try {
+          console.log('[EmulatorJSPlayer:Cleanup] 🔧 Destroying emulator instance...');
           emulatorInstance.destroy?.();
+          console.log('[EmulatorJSPlayer:Cleanup] ✅ Emulator instance destroyed successfully');
         } catch (err) {
-          console.warn('[EmulatorJSPlayer] Warning during cleanup:', err);
+          console.warn('[EmulatorJSPlayer:Cleanup] ⚠️ Warning during cleanup:', err);
         }
+      } else {
+        console.log('[EmulatorJSPlayer:Cleanup] ℹ️ No emulator instance to destroy');
       }
+
       isInitializedRef.current = false;
+      console.log('[EmulatorJSPlayer:Cleanup] 🔄 Initialization flag reset', {
+        timestamp: new Date().toISOString()
+      });
     };
   }, [romData, mimeType, coreType, emulatorInstance]);
 
@@ -514,6 +647,14 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
       {/* Game Display */}
       <Card className={`w-full max-w-4xl bg-black border-2 ${isFullscreen ? 'fullscreen-card' : ''}`}>
         <CardContent className={`p-4 ${isFullscreen ? 'fullscreen-content' : ''}`}>
+          {/* Log when container div is being rendered */}
+          {(() => {
+            console.log('[EmulatorJSPlayer:JSX] 🎨 Rendering container div with ref', {
+              isFullscreen,
+              timestamp: new Date().toISOString()
+            });
+            return null;
+          })()}
           <div
             ref={emulatorContainerRef}
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
