@@ -161,6 +161,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
 
   const emulatorContainerRef = useRef<HTMLDivElement>(null);
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null);
+  const isInitializedRef = useRef(false);
 
   // Get the appropriate core for this MIME type
   const coreType = MIME_TO_CORE[mimeType];
@@ -188,6 +189,11 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
 
   // Initialize EmulatorJS
   useEffect(() => {
+    // Skip if already initialized or missing required props
+    if (isInitializedRef.current || !romData || !mimeType) {
+      return;
+    }
+
     const initializeEmulator = async () => {
       try {
         console.log('[EmulatorJSPlayer] 🎮 Initializing EmulatorJS for:', {
@@ -222,17 +228,40 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           throw new Error(`Failed to decode ROM data: ${decodeError instanceof Error ? decodeError.message : 'Invalid data'}`);
         }
 
-        // Wait for container to be ready with a small delay to ensure DOM is rendered
-        await new Promise(resolve => setTimeout(resolve, 100));
+        // Wait for container to be ready with a robust retry mechanism
+        const waitForContainer = async (): Promise<HTMLDivElement> => {
+          const maxAttempts = 20; // 2 seconds max wait (20 * 100ms)
+          let attempts = 0;
 
-        if (!emulatorContainerRef.current) {
-          throw new Error('Emulator container not ready');
-        }
+          while (attempts < maxAttempts) {
+            if (emulatorContainerRef.current) {
+              return emulatorContainerRef.current;
+            }
+
+            // Wait for next animation frame or timeout
+            await new Promise(resolve => {
+              if (attempts === 0) {
+                // First attempt: wait for next animation frame
+                requestAnimationFrame(resolve);
+              } else {
+                // Subsequent attempts: use timeout
+                setTimeout(resolve, 100);
+              }
+            });
+
+            attempts++;
+            console.log(`[EmulatorJSPlayer] ⏳ Waiting for container... attempt ${attempts}/${maxAttempts}`);
+          }
+
+          throw new Error('Emulator container not ready after timeout');
+        };
+
+        const container = await waitForContainer();
+        console.log('[EmulatorJSPlayer] ✅ Container is ready');
 
         // For now, create a placeholder that shows the system information
         // TODO: Implement actual EmulatorJS integration once we have proper documentation
 
-        const container = emulatorContainerRef.current;
         container.innerHTML = '';
 
         // Create a placeholder div
@@ -290,6 +319,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         });
         setIsReady(true);
         setError(null);
+        isInitializedRef.current = true;
 
         console.log('[EmulatorJSPlayer] ✅ EmulatorJS initialized successfully');
 
@@ -312,8 +342,9 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           console.warn('[EmulatorJSPlayer] Warning during cleanup:', err);
         }
       }
+      isInitializedRef.current = false;
     };
-  }, [romData, mimeType, coreType]);
+  }, [romData, mimeType, coreType, emulatorInstance]);
 
   // Handle fullscreen changes
   useEffect(() => {
