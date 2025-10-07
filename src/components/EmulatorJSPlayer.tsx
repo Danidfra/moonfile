@@ -171,6 +171,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
   const [canvasElement, setCanvasElement] = useState<HTMLCanvasElement | null>(null);
   const isInitializedRef = useRef(false);
   const renderCountRef = useRef(0);
+  const containerReadyRef = useRef(false);
 
   // Get the appropriate core for this MIME type
   const coreType = MIME_TO_CORE[mimeType];
@@ -210,81 +211,16 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         throw new Error(`Failed to decode ROM data: ${decodeError instanceof Error ? decodeError.message : 'Invalid data'}`);
       }
 
-      // Wait for container to be ready with a robust retry mechanism
-      const waitForContainer = async (): Promise<HTMLDivElement> => {
-        const maxAttempts = 20; // 2 seconds max wait (20 * 100ms)
-        let attempts = 0;
+      // Get container - it should be available immediately since we always render it
+      const container = emulatorContainerRef.current;
+      if (!container) {
+        throw new Error('Emulator container not found');
+      }
 
-        console.log('[EmulatorJSPlayer:ContainerWait] 🎯 Starting container wait', {
-          initialValue: emulatorContainerRef.current ? 'EXISTS' : 'NULL',
-          timestamp: new Date().toISOString()
-        });
-
-        while (attempts < maxAttempts) {
-          const currentContainer = emulatorContainerRef.current;
-
-          if (currentContainer) {
-            console.log('[EmulatorJSPlayer:ContainerWait] ✅ Container found!', {
-              attempt: attempts + 1,
-              offsetWidth: currentContainer.offsetWidth,
-              offsetHeight: currentContainer.offsetHeight,
-              className: currentContainer.className,
-              innerHTML: currentContainer.innerHTML.substring(0, 100) + '...',
-              timestamp: new Date().toISOString()
-            });
-            return currentContainer;
-          }
-
-          console.log('[EmulatorJSPlayer:ContainerWait] ⏳ Container not ready', {
-            attempt: attempts + 1,
-            currentRefValue: currentContainer,
-            maxAttempts,
-            timestamp: new Date().toISOString()
-          });
-
-          // Wait for next animation frame or timeout
-          await new Promise(resolve => {
-            if (attempts === 0) {
-              // First attempt: wait for next animation frame
-              console.log('[EmulatorJSPlayer:ContainerWait] 🎬 Waiting for next animation frame...');
-              requestAnimationFrame(resolve);
-            } else {
-              // Subsequent attempts: use timeout
-              console.log(`[EmulatorJSPlayer:ContainerWait] ⏰ Waiting 100ms (attempt ${attempts + 1})...`);
-              setTimeout(resolve, 100);
-            }
-          });
-
-          attempts++;
-        }
-
-        console.error('[EmulatorJSPlayer:ContainerWait] ❌ Container wait timeout', {
-          finalRefValue: emulatorContainerRef.current,
-          totalAttempts: attempts,
-          timestamp: new Date().toISOString()
-        });
-        throw new Error('Emulator container not ready after timeout');
-      };
-
-      console.log('[EmulatorJSPlayer:ContainerWait] 📋 About to call waitForContainer()', {
-        currentRefState: emulatorContainerRef.current ? {
-          exists: true,
-          offsetWidth: emulatorContainerRef.current.offsetWidth,
-          offsetHeight: emulatorContainerRef.current.offsetHeight
-        } : {
-          exists: false,
-          value: emulatorContainerRef.current
-        },
-        timestamp: new Date().toISOString()
-      });
-
-      const container = await waitForContainer();
-      console.log('[EmulatorJSPlayer:ContainerWait] 🎉 Container wait completed successfully', {
-        container: {
-          offsetWidth: container.offsetWidth,
-          offsetHeight: container.offsetHeight,
-          className: container.className
-        },
+      console.log('[EmulatorJSPlayer:Container] ✅ Container ready', {
+        offsetWidth: container.offsetWidth,
+        offsetHeight: container.offsetHeight,
+        className: container.className,
         timestamp: new Date().toISOString()
       });
 
@@ -360,25 +296,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
     }
   };
 
-  useLayoutEffect(() => {
-    let attempts = 0;
-    const maxAttempts = 20;
-    
-    const tryInitialize = () => {
-      const container = emulatorContainerRef.current;
-      if (container && !isInitializedRef.current && romData && mimeType) {
-        console.log('[EmulatorJSPlayer:InitLayout] ✅ Container found after', attempts, 'attempt(s)');
-        initializeEmulator();
-      } else if (!container && attempts < maxAttempts) {
-        attempts++;
-        requestAnimationFrame(tryInitialize);
-      } else if (attempts >= maxAttempts) {
-        console.warn('[EmulatorJSPlayer:InitLayout] ❌ Container not found after max attempts');
-      }
-    };
-
-    tryInitialize();
-  }, [romData, mimeType]);
+  
 
   // Detect StrictMode and track render cycles
   useEffect(() => {
@@ -410,6 +328,25 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
       timestamp: new Date().toISOString()
     });
   }, [emulatorContainerRef.current]);
+
+  // Initialize when container is ready and data is available
+  useEffect(() => {
+    if (!containerReadyRef.current && emulatorContainerRef.current && romData && mimeType) {
+      console.log('[EmulatorJSPlayer:ContainerMount] ✅ Container mounted and ready', {
+        hasRomData: !!romData,
+        hasMimeType: !!mimeType,
+        timestamp: new Date().toISOString()
+      });
+
+      // Use a small timeout to ensure the DOM is fully settled
+      const timer = setTimeout(() => {
+        containerReadyRef.current = true;
+        initializeEmulator();
+      }, 50);
+
+      return () => clearTimeout(timer);
+    }
+  }, [emulatorContainerRef.current, romData, mimeType]);
 
   // Track state changes for debugging
   useEffect(() => {
@@ -447,30 +384,8 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
     }
   }));
 
-  // Initialize EmulatorJS
+  // Cleanup on unmount
   useEffect(() => {
-    console.log('[EmulatorJSPlayer:InitEffect] 🚀 Effect scheduled', {
-      isInitialized: isInitializedRef.current,
-      hasRomData: !!romData,
-      hasMimeType: !!mimeType,
-      romDataLength: romData?.length || 0,
-      timestamp: new Date().toISOString()
-    });
-
-    // Skip if already initialized or missing required props
-    if (isInitializedRef.current || !romData || !mimeType) {
-      console.log('[EmulatorJSPlayer:InitEffect] ⏭️ Skipping initialization', {
-        reason: isInitializedRef.current ? 'Already initialized' : 'Missing required props',
-        timestamp: new Date().toISOString()
-      });
-      return;
-    }
-
-    console.log('[EmulatorJSPlayer:InitEffect] ▶️ Effect running - starting initialization', {
-      timestamp: new Date().toISOString()
-    });
-
-    // Cleanup function
     return () => {
       console.log('[EmulatorJSPlayer:Cleanup] 🧹 Cleanup function called', {
         hasEmulatorInstance: !!emulatorInstance,
@@ -491,11 +406,12 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
       }
 
       isInitializedRef.current = false;
-      console.log('[EmulatorJSPlayer:Cleanup] 🔄 Initialization flag reset', {
+      containerReadyRef.current = false;
+      console.log('[EmulatorJSPlayer:Cleanup] 🔄 Initialization flags reset', {
         timestamp: new Date().toISOString()
       });
     };
-  }, [romData, mimeType, coreType, emulatorInstance]);
+  }, [emulatorInstance]);
 
   // Handle fullscreen changes
   useEffect(() => {
@@ -608,42 +524,6 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
     console.log(`[EmulatorJSPlayer] Audio ${newMutedState ? 'muted' : 'unmuted'}`);
   };
 
-  if (error) {
-    return (
-      <div className={`flex items-center justify-center ${className}`}>
-        <Card className="w-full max-w-4xl border-destructive">
-          <CardContent className="p-8 text-center">
-            <div className="text-destructive text-6xl mb-4">⚠️</div>
-            <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Game</h3>
-            <p className="text-muted-foreground mb-2">{error}</p>
-            <p className="text-sm text-muted-foreground mb-4">
-              System: {systemName} | MIME: {mimeType}
-            </p>
-            <Button onClick={() => window.location.reload()} variant="outline">
-              Try Again
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
-  if (!isReady) {
-    return (
-      <div className={`flex items-center justify-center ${className}`}>
-        <Card className="w-full max-w-4xl">
-          <CardContent className="p-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading {title}...</p>
-            <p className="text-sm text-muted-foreground mt-2">
-              System: {systemName}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
-
   return (
     <div
       className={`flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
@@ -662,7 +542,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         </Card>
       )}
 
-      {/* Game Display */}
+      {/* Game Display - Always render the container */}
       <Card className={`w-full max-w-4xl bg-black border-2 ${isFullscreen ? 'fullscreen-card' : ''}`}>
         <CardContent className={`p-4 ${isFullscreen ? 'fullscreen-content' : ''}`}>
           {/* Log when container div is being rendered */}
@@ -678,13 +558,39 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
-            {/* EmulatorJS will be mounted here */}
+            {/* Show loading state inside the container if not ready */}
+            {!isReady && !error && (
+              <div className="text-center text-white">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+                <p className="text-muted-foreground">Loading {title}...</p>
+                <p className="text-sm text-muted-foreground mt-2">
+                  System: {systemName}
+                </p>
+              </div>
+            )}
+
+            {/* Show error state inside the container if error */}
+            {error && (
+              <div className="text-center text-white p-8">
+                <div className="text-destructive text-6xl mb-4">⚠️</div>
+                <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Game</h3>
+                <p className="text-muted-foreground mb-2">{error}</p>
+                <p className="text-sm text-muted-foreground mb-4">
+                  System: {systemName} | MIME: {mimeType}
+                </p>
+                <Button onClick={() => window.location.reload()} variant="outline">
+                  Try Again
+                </Button>
+              </div>
+            )}
+
+            {/* EmulatorJS will be mounted here when ready */}
           </div>
         </CardContent>
       </Card>
 
-      {/* Controls - Hidden in fullscreen */}
-      {!isFullscreen && (
+      {/* Controls - Hidden in fullscreen and when not ready */}
+      {!isFullscreen && isReady && (
         <>
           <Card className="w-full max-w-4xl">
             <CardContent className="p-4">
