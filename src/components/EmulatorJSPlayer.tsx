@@ -233,20 +233,9 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         restart: () => console.log('Restart called'),
         setVolume: (vol: number) => console.log('Volume set to:', vol),
         destroy: () => {
-          console.log('Destroy called');
-          // Clean up any DOM elements we created
-          const container = emulatorContainerRef.current;
-          if (container) {
-            // Only remove elements we know we created
-            const placeholder = container.querySelector('.emulatorjs-placeholder');
-            const canvas = container.querySelector('.emulatorjs-canvas');
-            if (placeholder) {
-              container.removeChild(placeholder);
-            }
-            if (canvas) {
-              container.removeChild(canvas);
-            }
-          }
+          console.log('Destroy called - React manages DOM cleanup automatically');
+          // No manual DOM removal needed - React handles cleanup of its rendered components
+          // Just log the destroy call for debugging purposes
         }
       });
       setIsReady(true);
