@@ -173,6 +173,10 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
   const renderCountRef = useRef(0);
   const containerReadyRef = useRef(false);
 
+  // Generate unique container ID for this emulator instance
+  const containerIdRef = useRef(`emulator-container-${Math.random().toString(36).substr(2, 9)}`);
+  const containerId = containerIdRef.current;
+
   // Get the appropriate core for this MIME type
   const coreType = MIME_TO_CORE[mimeType];
   const systemName = MIME_TO_SYSTEM_NAME[mimeType] || 'Unknown System';
@@ -244,10 +248,11 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
       }
 
       // Set up EmulatorJS global variables
-      globalAny.EJS_player = container;
+      // CRITICAL: EJS_player must be a CSS selector string, not a DOM element
+      globalAny.EJS_player = `#${containerId}`;
       globalAny.EJS_gameUrl = gameUrl;
       globalAny.EJS_core = coreType;
-      globalAny.EJS_pathtodata = '/emulatorjs/';
+      globalAny.EJS_pathtodata = '/emulatorjs/data/';  // Fixed path to include /data/
       globalAny.EJS_startOnLoaded = true;
       globalAny.EJS_DEBUG_XX = false; // Disable debug mode for cleaner console
 
@@ -270,14 +275,16 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         core: coreType,
         gameUrl,
         pathtodata: globalAny.EJS_pathtodata,
-        gameID: globalAny.EJS_gameID
+        gameID: globalAny.EJS_gameID,
+        player: globalAny.EJS_player,
+        containerId
       });
 
       // Load EmulatorJS loader script
       const loadEmulatorJS = (): Promise<void> => {
         return new Promise((resolve, reject) => {
           // Check if script is already loaded
-          const existingScript = document.querySelector('script[src="/emulatorjs/loader.js"]');
+          const existingScript = document.querySelector('script[src="/emulatorjs/data/loader.js"]');
           if (existingScript) {
             console.log('[EmulatorJSPlayer] ♻️ EmulatorJS script already loaded, reinitializing...');
 
@@ -291,7 +298,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
           console.log('[EmulatorJSPlayer] 📥 Loading EmulatorJS loader script...');
 
           const script = document.createElement('script');
-          script.src = '/emulatorjs/loader.js';
+          script.src = '/emulatorjs/data/loader.js';
           script.async = true;
 
           script.onload = () => {
@@ -301,7 +308,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
 
           script.onerror = (error) => {
             console.error('[EmulatorJSPlayer] ❌ Failed to load EmulatorJS loader script:', error);
-            reject(new Error('Failed to load EmulatorJS loader script. Make sure the files are available at /emulatorjs/'));
+            reject(new Error('Failed to load EmulatorJS loader script. Make sure the files are available at /emulatorjs/data/'));
           };
 
           document.head.appendChild(script);
@@ -696,6 +703,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
             return null;
           })()}
           <div
+            id={containerId}
             ref={emulatorContainerRef}
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}

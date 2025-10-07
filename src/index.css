@@ -1,4 +1,4 @@
-@import url('/emulatorjs/emulator.css');
+@import url('/emulatorjs/data/emulator.css');
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
