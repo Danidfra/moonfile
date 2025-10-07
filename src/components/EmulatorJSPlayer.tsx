@@ -27,78 +27,78 @@ export interface EmulatorJSPlayerRef {
 // MIME type to EmulatorJS core mapping
 const MIME_TO_CORE: Record<string, string> = {
   // Nintendo Entertainment System
-  'application/x-nes-rom': 'fceumm',
-  'application/x-nintendo-nes-rom': 'fceumm',
+  'application/x-nes-rom': 'nes',
+  'application/x-nintendo-nes-rom': 'nes',
 
   // Super Nintendo Entertainment System
-  'application/x-snes-rom': 'snes9x',
-  'application/x-nintendo-snes-rom': 'snes9x',
+  'application/x-snes-rom': 'snes',
+  'application/x-nintendo-snes-rom': 'snes',
 
   // Game Boy / Game Boy Color
-  'application/x-gameboy-rom': 'gambatte',
-  'application/x-gameboy-color-rom': 'gambatte',
-  'application/x-nintendo-gameboy-rom': 'gambatte',
+  'application/x-gameboy-rom': 'gb',
+  'application/x-gameboy-color-rom': 'gbc',
+  'application/x-nintendo-gameboy-rom': 'gb',
 
   // Game Boy Advance
-  'application/x-gba-rom': 'mgba',
-  'application/x-gameboy-advance-rom': 'mgba',
-  'application/x-nintendo-gba-rom': 'mgba',
+  'application/x-gba-rom': 'gba',
+  'application/x-gameboy-advance-rom': 'gba',
+  'application/x-nintendo-gba-rom': 'gba',
 
   // Nintendo 64
-  'application/x-n64-rom': 'mupen64plus_next',
-  'application/x-nintendo-64-rom': 'mupen64plus_next',
+  'application/x-n64-rom': 'n64',
+  'application/x-nintendo-64-rom': 'n64',
 
   // Sega Genesis/Mega Drive
-  'application/x-genesis-rom': 'genesis_plus_gx',
-  'application/x-megadrive-rom': 'genesis_plus_gx',
-  'application/x-sega-genesis-rom': 'genesis_plus_gx',
+  'application/x-genesis-rom': 'segaMD',
+  'application/x-megadrive-rom': 'segaMD',
+  'application/x-sega-genesis-rom': 'segaMD',
 
   // Sega Master System
-  'application/x-sms-rom': 'genesis_plus_gx',
-  'application/x-master-system-rom': 'genesis_plus_gx',
+  'application/x-sms-rom': 'segaMS',
+  'application/x-master-system-rom': 'segaMS',
 
   // Sega Game Gear
-  'application/x-gamegear-rom': 'genesis_plus_gx',
-  'application/x-sega-gamegear-rom': 'genesis_plus_gx',
+  'application/x-gamegear-rom': 'segaGG',
+  'application/x-sega-gamegear-rom': 'segaGG',
 
   // Atari 2600
-  'application/x-atari-2600-rom': 'stella2014',
-  'application/x-atari2600-rom': 'stella2014',
+  'application/x-atari-2600-rom': 'atari2600',
+  'application/x-atari2600-rom': 'atari2600',
 
   // PlayStation
-  'application/x-playstation-rom': 'pcsx_rearmed',
-  'application/x-psx-rom': 'pcsx_rearmed',
+  'application/x-playstation-rom': 'psx',
+  'application/x-psx-rom': 'psx',
 
   // Neo Geo Pocket
-  'application/x-ngp-rom': 'mednafen_ngp',
-  'application/x-neo-geo-pocket-rom': 'mednafen_ngp',
+  'application/x-ngp-rom': 'ngp',
+  'application/x-neo-geo-pocket-rom': 'ngp',
 
   // Lynx
-  'application/x-lynx-rom': 'handy',
-  'application/x-atari-lynx-rom': 'handy',
+  'application/x-lynx-rom': 'lynx',
+  'application/x-atari-lynx-rom': 'lynx',
 
   // Virtual Boy
-  'application/x-virtualboy-rom': 'beetle_vb',
-  'application/x-nintendo-virtualboy-rom': 'beetle_vb',
+  'application/x-virtualboy-rom': 'vb',
+  'application/x-nintendo-virtualboy-rom': 'vb',
 
   // WonderSwan
-  'application/x-wonderswan-rom': 'mednafen_wswan',
+  'application/x-wonderswan-rom': 'ws',
 
   // PC Engine / TurboGrafx-16
-  'application/x-pce-rom': 'mednafen_pce',
-  'application/x-turbografx-rom': 'mednafen_pce',
+  'application/x-pce-rom': 'pce',
+  'application/x-turbografx-rom': 'pce',
 
   // Nintendo DS
-  'application/x-nintendo-ds-rom': 'desmume',
-  'application/x-nds-rom': 'desmume',
+  'application/x-nintendo-ds-rom': 'nds',
+  'application/x-nds-rom': 'nds',
 
   // Arcade (MAME)
-  'application/x-mame-rom': 'mame2003_plus',
-  'application/x-arcade-rom': 'mame2003_plus',
+  'application/x-mame-rom': 'arcade',
+  'application/x-arcade-rom': 'arcade',
 
   // DOS
-  'application/x-dos-executable': 'dosbox_pure',
-  'application/x-msdos-program': 'dosbox_pure',
+  'application/x-dos-executable': 'dos',
+  'application/x-msdos-program': 'dos',
 };
 
 // System names for display
@@ -196,17 +196,25 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         throw new Error('No ROM data provided');
       }
 
-      // Convert base64 to binary data
-      let binaryData: Uint8Array;
+      // Convert base64 to binary data and create blob URL
+      let gameUrl: string;
       try {
         // Remove data URL prefix if present
         const base64Data = romData.includes(',') ? romData.split(',')[1] : romData;
         const binaryString = atob(base64Data);
-        binaryData = new Uint8Array(binaryString.length);
+        const binaryData = new Uint8Array(binaryString.length);
         for (let i = 0; i < binaryString.length; i++) {
           binaryData[i] = binaryString.charCodeAt(i);
         }
-        console.log('[EmulatorJSPlayer] ✅ ROM data converted, size:', binaryData.length, 'bytes');
+
+        // Create blob and URL
+        const blob = new Blob([binaryData], { type: 'application/octet-stream' });
+        gameUrl = URL.createObjectURL(blob);
+
+        console.log('[EmulatorJSPlayer] ✅ ROM data converted and blob URL created:', {
+          size: binaryData.length,
+          url: gameUrl
+        });
       } catch (decodeError) {
         throw new Error(`Failed to decode ROM data: ${decodeError instanceof Error ? decodeError.message : 'Invalid data'}`);
       }
@@ -224,20 +232,186 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         timestamp: new Date().toISOString()
       });
 
-      // Instead of direct DOM manipulation, we'll use React state to manage the content
-      // This prevents DOM synchronization issues
-      setEmulatorInstance({
-        // Mock emulator instance
-        pause: () => console.log('Pause called'),
-        resume: () => console.log('Resume called'),
-        restart: () => console.log('Restart called'),
-        setVolume: (vol: number) => console.log('Volume set to:', vol),
-        destroy: () => {
-          console.log('Destroy called - React manages DOM cleanup automatically');
-          // No manual DOM removal needed - React handles cleanup of its rendered components
-          // Just log the destroy call for debugging purposes
+      // Clean up any existing EmulatorJS globals
+      const globalAny = globalThis as any;
+      if (globalAny.EJS_emulator) {
+        console.log('[EmulatorJSPlayer] 🧹 Cleaning up existing emulator instance');
+        try {
+          globalAny.EJS_emulator.destroy?.();
+        } catch (e) {
+          console.warn('[EmulatorJSPlayer] Warning during cleanup:', e);
         }
+      }
+
+      // Set up EmulatorJS global variables
+      globalAny.EJS_player = container;
+      globalAny.EJS_gameUrl = gameUrl;
+      globalAny.EJS_core = coreType;
+      globalAny.EJS_pathtodata = '/emulatorjs/';
+      globalAny.EJS_startOnLoaded = true;
+      globalAny.EJS_DEBUG_XX = false; // Disable debug mode for cleaner console
+
+      // Use CDN for cores since local cores may not be available
+      globalAny.EJS_pathtocore = 'https://cdn.emulatorjs.org/stable/data/cores/';
+
+      // Optional EmulatorJS settings
+      globalAny.EJS_gameID = title.replace(/[^a-zA-Z0-9]/g, '_');
+      globalAny.EJS_gameName = title;
+      globalAny.EJS_color = '#74b9ff';
+      globalAny.EJS_VirtualGamepadSettings = {
+        enable: true,
+        opacity: 0.7
+      };
+
+      // BIOS settings - use CDN for BIOS files too
+      globalAny.EJS_pathtobios = 'https://cdn.emulatorjs.org/stable/data/bios/';
+
+      console.log('[EmulatorJSPlayer] ⚙️ EmulatorJS globals configured:', {
+        core: coreType,
+        gameUrl,
+        pathtodata: globalAny.EJS_pathtodata,
+        gameID: globalAny.EJS_gameID
       });
+
+      // Load EmulatorJS loader script
+      const loadEmulatorJS = (): Promise<void> => {
+        return new Promise((resolve, reject) => {
+          // Check if script is already loaded
+          const existingScript = document.querySelector('script[src="/emulatorjs/loader.js"]');
+          if (existingScript) {
+            console.log('[EmulatorJSPlayer] ♻️ EmulatorJS script already loaded, reinitializing...');
+
+            // Try to reinitialize with existing script
+            if (globalAny.EJS_emulator) {
+              resolve();
+              return;
+            }
+          }
+
+          console.log('[EmulatorJSPlayer] 📥 Loading EmulatorJS loader script...');
+
+          const script = document.createElement('script');
+          script.src = '/emulatorjs/loader.js';
+          script.async = true;
+
+          script.onload = () => {
+            console.log('[EmulatorJSPlayer] ✅ EmulatorJS loader script loaded successfully');
+            resolve();
+          };
+
+          script.onerror = (error) => {
+            console.error('[EmulatorJSPlayer] ❌ Failed to load EmulatorJS loader script:', error);
+            reject(new Error('Failed to load EmulatorJS loader script. Make sure the files are available at /emulatorjs/'));
+          };
+
+          document.head.appendChild(script);
+        });
+      };
+
+      await loadEmulatorJS();
+
+      // Wait for emulator to initialize
+      const waitForEmulator = (): Promise<any> => {
+        return new Promise((resolve, reject) => {
+          let attempts = 0;
+          const maxAttempts = 100; // 10 seconds timeout
+
+          const checkEmulator = () => {
+            attempts++;
+
+            if (globalAny.EJS_emulator) {
+              console.log('[EmulatorJSPlayer] ✅ EmulatorJS instance found:', globalAny.EJS_emulator);
+              resolve(globalAny.EJS_emulator);
+              return;
+            }
+
+            if (attempts >= maxAttempts) {
+              reject(new Error('Timeout waiting for EmulatorJS to initialize'));
+              return;
+            }
+
+            setTimeout(checkEmulator, 100);
+          };
+
+          checkEmulator();
+        });
+      };
+
+      const emulator = await waitForEmulator();
+
+      // Store the emulator instance for controls
+      setEmulatorInstance({
+        pause: () => {
+          console.log('[EmulatorJSPlayer] ⏸️ Pausing emulator');
+          emulator.pause?.();
+        },
+        resume: () => {
+          console.log('[EmulatorJSPlayer] ▶️ Resuming emulator');
+          emulator.resume?.();
+        },
+        restart: () => {
+          console.log('[EmulatorJSPlayer] 🔄 Restarting emulator');
+          emulator.restart?.();
+        },
+        setVolume: (vol: number) => {
+          console.log('[EmulatorJSPlayer] 🔊 Setting volume to:', vol);
+          emulator.setVolume?.(vol);
+        },
+        destroy: () => {
+          console.log('[EmulatorJSPlayer] 🧹 Destroying emulator');
+          try {
+            emulator.destroy?.();
+            URL.revokeObjectURL(gameUrl); // Clean up blob URL
+            // Clean up globals
+            delete globalAny.EJS_player;
+            delete globalAny.EJS_gameUrl;
+            delete globalAny.EJS_core;
+            delete globalAny.EJS_emulator;
+          } catch (e) {
+            console.warn('[EmulatorJSPlayer] Warning during destroy:', e);
+          }
+        },
+        _gameUrl: gameUrl, // Store for cleanup
+        _emulator: emulator // Store reference
+      });
+
+      // Try to find the canvas element for streaming - EmulatorJS creates it dynamically
+      const findCanvas = () => {
+        const canvas = container.querySelector('canvas') as HTMLCanvasElement;
+        if (canvas) {
+          console.log('[EmulatorJSPlayer] 🎥 Canvas element found for streaming:', {
+            width: canvas.width,
+            height: canvas.height,
+            className: canvas.className
+          });
+          setCanvasElement(canvas);
+
+          // Hide the loading indicator once canvas is found
+          const loadingIndicator = container.querySelector('.emulatorjs-loading-indicator') as HTMLElement;
+          if (loadingIndicator) {
+            loadingIndicator.style.display = 'none';
+          }
+
+          return true;
+        }
+        return false;
+      };
+
+      // Try to find canvas immediately and then poll
+      if (!findCanvas()) {
+        const pollInterval = setInterval(() => {
+          if (findCanvas()) {
+            clearInterval(pollInterval);
+          }
+        }, 500);
+
+        // Stop polling after 30 seconds
+        setTimeout(() => {
+          clearInterval(pollInterval);
+          console.warn('[EmulatorJSPlayer] ⚠️ Canvas element not found after 30 seconds');
+        }, 30000);
+      }
+
       setIsReady(true);
       setError(null);
       isInitializedRef.current = true;
@@ -359,6 +533,18 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         }
       } else {
         console.log('[EmulatorJSPlayer:Cleanup] ℹ️ No emulator instance to destroy');
+      }
+
+      // Clean up any remaining globals
+      const globalAny = globalThis as any;
+      try {
+        delete globalAny.EJS_player;
+        delete globalAny.EJS_gameUrl;
+        delete globalAny.EJS_core;
+        delete globalAny.EJS_emulator;
+        console.log('[EmulatorJSPlayer:Cleanup] 🔄 Global variables cleaned up');
+      } catch (e) {
+        console.warn('[EmulatorJSPlayer:Cleanup] Warning cleaning globals:', e);
       }
 
       isInitializedRef.current = false;
@@ -540,63 +726,25 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
               </div>
             )}
 
-            {/* EmulatorJS placeholder - rendered via React, not DOM manipulation */}
+            {/* EmulatorJS will inject its content here */}
             {isReady && !error && (
-              <>
-                <div
-                  className="emulatorjs-placeholder"
-                  style={{
-                    width: '100%',
-                    height: '600px',
-                    backgroundColor: '#1a1a1a',
-                    border: '2px solid #333',
-                    borderRadius: '8px',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#fff',
-                    fontFamily: 'system-ui, sans-serif'
-                  }}
-                >
-                  <div style={{ textAlign: 'center', padding: '20px' }}>
-                    <div style={{ fontSize: '48px', marginBottom: '20px' }}>🎮</div>
-                    <h3 style={{ margin: '0 0 10px 0', fontSize: '24px' }}>EmulatorJS Player</h3>
-                    <p style={{ margin: '0 0 5px 0', color: '#888' }}>System: {systemName}</p>
-                    <p style={{ margin: '0 0 5px 0', color: '#888' }}>Core: {coreType}</p>
-                    <p style={{ margin: '0 0 5px 0', color: '#888' }}>MIME: {mimeType}</p>
-                    <p style={{ margin: '0 0 20px 0', color: '#888' }}>
-                      ROM Size: {romData ? Math.round((romData.includes(',') ? romData.split(',')[1].length : romData.length) * 0.75 / 1024) : 0}KB
-                    </p>
-                    <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>EmulatorJS integration in progress...</p>
-                  </div>
+              <div className="emulatorjs-loading-indicator" style={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                color: '#fff',
+                textAlign: 'center',
+                fontSize: '14px',
+                zIndex: 1000,
+                pointerEvents: 'none'
+              }}>
+                <div style={{ marginBottom: '10px' }}>🎮</div>
+                <div>Loading {systemName}...</div>
+                <div style={{ fontSize: '12px', color: '#888', marginTop: '5px' }}>
+                  Core: {coreType}
                 </div>
-
-                {/* Hidden canvas for stream capture */}
-                <canvas
-                  ref={(canvas) => {
-                    if (canvas && !canvasElement) {
-                      canvas.width = 256;
-                      canvas.height = 240;
-                      canvas.style.display = 'none';
-                      canvas.className = 'emulatorjs-canvas';
-                      setCanvasElement(canvas);
-
-                      // Draw a simple pattern on the canvas for testing
-                      const ctx = canvas.getContext('2d');
-                      if (ctx) {
-                        ctx.fillStyle = '#1a1a1a';
-                        ctx.fillRect(0, 0, canvas.width, canvas.height);
-                        ctx.fillStyle = '#333';
-                        ctx.font = '12px sans-serif';
-                        ctx.fillText('EmulatorJS Placeholder', 10, 120);
-                      }
-                    }
-                  }}
-                  className="emulatorjs-canvas"
-                  style={{ display: 'none' }}
-                />
-              </>
+              </div>
             )}
           </div>
         </CardContent>
