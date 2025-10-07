@@ -5,7 +5,7 @@
  * Automatically selects the appropriate emulator core based on the game's MIME type.
  */
 
-import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, useLayoutEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
@@ -176,6 +176,210 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
   const coreType = MIME_TO_CORE[mimeType];
   const systemName = MIME_TO_SYSTEM_NAME[mimeType] || 'Unknown System';
 
+  const initializeEmulator = async () => {
+    try {
+      console.log('[EmulatorJSPlayer] 🎮 Initializing EmulatorJS for:', {
+        mimeType,
+        coreType,
+        systemName,
+        romDataLength: romData?.length || 0
+      });
+
+      // Check if we have a supported core
+      if (!coreType) {
+        throw new Error(`Unsupported ROM type: ${mimeType}. Please use a supported game format.`);
+      }
+
+      // Validate ROM data
+      if (!romData || typeof romData !== 'string') {
+        throw new Error('No ROM data provided');
+      }
+
+      // Convert base64 to binary data
+      let binaryData: Uint8Array;
+      try {
+        // Remove data URL prefix if present
+        const base64Data = romData.includes(',') ? romData.split(',')[1] : romData;
+        const binaryString = atob(base64Data);
+        binaryData = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          binaryData[i] = binaryString.charCodeAt(i);
+        }
+        console.log('[EmulatorJSPlayer] ✅ ROM data converted, size:', binaryData.length, 'bytes');
+      } catch (decodeError) {
+        throw new Error(`Failed to decode ROM data: ${decodeError instanceof Error ? decodeError.message : 'Invalid data'}`);
+      }
+
+      // Wait for container to be ready with a robust retry mechanism
+      const waitForContainer = async (): Promise<HTMLDivElement> => {
+        const maxAttempts = 20; // 2 seconds max wait (20 * 100ms)
+        let attempts = 0;
+
+        console.log('[EmulatorJSPlayer:ContainerWait] 🎯 Starting container wait', {
+          initialValue: emulatorContainerRef.current ? 'EXISTS' : 'NULL',
+          timestamp: new Date().toISOString()
+        });
+
+        while (attempts < maxAttempts) {
+          const currentContainer = emulatorContainerRef.current;
+
+          if (currentContainer) {
+            console.log('[EmulatorJSPlayer:ContainerWait] ✅ Container found!', {
+              attempt: attempts + 1,
+              offsetWidth: currentContainer.offsetWidth,
+              offsetHeight: currentContainer.offsetHeight,
+              className: currentContainer.className,
+              innerHTML: currentContainer.innerHTML.substring(0, 100) + '...',
+              timestamp: new Date().toISOString()
+            });
+            return currentContainer;
+          }
+
+          console.log('[EmulatorJSPlayer:ContainerWait] ⏳ Container not ready', {
+            attempt: attempts + 1,
+            currentRefValue: currentContainer,
+            maxAttempts,
+            timestamp: new Date().toISOString()
+          });
+
+          // Wait for next animation frame or timeout
+          await new Promise(resolve => {
+            if (attempts === 0) {
+              // First attempt: wait for next animation frame
+              console.log('[EmulatorJSPlayer:ContainerWait] 🎬 Waiting for next animation frame...');
+              requestAnimationFrame(resolve);
+            } else {
+              // Subsequent attempts: use timeout
+              console.log(`[EmulatorJSPlayer:ContainerWait] ⏰ Waiting 100ms (attempt ${attempts + 1})...`);
+              setTimeout(resolve, 100);
+            }
+          });
+
+          attempts++;
+        }
+
+        console.error('[EmulatorJSPlayer:ContainerWait] ❌ Container wait timeout', {
+          finalRefValue: emulatorContainerRef.current,
+          totalAttempts: attempts,
+          timestamp: new Date().toISOString()
+        });
+        throw new Error('Emulator container not ready after timeout');
+      };
+
+      console.log('[EmulatorJSPlayer:ContainerWait] 📋 About to call waitForContainer()', {
+        currentRefState: emulatorContainerRef.current ? {
+          exists: true,
+          offsetWidth: emulatorContainerRef.current.offsetWidth,
+          offsetHeight: emulatorContainerRef.current.offsetHeight
+        } : {
+          exists: false,
+          value: emulatorContainerRef.current
+        },
+        timestamp: new Date().toISOString()
+      });
+
+      const container = await waitForContainer();
+      console.log('[EmulatorJSPlayer:ContainerWait] 🎉 Container wait completed successfully', {
+        container: {
+          offsetWidth: container.offsetWidth,
+          offsetHeight: container.offsetHeight,
+          className: container.className
+        },
+        timestamp: new Date().toISOString()
+      });
+
+      // For now, create a placeholder that shows the system information
+      // TODO: Implement actual EmulatorJS integration once we have proper documentation
+
+      container.innerHTML = '';
+
+      // Create a placeholder div
+      const placeholder = document.createElement('div');
+      placeholder.style.width = '100%';
+      placeholder.style.height = '600px';
+      placeholder.style.backgroundColor = '#1a1a1a';
+      placeholder.style.border = '2px solid #333';
+      placeholder.style.borderRadius = '8px';
+      placeholder.style.display = 'flex';
+      placeholder.style.flexDirection = 'column';
+      placeholder.style.alignItems = 'center';
+      placeholder.style.justifyContent = 'center';
+      placeholder.style.color = '#fff';
+      placeholder.style.fontFamily = 'system-ui, sans-serif';
+
+      placeholder.innerHTML = `
+        <div style="text-align: center; padding: 20px;">
+          <div style="font-size: 48px; margin-bottom: 20px;">🎮</div>
+          <h3 style="margin: 0 0 10px 0; font-size: 24px;">EmulatorJS Player</h3>
+          <p style="margin: 0 0 5px 0; color: #888;">System: ${systemName}</p>
+          <p style="margin: 0 0 5px 0; color: #888;">Core: ${coreType}</p>
+          <p style="margin: 0 0 5px 0; color: #888;">MIME: ${mimeType}</p>
+          <p style="margin: 0 0 20px 0; color: #888;">ROM Size: ${Math.round(binaryData.length / 1024)}KB</p>
+          <p style="margin: 0; color: #666; font-size: 14px;">EmulatorJS integration in progress...</p>
+        </div>
+      `;
+
+      container.appendChild(placeholder);
+
+      // Create a fake canvas for stream capture (for multiplayer compatibility)
+      const canvas = document.createElement('canvas');
+      canvas.width = 256;
+      canvas.height = 240;
+      canvas.style.display = 'none';
+      container.appendChild(canvas);
+      setCanvasElement(canvas);
+
+      // Draw a simple pattern on the canvas for testing
+      const ctx = canvas.getContext('2d');
+      if (ctx) {
+        ctx.fillStyle = '#1a1a1a';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.fillStyle = '#333';
+        ctx.fillText('EmulatorJS Placeholder', 10, 120);
+      }
+
+      setEmulatorInstance({
+        // Mock emulator instance
+        pause: () => console.log('Pause called'),
+        resume: () => console.log('Resume called'),
+        restart: () => console.log('Restart called'),
+        setVolume: (vol: number) => console.log('Volume set to:', vol),
+        destroy: () => console.log('Destroy called')
+      });
+      setIsReady(true);
+      setError(null);
+      isInitializedRef.current = true;
+
+      console.log('[EmulatorJSPlayer] ✅ EmulatorJS initialized successfully');
+
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : 'Failed to initialize emulator';
+      console.error('[EmulatorJSPlayer] ❌ Initialization error:', errorMessage);
+      setError(errorMessage);
+      setIsReady(false);
+    }
+  };
+
+  useLayoutEffect(() => {
+    let attempts = 0;
+    const maxAttempts = 20;
+    
+    const tryInitialize = () => {
+      const container = emulatorContainerRef.current;
+      if (container && !isInitializedRef.current && romData && mimeType) {
+        console.log('[EmulatorJSPlayer:InitLayout] ✅ Container found after', attempts, 'attempt(s)');
+        initializeEmulator();
+      } else if (!container && attempts < maxAttempts) {
+        attempts++;
+        requestAnimationFrame(tryInitialize);
+      } else if (attempts >= maxAttempts) {
+        console.warn('[EmulatorJSPlayer:InitLayout] ❌ Container not found after max attempts');
+      }
+    };
+
+    tryInitialize();
+  }, [romData, mimeType]);
+
   // Detect StrictMode and track render cycles
   useEffect(() => {
     // Check if we're in StrictMode by looking for React's __REACT_DEVTOOLS_GLOBAL_HOOK__
@@ -265,192 +469,6 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
     console.log('[EmulatorJSPlayer:InitEffect] ▶️ Effect running - starting initialization', {
       timestamp: new Date().toISOString()
     });
-
-    const initializeEmulator = async () => {
-      try {
-        console.log('[EmulatorJSPlayer] 🎮 Initializing EmulatorJS for:', {
-          mimeType,
-          coreType,
-          systemName,
-          romDataLength: romData?.length || 0
-        });
-
-        // Check if we have a supported core
-        if (!coreType) {
-          throw new Error(`Unsupported ROM type: ${mimeType}. Please use a supported game format.`);
-        }
-
-        // Validate ROM data
-        if (!romData || typeof romData !== 'string') {
-          throw new Error('No ROM data provided');
-        }
-
-        // Convert base64 to binary data
-        let binaryData: Uint8Array;
-        try {
-          // Remove data URL prefix if present
-          const base64Data = romData.includes(',') ? romData.split(',')[1] : romData;
-          const binaryString = atob(base64Data);
-          binaryData = new Uint8Array(binaryString.length);
-          for (let i = 0; i < binaryString.length; i++) {
-            binaryData[i] = binaryString.charCodeAt(i);
-          }
-          console.log('[EmulatorJSPlayer] ✅ ROM data converted, size:', binaryData.length, 'bytes');
-        } catch (decodeError) {
-          throw new Error(`Failed to decode ROM data: ${decodeError instanceof Error ? decodeError.message : 'Invalid data'}`);
-        }
-
-        // Wait for container to be ready with a robust retry mechanism
-        const waitForContainer = async (): Promise<HTMLDivElement> => {
-          const maxAttempts = 20; // 2 seconds max wait (20 * 100ms)
-          let attempts = 0;
-
-          console.log('[EmulatorJSPlayer:ContainerWait] 🎯 Starting container wait', {
-            initialValue: emulatorContainerRef.current ? 'EXISTS' : 'NULL',
-            timestamp: new Date().toISOString()
-          });
-
-          while (attempts < maxAttempts) {
-            const currentContainer = emulatorContainerRef.current;
-
-            if (currentContainer) {
-              console.log('[EmulatorJSPlayer:ContainerWait] ✅ Container found!', {
-                attempt: attempts + 1,
-                offsetWidth: currentContainer.offsetWidth,
-                offsetHeight: currentContainer.offsetHeight,
-                className: currentContainer.className,
-                innerHTML: currentContainer.innerHTML.substring(0, 100) + '...',
-                timestamp: new Date().toISOString()
-              });
-              return currentContainer;
-            }
-
-            console.log('[EmulatorJSPlayer:ContainerWait] ⏳ Container not ready', {
-              attempt: attempts + 1,
-              currentRefValue: currentContainer,
-              maxAttempts,
-              timestamp: new Date().toISOString()
-            });
-
-            // Wait for next animation frame or timeout
-            await new Promise(resolve => {
-              if (attempts === 0) {
-                // First attempt: wait for next animation frame
-                console.log('[EmulatorJSPlayer:ContainerWait] 🎬 Waiting for next animation frame...');
-                requestAnimationFrame(resolve);
-              } else {
-                // Subsequent attempts: use timeout
-                console.log(`[EmulatorJSPlayer:ContainerWait] ⏰ Waiting 100ms (attempt ${attempts + 1})...`);
-                setTimeout(resolve, 100);
-              }
-            });
-
-            attempts++;
-          }
-
-          console.error('[EmulatorJSPlayer:ContainerWait] ❌ Container wait timeout', {
-            finalRefValue: emulatorContainerRef.current,
-            totalAttempts: attempts,
-            timestamp: new Date().toISOString()
-          });
-          throw new Error('Emulator container not ready after timeout');
-        };
-
-        console.log('[EmulatorJSPlayer:ContainerWait] 📋 About to call waitForContainer()', {
-          currentRefState: emulatorContainerRef.current ? {
-            exists: true,
-            offsetWidth: emulatorContainerRef.current.offsetWidth,
-            offsetHeight: emulatorContainerRef.current.offsetHeight
-          } : {
-            exists: false,
-            value: emulatorContainerRef.current
-          },
-          timestamp: new Date().toISOString()
-        });
-
-        const container = await waitForContainer();
-        console.log('[EmulatorJSPlayer:ContainerWait] 🎉 Container wait completed successfully', {
-          container: {
-            offsetWidth: container.offsetWidth,
-            offsetHeight: container.offsetHeight,
-            className: container.className
-          },
-          timestamp: new Date().toISOString()
-        });
-
-        // For now, create a placeholder that shows the system information
-        // TODO: Implement actual EmulatorJS integration once we have proper documentation
-
-        container.innerHTML = '';
-
-        // Create a placeholder div
-        const placeholder = document.createElement('div');
-        placeholder.style.width = '100%';
-        placeholder.style.height = '600px';
-        placeholder.style.backgroundColor = '#1a1a1a';
-        placeholder.style.border = '2px solid #333';
-        placeholder.style.borderRadius = '8px';
-        placeholder.style.display = 'flex';
-        placeholder.style.flexDirection = 'column';
-        placeholder.style.alignItems = 'center';
-        placeholder.style.justifyContent = 'center';
-        placeholder.style.color = '#fff';
-        placeholder.style.fontFamily = 'system-ui, sans-serif';
-
-        placeholder.innerHTML = `
-          <div style="text-align: center; padding: 20px;">
-            <div style="font-size: 48px; margin-bottom: 20px;">🎮</div>
-            <h3 style="margin: 0 0 10px 0; font-size: 24px;">EmulatorJS Player</h3>
-            <p style="margin: 0 0 5px 0; color: #888;">System: ${systemName}</p>
-            <p style="margin: 0 0 5px 0; color: #888;">Core: ${coreType}</p>
-            <p style="margin: 0 0 5px 0; color: #888;">MIME: ${mimeType}</p>
-            <p style="margin: 0 0 20px 0; color: #888;">ROM Size: ${Math.round(binaryData.length / 1024)}KB</p>
-            <p style="margin: 0; color: #666; font-size: 14px;">EmulatorJS integration in progress...</p>
-          </div>
-        `;
-
-        container.appendChild(placeholder);
-
-        // Create a fake canvas for stream capture (for multiplayer compatibility)
-        const canvas = document.createElement('canvas');
-        canvas.width = 256;
-        canvas.height = 240;
-        canvas.style.display = 'none';
-        container.appendChild(canvas);
-        setCanvasElement(canvas);
-
-        // Draw a simple pattern on the canvas for testing
-        const ctx = canvas.getContext('2d');
-        if (ctx) {
-          ctx.fillStyle = '#1a1a1a';
-          ctx.fillRect(0, 0, canvas.width, canvas.height);
-          ctx.fillStyle = '#333';
-          ctx.fillText('EmulatorJS Placeholder', 10, 120);
-        }
-
-        setEmulatorInstance({
-          // Mock emulator instance
-          pause: () => console.log('Pause called'),
-          resume: () => console.log('Resume called'),
-          restart: () => console.log('Restart called'),
-          setVolume: (vol: number) => console.log('Volume set to:', vol),
-          destroy: () => console.log('Destroy called')
-        });
-        setIsReady(true);
-        setError(null);
-        isInitializedRef.current = true;
-
-        console.log('[EmulatorJSPlayer] ✅ EmulatorJS initialized successfully');
-
-      } catch (err) {
-        const errorMessage = err instanceof Error ? err.message : 'Failed to initialize emulator';
-        console.error('[EmulatorJSPlayer] ❌ Initialization error:', errorMessage);
-        setError(errorMessage);
-        setIsReady(false);
-      }
-    };
-
-    initializeEmulator();
 
     // Cleanup function
     return () => {
