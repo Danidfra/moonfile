@@ -224,63 +224,30 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
         timestamp: new Date().toISOString()
       });
 
-      // For now, create a placeholder that shows the system information
-      // TODO: Implement actual EmulatorJS integration once we have proper documentation
-
-      container.innerHTML = '';
-
-      // Create a placeholder div
-      const placeholder = document.createElement('div');
-      placeholder.style.width = '100%';
-      placeholder.style.height = '600px';
-      placeholder.style.backgroundColor = '#1a1a1a';
-      placeholder.style.border = '2px solid #333';
-      placeholder.style.borderRadius = '8px';
-      placeholder.style.display = 'flex';
-      placeholder.style.flexDirection = 'column';
-      placeholder.style.alignItems = 'center';
-      placeholder.style.justifyContent = 'center';
-      placeholder.style.color = '#fff';
-      placeholder.style.fontFamily = 'system-ui, sans-serif';
-
-      placeholder.innerHTML = `
-        <div style="text-align: center; padding: 20px;">
-          <div style="font-size: 48px; margin-bottom: 20px;">🎮</div>
-          <h3 style="margin: 0 0 10px 0; font-size: 24px;">EmulatorJS Player</h3>
-          <p style="margin: 0 0 5px 0; color: #888;">System: ${systemName}</p>
-          <p style="margin: 0 0 5px 0; color: #888;">Core: ${coreType}</p>
-          <p style="margin: 0 0 5px 0; color: #888;">MIME: ${mimeType}</p>
-          <p style="margin: 0 0 20px 0; color: #888;">ROM Size: ${Math.round(binaryData.length / 1024)}KB</p>
-          <p style="margin: 0; color: #666; font-size: 14px;">EmulatorJS integration in progress...</p>
-        </div>
-      `;
-
-      container.appendChild(placeholder);
-
-      // Create a fake canvas for stream capture (for multiplayer compatibility)
-      const canvas = document.createElement('canvas');
-      canvas.width = 256;
-      canvas.height = 240;
-      canvas.style.display = 'none';
-      container.appendChild(canvas);
-      setCanvasElement(canvas);
-
-      // Draw a simple pattern on the canvas for testing
-      const ctx = canvas.getContext('2d');
-      if (ctx) {
-        ctx.fillStyle = '#1a1a1a';
-        ctx.fillRect(0, 0, canvas.width, canvas.height);
-        ctx.fillStyle = '#333';
-        ctx.fillText('EmulatorJS Placeholder', 10, 120);
-      }
-
+      // Instead of direct DOM manipulation, we'll use React state to manage the content
+      // This prevents DOM synchronization issues
       setEmulatorInstance({
         // Mock emulator instance
         pause: () => console.log('Pause called'),
         resume: () => console.log('Resume called'),
         restart: () => console.log('Restart called'),
         setVolume: (vol: number) => console.log('Volume set to:', vol),
-        destroy: () => console.log('Destroy called')
+        destroy: () => {
+          console.log('Destroy called');
+          // Clean up any DOM elements we created
+          const container = emulatorContainerRef.current;
+          if (container) {
+            // Only remove elements we know we created
+            const placeholder = container.querySelector('.emulatorjs-placeholder');
+            const canvas = container.querySelector('.emulatorjs-canvas');
+            if (placeholder) {
+              container.removeChild(placeholder);
+            }
+            if (canvas) {
+              container.removeChild(canvas);
+            }
+          }
+        }
       });
       setIsReady(true);
       setError(null);
@@ -296,7 +263,7 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
     }
   };
 
-  
+
 
   // Detect StrictMode and track render cycles
   useEffect(() => {
@@ -584,7 +551,64 @@ const EmulatorJSPlayer = forwardRef<EmulatorJSPlayerRef, EmulatorJSPlayerProps>(
               </div>
             )}
 
-            {/* EmulatorJS will be mounted here when ready */}
+            {/* EmulatorJS placeholder - rendered via React, not DOM manipulation */}
+            {isReady && !error && (
+              <>
+                <div
+                  className="emulatorjs-placeholder"
+                  style={{
+                    width: '100%',
+                    height: '600px',
+                    backgroundColor: '#1a1a1a',
+                    border: '2px solid #333',
+                    borderRadius: '8px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: '#fff',
+                    fontFamily: 'system-ui, sans-serif'
+                  }}
+                >
+                  <div style={{ textAlign: 'center', padding: '20px' }}>
+                    <div style={{ fontSize: '48px', marginBottom: '20px' }}>🎮</div>
+                    <h3 style={{ margin: '0 0 10px 0', fontSize: '24px' }}>EmulatorJS Player</h3>
+                    <p style={{ margin: '0 0 5px 0', color: '#888' }}>System: {systemName}</p>
+                    <p style={{ margin: '0 0 5px 0', color: '#888' }}>Core: {coreType}</p>
+                    <p style={{ margin: '0 0 5px 0', color: '#888' }}>MIME: {mimeType}</p>
+                    <p style={{ margin: '0 0 20px 0', color: '#888' }}>
+                      ROM Size: {romData ? Math.round((romData.includes(',') ? romData.split(',')[1].length : romData.length) * 0.75 / 1024) : 0}KB
+                    </p>
+                    <p style={{ margin: 0, color: '#666', fontSize: '14px' }}>EmulatorJS integration in progress...</p>
+                  </div>
+                </div>
+
+                {/* Hidden canvas for stream capture */}
+                <canvas
+                  ref={(canvas) => {
+                    if (canvas && !canvasElement) {
+                      canvas.width = 256;
+                      canvas.height = 240;
+                      canvas.style.display = 'none';
+                      canvas.className = 'emulatorjs-canvas';
+                      setCanvasElement(canvas);
+
+                      // Draw a simple pattern on the canvas for testing
+                      const ctx = canvas.getContext('2d');
+                      if (ctx) {
+                        ctx.fillStyle = '#1a1a1a';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        ctx.fillStyle = '#333';
+                        ctx.font = '12px sans-serif';
+                        ctx.fillText('EmulatorJS Placeholder', 10, 120);
+                      }
+                    }
+                  }}
+                  className="emulatorjs-canvas"
+                  style={{ display: 'none' }}
+                />
+              </>
+            )}
           </div>
         </CardContent>
       </Card>
