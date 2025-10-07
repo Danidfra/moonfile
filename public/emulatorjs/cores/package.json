@@ -16,7 +16,6 @@
     "dependencies": {
         "@emulatorjs/emulatorjs": "latest",
         "@emulatorjs/core-81": "latest",
-        "@emulatorjs/core-mame2003": "latest",
         "@emulatorjs/core-vice_x64": "latest",
         "@emulatorjs/core-vice_x64sc": "latest",
         "@emulatorjs/core-vice_x128": "latest",
@@ -53,6 +52,7 @@
         "@emulatorjs/core-mednafen_wswan": "latest",
         "@emulatorjs/core-gearcoleco": "latest",
         "@emulatorjs/core-parallel_n64": "latest",
+        "@emulatorjs/core-mame2003": "latest",
         "@emulatorjs/core-mame2003_plus": "latest",
         "@emulatorjs/core-puae": "latest",
         "@emulatorjs/core-smsplus": "latest",
@@ -60,6 +60,8 @@
         "@emulatorjs/core-cap32": "latest",
         "@emulatorjs/core-crocods": "latest",
         "@emulatorjs/core-prboom": "latest",
-        "@emulatorjs/core-ppsspp": "latest"
+        "@emulatorjs/core-ppsspp": "latest",
+        "@emulatorjs/core-same_cdi": "latest",
+        "@emulatorjs/core-dosbox_pure": "latest"
     }
 }
