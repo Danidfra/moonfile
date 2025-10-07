@@ -16,7 +16,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
 import { isMultiplayerGame, getMaxPlayers } from '@/lib/gameUtils';
-import EmulatorJSPlayer from '@/components/EmulatorJSPlayer';
+import NesPlayer from '@/components/NesPlayer';
 import GameInteractionCard from '@/components/GameInteractionCard';
 import MultiplayerCard from '@/components/MultiplayerCard';
 import MultiplayerChat from '@/components/MultiplayerChat';
@@ -25,7 +25,7 @@ import GameControls from '@/components/GameControls';
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 type PlayerState = 'loading' | 'ready' | 'error';
-type SessionStatus = 'idle' | 'creating' | 'available' | 'full' | 'error';
+type SessionStatus = 'idle' | 'creating' | 'waiting' | 'active' | 'error';
 
 interface GameMetadata {
   id: string;
@@ -37,7 +37,6 @@ interface GameMetadata {
   version?: string;
   credits?: string;
   platforms: string[];
-  mime?: string;
   assets: {
     cover?: string;
     icon?: string;
@@ -66,12 +65,12 @@ export default function GamePage() {
   const [error, setError] = useState<string | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
-  const [romData, setRomData] = useState<string | null>(null);
+  const [romPath, setRomPath] = useState<string | null>(null);
   const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
   const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
 
   // Refs for multiplayer integration
-  const emulatorPlayerRef = useRef<any>(null);
+  const nesPlayerRef = useRef<any>(null);
   const [gameStream, setGameStream] = useState<MediaStream | null>(null);
 
   // Handle multiplayer stream start
@@ -82,8 +81,8 @@ export default function GamePage() {
 
   // Get canvas stream for multiplayer
   const getGameCanvas = () => {
-    if (emulatorPlayerRef.current) {
-      return emulatorPlayerRef.current.getCanvasStream();
+    if (nesPlayerRef.current) {
+      return nesPlayerRef.current.getCanvasStream();
     }
     return null;
   };
@@ -132,75 +131,61 @@ export default function GamePage() {
           throw new Error(`Unsupported encoding: ${encoding || 'none'}. Expected base64.`);
         }
 
-        console.log('[GamePage] Using base64 ROM data from event content');
+        console.log('[GamePage] Decoding base64 ROM from event content');
 
-        // Validate base64 data by decoding it
+        // Decode ROM from event content
         let romBytes: Uint8Array;
         try {
           romBytes = decodeBase64ToBytes(event.content);
-          console.log('[GamePage] ROM decoded for validation, size:', romBytes.length, 'bytes');
+          console.log('[GamePage] ROM decoded, size:', romBytes.length, 'bytes');
         } catch (decodeError) {
           throw new Error(`Failed to decode base64 ROM: ${decodeError instanceof Error ? decodeError.message : 'Invalid base64 data'}`);
         }
 
-        // For NES ROMs, perform detailed analysis (optional for other systems)
-        const mimeTag = event.tags.find(tag => tag[0] === 'mime');
-        const mimeType = mimeTag?.[1];
+        // Validate ROM format
+        validateNESRom(romBytes);
 
-        if (mimeType === 'application/x-nes-rom') {
-          // Validate ROM format for NES
-          validateNESRom(romBytes);
+        // Perform detailed ROM analysis
+        console.log('[GamePage] Performing detailed ROM analysis...');
+        const romAnalysis = analyzeRom(romBytes);
+        const recommendations = generateRecommendations(romAnalysis);
+        const compatCheck = quickCompatibilityCheck(romBytes);
 
-          // Perform detailed ROM analysis
-          console.log('[GamePage] Performing detailed NES ROM analysis...');
-          const romAnalysis = analyzeRom(romBytes);
-          const recommendations = generateRecommendations(romAnalysis);
-          const compatCheck = quickCompatibilityCheck(romBytes);
+        console.log('[GamePage] ROM analysis complete:', {
+          compatible: compatCheck.compatible,
+          reason: compatCheck.reason,
+          recommendations
+        });
 
-          console.log('[GamePage] ROM analysis complete:', {
-            compatible: compatCheck.compatible,
-            reason: compatCheck.reason,
-            recommendations
-          });
-
-          if (!compatCheck.compatible) {
-            console.warn('[GamePage] ROM compatibility warning:', compatCheck.reason);
-          }
-
-          // Parse header and compute hash for NES
-          const header = parseINesHeader(romBytes);
-          const hash = await sha256(romBytes);
-
-          const info: RomInfo = {
-            size: romBytes.length,
-            sha256: hash,
-            header: {
-              mapper: header.mapper,
-              prgBanks: header.prgBanks,
-              chrBanks: header.chrBanks,
-            }
-          };
-
-          setRomInfo(info);
-        } else {
-          // For non-NES ROMs, just store basic info
-          const hash = await sha256(romBytes);
-          const info: RomInfo = {
-            size: romBytes.length,
-            sha256: hash,
-            header: {
-              mapper: 0,
-              prgBanks: 0,
-              chrBanks: 0,
-            }
-          };
-          setRomInfo(info);
+        if (!compatCheck.compatible) {
+          console.warn('[GamePage] ROM compatibility warning:', compatCheck.reason);
         }
+
+        // Parse header and compute hash
+        const header = parseINesHeader(romBytes);
+        const hash = await sha256(romBytes);
 
         console.log('[GamePage] ROM validation passed');
 
-        // Store the base64 data directly for EmulatorJS
-        setRomData(event.content);
+        const info: RomInfo = {
+          size: romBytes.length,
+          sha256: hash,
+          header: {
+            mapper: header.mapper,
+            prgBanks: header.prgBanks,
+            chrBanks: header.chrBanks,
+          }
+        };
+
+        setRomInfo(info);
+
+        // Convert ROM bytes to binary string for jsnes
+        let romBinaryString = '';
+        for (let i = 0; i < romBytes.length; i++) {
+          romBinaryString += String.fromCharCode(romBytes[i]);
+        }
+
+        setRomPath(romBinaryString);
         setStatus('ready');
         console.log('[GamePage] Game ready to play');
 
@@ -213,9 +198,9 @@ export default function GamePage() {
 
     loadGameData();
 
-    // Cleanup
+    // Cleanup - no blob URLs to revoke anymore
     return () => {
-      // No cleanup needed for base64 strings
+      // No cleanup needed for binary strings
     };
   }, [id, nostr]);
 
@@ -224,7 +209,7 @@ export default function GamePage() {
    */
   const handleRetry = () => {
     // Clean up current state
-    setRomData(null);
+    setRomPath(null);
     setRomInfo(null);
     setError(null);
 
@@ -283,7 +268,7 @@ export default function GamePage() {
     );
   }
 
-  if (!gameMeta || !romData || !gameEvent) {
+  if (!gameMeta || !romPath || !gameEvent) {
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <Card className="w-full max-w-2xl border-gray-800 bg-gray-900">
@@ -305,8 +290,8 @@ export default function GamePage() {
   const isMultiplayer = isMultiplayerGame(gameEvent);
   const maxPlayers = getMaxPlayers(gameEvent);
 
-  // Show chat when session is available or full
-  const showMultiplayerChat = isMultiplayer && ['available', 'full'].includes(multiplayerSessionStatus);
+  // Show chat when session is active or waiting
+  const showMultiplayerChat = isMultiplayer && ['waiting', 'active'].includes(multiplayerSessionStatus);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -349,12 +334,11 @@ export default function GamePage() {
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
           <div className="lg:col-span-3">
-            <EmulatorJSPlayer
-              romData={romData}
-              mimeType={gameMeta.mime}
+            <NesPlayer
+              romPath={romPath}
               title={gameMeta.title}
               className="w-full"
-              ref={emulatorPlayerRef}
+              ref={nesPlayerRef}
             />
           </div>
 
@@ -502,7 +486,6 @@ function parseGameMetadata(event: NostrEvent): GameMetadata {
     version: getTagValue('version'),
     credits: getTagValue('credits'),
     platforms: getTagValues('platform'),
-    mime: getTagValue('mime'),
     assets: {
       cover: getAssetUrl('cover'),
       icon: getAssetUrl('icon'),

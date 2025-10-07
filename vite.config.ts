@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react-swc";
 import { defineConfig } from "vitest/config";
 
 // https://vitejs.dev/config/
-export default defineConfig(({ command, mode }) => ({
+export default defineConfig(() => ({
   server: {
     host: "::",
     port: 8080,
@@ -13,53 +13,22 @@ export default defineConfig(({ command, mode }) => ({
       allow: ['..']
     },
     middlewareMode: false,
-    // Configure headers - CSP handled separately for dev vs prod
+    // Configure headers for WASM files
     headers: {
       'Cache-Control': 'no-store',
     }
   },
   plugins: [
     react(),
-    // Custom plugin to handle assets and CSP
+    // Custom plugin to handle WASM files properly
     {
-      name: 'csp-and-assets',
+      name: 'wasm-headers',
       configureServer(server) {
-        server.middlewares.use((req, res, next) => {
-          // Set relaxed CSP for development to allow Vite HMR
-          if (command === 'serve') {
-            res.setHeader(
-              'Content-Security-Policy',
-              [
-                "default-src 'self'",
-                "script-src 'self' 'unsafe-eval' 'unsafe-inline' 'wasm-unsafe-eval' https://cdn.emulatorjs.org", // Allow EmulatorJS CDN for cores
-                "style-src 'self' 'unsafe-inline'",
-                "img-src 'self' data: blob: https:",
-                "font-src 'self' data:",
-                "connect-src 'self' ws: wss: https:",
-                "worker-src 'self' blob:",
-                "media-src 'self' blob: data:",
-                "object-src 'none'",
-                "base-uri 'self'"
-                // Note: frame-ancestors removed from meta tag as it's ignored there
-              ].join('; ')
-            );
-          }
-
-          // Handle WASM files
+        server.middlewares.use('/wasm', (req, res, next) => {
           if (req.url?.endsWith('.wasm')) {
             res.setHeader('Content-Type', 'application/wasm');
             res.setHeader('Cache-Control', 'no-store');
-            res.setHeader('Content-Encoding', 'identity');
-          }
-          // Handle EmulatorJS JavaScript files
-          else if (req.url?.includes('/emulatorjs/') && req.url?.endsWith('.js')) {
-            res.setHeader('Content-Type', 'application/javascript');
-            res.setHeader('Cache-Control', 'no-store');
-          }
-          // Handle EmulatorJS CSS files
-          else if (req.url?.includes('/emulatorjs/') && req.url?.endsWith('.css')) {
-            res.setHeader('Content-Type', 'text/css');
-            res.setHeader('Cache-Control', 'no-store');
+            res.setHeader('Content-Encoding', 'identity'); // Disable compression
           }
           next();
         });
@@ -72,8 +41,6 @@ export default defineConfig(({ command, mode }) => ({
     rollupOptions: {
       external: ['/lib/fceux/fceux-web.js'],
     },
-    // Generate a _headers file for production CSP (Netlify/Vercel)
-    outDir: 'dist',
   },
   test: {
     globals: true,

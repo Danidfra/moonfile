@@ -100,35 +100,6 @@
   }
 }
 
-/* EmulatorJS Fullscreen Support */
-.fullscreen-mode {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  width: 100vw !important;
-  height: 100vh !important;
-  z-index: 9999 !important;
-  background: black !important;
-}
-
-.fullscreen-card {
-  width: 100vw !important;
-  height: 100vh !important;
-  border: none !important;
-  border-radius: 0 !important;
-}
-
-.fullscreen-content {
-  padding: 0 !important;
-  height: 100vh !important;
-}
-
-.fullscreen-canvas {
-  border-radius: 0 !important;
-  height: 100vh !important;
-  min-height: 100vh !important;
-}
-
 @layer utilities {
   .animate-gradient-x {
     background-size: 200% 200%;
