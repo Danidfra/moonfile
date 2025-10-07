@@ -15,7 +15,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 // Import ROM utilities for parsing Nostr events
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
-import { isMultiplayerGame, getMaxPlayers } from '@/lib/gameUtils';
+import { isMultiplayerGame, getMaxPlayers, getGameMimeType, getSystemNameFromMimeType, isSupportedMimeType } from '@/lib/gameUtils';
 import EmulatorJSPlayer from '@/components/EmulatorJSPlayer';
 import GameInteractionCard from '@/components/GameInteractionCard';
 import MultiplayerCard from '@/components/MultiplayerCard';
@@ -25,7 +25,7 @@ import GameControls from '@/components/GameControls';
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
 type PlayerState = 'loading' | 'ready' | 'error';
-type SessionStatus = 'idle' | 'creating' | 'available' | 'full' | 'error';
+type SessionStatus = 'idle' | 'creating' | 'available' | 'waiting' | 'active' | 'full' | 'error';
 
 interface GameMetadata {
   id: string;
@@ -67,6 +67,7 @@ export default function GamePage() {
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [romInfo, setRomInfo] = useState<RomInfo | null>(null);
   const [romData, setRomData] = useState<string | null>(null);
+  const [mimeType, setMimeType] = useState<string>('application/x-nes-rom'); // Default to NES
   const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
   const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
 
@@ -124,6 +125,17 @@ export default function GamePage() {
         setGameMeta(meta);
         console.log('[GamePage] Game metadata parsed:', meta);
 
+        // Extract MIME type from event tags
+        const detectedMimeType = getGameMimeType(event);
+        setMimeType(detectedMimeType);
+        console.log('[GamePage] Detected MIME type:', detectedMimeType);
+
+        // Check if the MIME type is supported
+        if (!isSupportedMimeType(detectedMimeType)) {
+          console.warn('[GamePage] Unsupported MIME type:', detectedMimeType);
+          // Continue anyway, EmulatorJS will show an appropriate error
+        }
+
         // Check encoding tag
         const encodingTag = event.tags.find(tag => tag[0] === 'encoding');
         const encoding = encodingTag?.[1];
@@ -143,28 +155,25 @@ export default function GamePage() {
           throw new Error(`Failed to decode base64 ROM: ${decodeError instanceof Error ? decodeError.message : 'Invalid base64 data'}`);
         }
 
-        // For NES ROMs, perform detailed analysis (optional for other systems)
-        const mimeTag = event.tags.find(tag => tag[0] === 'mime');
-        const mimeType = mimeTag?.[1];
-
-        if (mimeType === 'application/x-nes-rom') {
-          // Validate ROM format for NES
+        // Validate ROM format based on MIME type
+        if (detectedMimeType === 'application/x-nes-rom' || detectedMimeType === 'application/x-nintendo-nes-rom') {
+          // Only validate as NES ROM if it's specifically a NES ROM
           validateNESRom(romBytes);
 
-          // Perform detailed ROM analysis
+          // Perform detailed ROM analysis for NES
           console.log('[GamePage] Performing detailed NES ROM analysis...');
           const romAnalysis = analyzeRom(romBytes);
           const recommendations = generateRecommendations(romAnalysis);
           const compatCheck = quickCompatibilityCheck(romBytes);
 
-          console.log('[GamePage] ROM analysis complete:', {
+          console.log('[GamePage] NES ROM analysis complete:', {
             compatible: compatCheck.compatible,
             reason: compatCheck.reason,
             recommendations
           });
 
           if (!compatCheck.compatible) {
-            console.warn('[GamePage] ROM compatibility warning:', compatCheck.reason);
+            console.warn('[GamePage] NES ROM compatibility warning:', compatCheck.reason);
           }
 
           // Parse header and compute hash for NES
@@ -189,17 +198,16 @@ export default function GamePage() {
             size: romBytes.length,
             sha256: hash,
             header: {
-              mapper: 0,
+              mapper: 0, // Not applicable for non-NES
               prgBanks: 0,
               chrBanks: 0,
             }
           };
           setRomInfo(info);
+          console.log('[GamePage] Non-NES ROM processed, size:', romBytes.length, 'bytes');
         }
 
-        console.log('[GamePage] ROM validation passed');
-
-        // Store the base64 data directly for EmulatorJS
+        // Store the base64 ROM data for EmulatorJS
         setRomData(event.content);
         setStatus('ready');
         console.log('[GamePage] Game ready to play');
@@ -215,7 +223,7 @@ export default function GamePage() {
 
     // Cleanup
     return () => {
-      // No cleanup needed for base64 strings
+      // No cleanup needed for base64 data
     };
   }, [id, nostr]);
 
@@ -227,6 +235,7 @@ export default function GamePage() {
     setRomData(null);
     setRomInfo(null);
     setError(null);
+    setMimeType('application/x-nes-rom');
 
     // Restart loading process
     setStatus('loading');
@@ -305,8 +314,8 @@ export default function GamePage() {
   const isMultiplayer = isMultiplayerGame(gameEvent);
   const maxPlayers = getMaxPlayers(gameEvent);
 
-  // Show chat when session is available or full
-  const showMultiplayerChat = isMultiplayer && ['available', 'full'].includes(multiplayerSessionStatus);
+  // Show chat when session is active, waiting, or available
+  const showMultiplayerChat = isMultiplayer && ['available', 'waiting', 'active'].includes(multiplayerSessionStatus);
 
   return (
     <div className="min-h-screen bg-black text-white">
@@ -323,7 +332,10 @@ export default function GamePage() {
               <div>
                 <h1 className="text-xl font-bold text-white">{gameMeta.title}</h1>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
-                  {romInfo?.header.mapper !== undefined && (
+                  <span className="bg-gray-800 px-2 py-1 rounded text-xs">
+                    {getSystemNameFromMimeType(mimeType)}
+                  </span>
+                  {(mimeType === 'application/x-nes-rom' || mimeType === 'application/x-nintendo-nes-rom') && romInfo?.header.mapper !== undefined && (
                     <span className="bg-gray-800 px-2 py-1 rounded text-xs">
                       Mapper {romInfo.header.mapper}
                     </span>
@@ -351,10 +363,12 @@ export default function GamePage() {
           <div className="lg:col-span-3">
             <EmulatorJSPlayer
               romData={romData}
-              mimeType={gameMeta.mime}
+              mimeType={mimeType}
               title={gameMeta.title}
               className="w-full"
               ref={emulatorPlayerRef}
+              isHost={isMultiplayer && multiplayerSessionStatus === 'active'}
+              addVideoTrackToPeerConnection={undefined} // Will be set by multiplayer logic
             />
           </div>
 
@@ -441,10 +455,15 @@ export default function GamePage() {
                       <div className="pt-2 border-t border-gray-800">
                         <span className="text-gray-500">ROM Info:</span>
                         <div className="text-xs text-gray-400 mt-1 space-y-1">
-                          <div>PRG Banks: {romInfo.header.prgBanks}</div>
-                          <div>CHR Banks: {romInfo.header.chrBanks}</div>
-                          <div>Mapper: {romInfo.header.mapper}</div>
+                          {(mimeType === 'application/x-nes-rom' || mimeType === 'application/x-nintendo-nes-rom') && (
+                            <>
+                              <div>PRG Banks: {romInfo.header.prgBanks}</div>
+                              <div>CHR Banks: {romInfo.header.chrBanks}</div>
+                              <div>Mapper: {romInfo.header.mapper}</div>
+                            </>
+                          )}
                           <div>Size: {Math.round(romInfo.size / 1024)}KB</div>
+                          <div>MIME Type: {mimeType}</div>
                           <div>SHA256: {romInfo.sha256.substring(0, 8)}...</div>
                         </div>
                       </div>

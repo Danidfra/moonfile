@@ -86,92 +86,136 @@ class Emulator extends Component<EmulatorProps> {
     const mountStartTime = performance.now();
     console.log('[Emulator] ⏱️ Component mounting started at:', new Date().toISOString());
 
-    this.fitInParent();
+    // Use requestAnimationFrame to ensure DOM is fully ready
+    requestAnimationFrame(() => {
+      try {
+        this.fitInParent();
 
-    const speakersStartTime = performance.now();
-    console.log('[Emulator] 🎵 Creating Speakers...');
-    this.speakers = new Speakers({
-      onBufferUnderrun: (actualSize: number, desiredSize: number) => {
-        if (this.props.paused) return;
+        const speakersStartTime = performance.now();
+        console.log('[Emulator] 🎵 Creating Speakers...');
+        this.speakers = new Speakers({
+          onBufferUnderrun: (actualSize: number, desiredSize: number) => {
+            if (this.props.paused) return;
 
-        console.log("Buffer underrun, running another frame to try and catch up");
-        if (this.frameTimer) {
-          this.frameTimer.generateFrame();
+            console.log("Buffer underrun, running another frame to try and catch up");
+            if (this.frameTimer) {
+              this.frameTimer.generateFrame();
+            }
+
+            if (this.speakers && (this.speakers as any).buffer.size() < desiredSize) {
+              console.log("Still buffer underrun, running a second frame");
+              if (this.frameTimer) {
+                this.frameTimer.generateFrame();
+              }
+            }
+          },
+        });
+
+        const nesStartTime = performance.now();
+        console.log('[Emulator] 🕹️ Creating NES instance...');
+        this.nes = new NES({
+          onFrame: this.screen ? this.screen.setBuffer : () => {},
+          onStatusUpdate: console.log,
+          onAudioSample: this.speakers ? (this.speakers as any).writeSample : () => {},
+          sampleRate: this.speakers ? (this.speakers as any).getSampleRate() : 44100,
+        });
+
+        (window as unknown as Record<string, unknown>)["nes"] = this.nes;
+        console.log('[Emulator] ⏱️ NES instance created in:', performance.now() - nesStartTime, 'ms');
+
+        this.frameTimer = new FrameTimer({
+          onGenerateFrame: this.nes.frame,
+          onWriteFrame: this.screen ? this.screen.writeBuffer : () => {},
+        });
+
+        this.gamepadController = new GamepadController({
+          onButtonDown: this.nes.buttonDown,
+          onButtonUp: this.nes.buttonUp,
+        });
+        this.gamepadController.loadGamepadConfig();
+        this.gamepadPolling = this.gamepadController.startPolling();
+
+        this.keyboardController = new KeyboardController({
+          onButtonDown: this.gamepadController ? this.gamepadController.disableIfGamepadEnabled(this.nes.buttonDown) : this.nes.buttonDown,
+          onButtonUp: this.gamepadController ? this.gamepadController.disableIfGamepadEnabled(this.nes.buttonUp) : this.nes.buttonUp,
+        });
+        this.keyboardController.loadKeys();
+
+        document.addEventListener("keydown", this.keyboardController.handleKeyDown);
+        document.addEventListener("keyup", this.keyboardController.handleKeyUp);
+        document.addEventListener("keypress", this.keyboardController.handleKeyPress);
+
+        const romLoadStartTime = performance.now();
+        console.log('[Emulator] 📀 Loading ROM data...');
+        console.log('[Emulator] 📊 ROM data size:', this.props.romData.length, 'characters');
+
+        // Validate ROM data before loading
+        if (!this.props.romData || typeof this.props.romData !== 'string') {
+          throw new Error('Invalid ROM data provided');
         }
 
-        if (this.speakers && (this.speakers as any).buffer.size() < desiredSize) {
-          console.log("Still buffer underrun, running a second frame");
-          if (this.frameTimer) {
-            this.frameTimer.generateFrame();
-          }
-        }
-      },
+        this.nes.loadROM(this.props.romData);
+
+        const romLoadEndTime = performance.now();
+        console.log('[Emulator] ⏱️ ROM loading completed in:', romLoadEndTime - romLoadStartTime, 'ms');
+
+        const startStartTime = performance.now();
+        console.log('[Emulator] ▶️ Starting emulator...');
+        this.start();
+
+        const totalMountTime = performance.now() - mountStartTime;
+        console.log('[Emulator] ⏱️ Total componentDidMount time:', totalMountTime, 'ms');
+      } catch (error) {
+        console.error('[Emulator] ❌ Error during component mounting:', error);
+        // Ensure cleanup if initialization fails
+        this.stop();
+      }
     });
-
-    const nesStartTime = performance.now();
-    console.log('[Emulator] 🕹️ Creating NES instance...');
-    this.nes = new NES({
-      onFrame: this.screen ? this.screen.setBuffer : () => {},
-      onStatusUpdate: console.log,
-      onAudioSample: this.speakers ? this.speakers.writeSample : () => {},
-      sampleRate: this.speakers ? this.speakers.getSampleRate() : 44100,
-    });
-
-    (window as unknown as Record<string, unknown>)["nes"] = this.nes;
-    console.log('[Emulator] ⏱️ NES instance created in:', performance.now() - nesStartTime, 'ms');
-
-    this.frameTimer = new FrameTimer({
-      onGenerateFrame: this.nes.frame,
-      onWriteFrame: this.screen ? this.screen.writeBuffer : () => {},
-    });
-
-    this.gamepadController = new GamepadController({
-      onButtonDown: this.nes.buttonDown,
-      onButtonUp: this.nes.buttonUp,
-    });
-    this.gamepadController.loadGamepadConfig();
-    this.gamepadPolling = this.gamepadController.startPolling();
-
-    this.keyboardController = new KeyboardController({
-      onButtonDown: this.gamepadController ? this.gamepadController.disableIfGamepadEnabled(this.nes.buttonDown) : this.nes.buttonDown,
-      onButtonUp: this.gamepadController ? this.gamepadController.disableIfGamepadEnabled(this.nes.buttonUp) : this.nes.buttonUp,
-    });
-    this.keyboardController.loadKeys();
-
-    document.addEventListener("keydown", this.keyboardController.handleKeyDown);
-    document.addEventListener("keyup", this.keyboardController.handleKeyUp);
-    document.addEventListener("keypress", this.keyboardController.handleKeyPress);
-
-    const romLoadStartTime = performance.now();
-    console.log('[Emulator] 📀 Loading ROM data...');
-    console.log('[Emulator] 📊 ROM data size:', this.props.romData.length, 'characters');
-
-    this.nes.loadROM(this.props.romData);
-
-    const romLoadEndTime = performance.now();
-    console.log('[Emulator] ⏱️ ROM loading completed in:', romLoadEndTime - romLoadStartTime, 'ms');
-
-    const startStartTime = performance.now();
-    console.log('[Emulator] ▶️ Starting emulator...');
-    this.start();
-
-    const totalMountTime = performance.now() - mountStartTime;
-    console.log('[Emulator] ⏱️ Total componentDidMount time:', totalMountTime, 'ms');
   }
 
   componentWillUnmount() {
+    console.log('[Emulator] 🧹 Starting component cleanup...');
+
+    // Stop the emulator first
     this.stop();
 
+    // Remove keyboard event listeners safely
     if (this.keyboardController) {
-      document.removeEventListener("keydown", this.keyboardController.handleKeyDown);
-      document.removeEventListener("keyup", this.keyboardController.handleKeyUp);
-      document.removeEventListener("keypress", this.keyboardController.handleKeyPress);
+      try {
+        document.removeEventListener("keydown", this.keyboardController.handleKeyDown);
+        document.removeEventListener("keyup", this.keyboardController.handleKeyUp);
+        document.removeEventListener("keypress", this.keyboardController.handleKeyPress);
+        console.log('[Emulator] ✅ Keyboard event listeners removed');
+      } catch (error) {
+        console.warn('[Emulator] ⚠️ Error removing keyboard listeners:', error);
+      }
     }
 
+    // Stop gamepad polling safely
     if (this.gamepadPolling) {
-      this.gamepadPolling.stop();
+      try {
+        this.gamepadPolling.stop();
+        console.log('[Emulator] ✅ Gamepad polling stopped');
+      } catch (error) {
+        console.warn('[Emulator] ⚠️ Error stopping gamepad polling:', error);
+      }
     }
-    (window as any)["nes"] = undefined;
+
+    // Clear the global reference
+    try {
+      delete (window as any)["nes"];
+      console.log('[Emulator] ✅ Global nes reference cleared');
+    } catch (error) {
+      console.warn('[Emulator] ⚠️ Error clearing global reference:', error);
+    }
+
+    // Clear any remaining timeouts/intervals
+    if (this.fpsInterval) {
+      clearInterval(this.fpsInterval);
+      this.fpsInterval = null;
+    }
+
+    console.log('[Emulator] ✅ Component cleanup completed');
   }
 
   componentDidUpdate(prevProps: EmulatorProps) {
