@@ -130,6 +130,8 @@ function createRomBlobUrl(romData: Uint8Array): string {
   return URL.createObjectURL(blob);
 }
 
+
+
 const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
   romData,
   platform,
@@ -181,123 +183,113 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
   }));
 
   // Initialize EmulatorJS
-  useEffect(() => {
-    let mounted = true;
+useEffect(() => {
+  // Capture ref value at the beginning of the effect for cleanup
+  const gameContainer = gameContainerRef.current;
 
-    const initializeEmulator = async () => {
-      try {
-        setIsLoading(true);
-        setError(null);
+  const initializeEmulator = async () => {
+    try {
+      setIsLoading(true);
+      setError(null);
 
-        console.log('[EmulatorJS] Initializing emulator for platform:', platform);
+      console.log('[EmulatorJS] Initializing emulator for platform:', platform);
 
-        // Load EmulatorJS script
-        await loadEmulatorJSScript();
+      // Check if gameContainerRef.current is available
+      if (!gameContainerRef.current) {
+        throw new Error('Game container ref is not available');
+      }
 
-        if (!mounted) return;
+      const romUrl = createRomBlobUrl(romData);
+      romBlobUrlRef.current = romUrl;
+      console.log('[EmulatorJS] ROM blob URL created:', romUrl);
 
-        // Create blob URL for ROM data
-        const romUrl = createRomBlobUrl(romData);
-        romBlobUrlRef.current = romUrl;
+      const system = getEmulatorSystemFromPlatform(platform);
+      console.log('[EmulatorJS] Using system:', system);
 
-        console.log('[EmulatorJS] ROM blob URL created:', romUrl);
+      // Use the ref directly instead of waiting for container by ID
+      const container = gameContainerRef.current;
+      container.innerHTML = '';
 
-        // Get EmulatorJS system from platform
-        const system = getEmulatorSystemFromPlatform(platform);
-        console.log('[EmulatorJS] Using system:', system);
+      (window as unknown as { EJS_gameID: string }).EJS_gameID = `game-${Date.now()}`;
 
-        // Set up EmulatorJS configuration
-        window.EJS_player = '#game-container';
-        window.EJS_gameUrl = romUrl;
-        window.EJS_core = system;
-        window.EJS_startOnLoaded = true;
-        window.EJS_volume = isMuted ? 0 : 0.5;
-        window.EJS_mute = isMuted;
-        window.EJS_loadStateOnStart = false;
-        window.EJS_saveStateOnUnload = false;
-        window.EJS_alignStartButton = 'center';
-        window.EJS_fullscreenOnDoubleClick = true;
+      await loadEmulatorJSScript();
 
-        // Set the required EmulatorJS global variables before calling window.EmulatorJS()
-        (window as any).EJS_gameID = `game-${Date.now()}`;
-        (window as any).EJS_gameUrl = romUrl;
-        (window as any).EJS_core = system;
-        (window as any).EJS_biosUrl = '';
+      console.log('[EmulatorJS] Starting emulator (manual constructor)...');
 
-        // Wait for the game container to exist before initializing
-        await new Promise(requestAnimationFrame);
-        const container = document.getElementById('game-container');
-        if (!container) throw new Error('Game container not found');
+      const emulatorInstance = new (window as unknown as { EJS_emulator: new (container: HTMLElement, config: unknown) => unknown }).EJS_emulator(container, {
+        core: system,
+        gameUrl: romUrl,
+        pathtodata: 'https://cdn.emulatorjs.org/stable/data/',
+        startOnLoaded: true,
+        volume: isMuted ? 0 : 0.5,
+        mute: isMuted,
+      });
 
-        // Clear any existing content
-        container.innerHTML = '';
+      emulatorInstanceRef.current = emulatorInstance;
 
-        console.log('[EmulatorJS] Starting emulator...');
-
-        // Initialize the emulator
-        const emulatorInstance = new (window.EJS_emulator as new (...args: unknown[]) => unknown)(
-          '#game-container',
-          {
-            gameUrl: romUrl,
-            core: system,
-            startOnLoaded: true,
-            volume: isMuted ? 0 : 0.5,
-            mute: isMuted
-          }
-        );
-
-        emulatorInstanceRef.current = emulatorInstance;
-
-        // Wait a bit for the emulator to initialize
-        setTimeout(() => {
-          if (mounted) {
-            setIsReady(true);
-            setIsLoading(false);
-            console.log('[EmulatorJS] Emulator ready');
-          }
-        }, 2000);
-
-      } catch (err) {
-        console.error('[EmulatorJS] Initialization error:', err);
-        if (mounted) {
-          setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
+      const start = performance.now();
+      const poll = () => {
+        if (!gameContainerRef.current) return;
+        const canvas = gameContainerRef.current.querySelector('canvas');
+        if (canvas) {
+          setIsReady(true);
           setIsLoading(false);
+          console.log('[EmulatorJS] Emulator ready (canvas found)');
+          return;
         }
-      }
-    };
+        if (performance.now() - start > 5000) {
+          setIsLoading(false);
+          setError('Emulator did not render in time');
+          return;
+        }
+        requestAnimationFrame(poll);
+      };
+      requestAnimationFrame(poll);
 
+    } catch (err) {
+      console.error('[EmulatorJS] Initialization error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
+      setIsLoading(false);
+    }
+  };
+
+  // ✅ Aqui sim: aguardamos o próximo tick antes de inicializar
+  const t = setTimeout(() => {
     initializeEmulator();
+  }, 0);
 
-    return () => {
-      mounted = false;
+  return () => {
+    clearTimeout(t);
 
-      // Cleanup blob URL
-      if (romBlobUrlRef.current) {
-        URL.revokeObjectURL(romBlobUrlRef.current);
-        romBlobUrlRef.current = null;
-      }
+    // Cleanup blob URL
+    if (romBlobUrlRef.current) {
+      URL.revokeObjectURL(romBlobUrlRef.current);
+      romBlobUrlRef.current = null;
+    }
 
-      // Cleanup emulator instance
-      if (emulatorInstanceRef.current) {
-        try {
-          // Try to stop/destroy the emulator if methods exist
-          if (emulatorInstanceRef.current && typeof (emulatorInstanceRef.current as { destroy?: () => void }).destroy === 'function') {
-            (emulatorInstanceRef.current as { destroy: () => void }).destroy();
-          }
-        } catch (error) {
-          console.warn('[EmulatorJS] Error during cleanup:', error);
+    // Cleanup emulator instance
+    if (emulatorInstanceRef.current) {
+      try {
+        if (
+          emulatorInstanceRef.current &&
+          typeof (emulatorInstanceRef.current as { destroy?: () => void }).destroy === 'function'
+        ) {
+          (emulatorInstanceRef.current as { destroy: () => void }).destroy();
         }
-        emulatorInstanceRef.current = null;
+      } catch (error) {
+        console.warn('[EmulatorJS] Error during cleanup:', error);
       }
+      emulatorInstanceRef.current = null;
+    }
 
-      // Clear container
-      if (gameContainerRef.current) {
-        gameContainerRef.current.innerHTML = '';
-      }
+    // Clear container using captured ref value
+    if (gameContainer) {
+      gameContainer.innerHTML = '';
+    }
 
-      console.log('[EmulatorJS] Component cleanup completed');
-    };
-  }, [romData, platform, isMuted]);
+    console.log('[EmulatorJS] Component cleanup completed');
+  };
+}, [romData, platform, isMuted]);
 
   // Handle fullscreen change events
   useEffect(() => {
@@ -520,7 +512,6 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         <CardContent className={`p-4 ${isFullscreen ? 'fullscreen-content' : ''}`}>
           <div
             ref={gameContainerRef}
-            id="game-container"
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
