@@ -5,7 +5,7 @@
  * (NES, SNES, GBA, etc.) based on the platform tag from Nostr events.
  */
 
-import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
@@ -182,114 +182,125 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     }
   }));
 
-  // Initialize EmulatorJS
-useEffect(() => {
-  // Capture ref value at the beginning of the effect for cleanup
-  const gameContainer = gameContainerRef.current;
+  // Initialize EmulatorJS - wait for container ref to be available
+  useLayoutEffect(() => {
+    let isInitialized = false;
+    let animationFrameId: number | null = null;
+    // Capture ref value at the beginning of the effect for cleanup
+    const gameContainer = gameContainerRef.current;
 
-  const initializeEmulator = async () => {
-    try {
-      setIsLoading(true);
-      setError(null);
-
-      console.log('[EmulatorJS] Initializing emulator for platform:', platform);
-
-      // Check if gameContainerRef.current is available
-      if (!gameContainerRef.current) {
-        throw new Error('Game container ref is not available');
-      }
-
-      const romUrl = createRomBlobUrl(romData);
-      romBlobUrlRef.current = romUrl;
-      console.log('[EmulatorJS] ROM blob URL created:', romUrl);
-
-      const system = getEmulatorSystemFromPlatform(platform);
-      console.log('[EmulatorJS] Using system:', system);
-
-      // Use the ref directly instead of waiting for container by ID
-      const container = gameContainerRef.current;
-      container.innerHTML = '';
-
-      (window as unknown as { EJS_gameID: string }).EJS_gameID = `game-${Date.now()}`;
-
-      await loadEmulatorJSScript();
-
-      console.log('[EmulatorJS] Starting emulator (manual constructor)...');
-
-      const emulatorInstance = new (window as unknown as { EJS_emulator: new (container: HTMLElement, config: unknown) => unknown }).EJS_emulator(container, {
-        core: system,
-        gameUrl: romUrl,
-        pathtodata: 'https://cdn.emulatorjs.org/stable/data/',
-        startOnLoaded: true,
-        volume: isMuted ? 0 : 0.5,
-        mute: isMuted,
-      });
-
-      emulatorInstanceRef.current = emulatorInstance;
-
-      const start = performance.now();
-      const poll = () => {
-        if (!gameContainerRef.current) return;
-        const canvas = gameContainerRef.current.querySelector('canvas');
-        if (canvas) {
-          setIsReady(true);
-          setIsLoading(false);
-          console.log('[EmulatorJS] Emulator ready (canvas found)');
-          return;
-        }
-        if (performance.now() - start > 5000) {
-          setIsLoading(false);
-          setError('Emulator did not render in time');
-          return;
-        }
-        requestAnimationFrame(poll);
-      };
-      requestAnimationFrame(poll);
-
-    } catch (err) {
-      console.error('[EmulatorJS] Initialization error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
-      setIsLoading(false);
-    }
-  };
-
-  // ✅ Aqui sim: aguardamos o próximo tick antes de inicializar
-  const t = setTimeout(() => {
-    initializeEmulator();
-  }, 0);
-
-  return () => {
-    clearTimeout(t);
-
-    // Cleanup blob URL
-    if (romBlobUrlRef.current) {
-      URL.revokeObjectURL(romBlobUrlRef.current);
-      romBlobUrlRef.current = null;
-    }
-
-    // Cleanup emulator instance
-    if (emulatorInstanceRef.current) {
+    const initializeEmulator = async () => {
       try {
-        if (
-          emulatorInstanceRef.current &&
-          typeof (emulatorInstanceRef.current as { destroy?: () => void }).destroy === 'function'
-        ) {
-          (emulatorInstanceRef.current as { destroy: () => void }).destroy();
-        }
-      } catch (error) {
-        console.warn('[EmulatorJS] Error during cleanup:', error);
+        if (isInitialized) return; // Prevent multiple initializations
+
+        setIsLoading(true);
+        setError(null);
+
+        console.log('[EmulatorJS] Initializing emulator for platform:', platform);
+
+        const romUrl = createRomBlobUrl(romData);
+        romBlobUrlRef.current = romUrl;
+        console.log('[EmulatorJS] ROM blob URL created:', romUrl);
+
+        const system = getEmulatorSystemFromPlatform(platform);
+        console.log('[EmulatorJS] Using system:', system);
+
+        // Use the ref directly - it's guaranteed to be available at this point
+        const container = gameContainerRef.current!;
+        container.innerHTML = '';
+
+        (window as unknown as { EJS_gameID: string }).EJS_gameID = `game-${Date.now()}`;
+
+        await loadEmulatorJSScript();
+
+        console.log('[EmulatorJS] Starting emulator (manual constructor)...');
+
+        const emulatorInstance = new (window as unknown as { EJS_emulator: new (container: HTMLElement, config: unknown) => unknown }).EJS_emulator(container, {
+          core: system,
+          gameUrl: romUrl,
+          pathtodata: 'https://cdn.emulatorjs.org/stable/data/',
+          startOnLoaded: true,
+          volume: isMuted ? 0 : 0.5,
+          mute: isMuted,
+        });
+
+        emulatorInstanceRef.current = emulatorInstance;
+        isInitialized = true;
+
+        const start = performance.now();
+        const poll = () => {
+          if (!gameContainerRef.current) return;
+          const canvas = gameContainerRef.current.querySelector('canvas');
+          if (canvas) {
+            setIsReady(true);
+            setIsLoading(false);
+            console.log('[EmulatorJS] Emulator ready (canvas found)');
+            return;
+          }
+          if (performance.now() - start > 5000) {
+            setIsLoading(false);
+            setError('Emulator did not render in time');
+            return;
+          }
+          requestAnimationFrame(poll);
+        };
+        requestAnimationFrame(poll);
+
+      } catch (err) {
+        console.error('[EmulatorJS] Initialization error:', err);
+        setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
+        setIsLoading(false);
       }
-      emulatorInstanceRef.current = null;
-    }
+    };
 
-    // Clear container using captured ref value
-    if (gameContainer) {
-      gameContainer.innerHTML = '';
-    }
+    const waitForContainer = () => {
+      if (gameContainerRef.current) {
+        // Container ref is available, initialize immediately
+        initializeEmulator();
+      } else {
+        // Container ref not ready yet, wait using requestAnimationFrame
+        animationFrameId = requestAnimationFrame(waitForContainer);
+      }
+    };
 
-    console.log('[EmulatorJS] Component cleanup completed');
-  };
-}, [romData, platform, isMuted]);
+    // Start waiting for container
+    waitForContainer();
+
+    return () => {
+      // Cancel any pending animation frame
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
+
+      // Cleanup blob URL
+      if (romBlobUrlRef.current) {
+        URL.revokeObjectURL(romBlobUrlRef.current);
+        romBlobUrlRef.current = null;
+      }
+
+      // Cleanup emulator instance
+      if (emulatorInstanceRef.current) {
+        try {
+          if (
+            emulatorInstanceRef.current &&
+            typeof (emulatorInstanceRef.current as { destroy?: () => void }).destroy === 'function'
+          ) {
+            (emulatorInstanceRef.current as { destroy: () => void }).destroy();
+          }
+        } catch (error) {
+          console.warn('[EmulatorJS] Error during cleanup:', error);
+        }
+        emulatorInstanceRef.current = null;
+      }
+
+      // Clear container using captured ref value
+      if (gameContainer) {
+        gameContainer.innerHTML = '';
+      }
+
+      console.log('[EmulatorJS] Component cleanup completed');
+    };
+  }, [romData, platform, isMuted]);
 
   // Handle fullscreen change events
   useEffect(() => {
