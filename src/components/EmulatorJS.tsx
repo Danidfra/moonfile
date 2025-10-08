@@ -13,7 +13,7 @@ import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lu
 // Extend Window interface to include EmulatorJS
 declare global {
   interface Window {
-    EJS_emulator?: any;
+    EJS_emulator?: unknown;
     EJS_player?: string;
     EJS_gameUrl?: string;
     EJS_core?: string;
@@ -26,6 +26,18 @@ declare global {
     EJS_saveStateOnUnload?: boolean;
     EJS_alignStartButton?: string;
     EJS_fullscreenOnDoubleClick?: boolean;
+  }
+
+  interface HTMLElement {
+    webkitRequestFullscreen?: () => Promise<void>;
+    mozRequestFullScreen?: () => Promise<void>;
+    msRequestFullscreen?: () => Promise<void>;
+  }
+
+  interface Document {
+    webkitExitFullscreen?: () => Promise<void>;
+    mozCancelFullScreen?: () => Promise<void>;
+    msExitFullscreen?: () => Promise<void>;
   }
 }
 
@@ -48,6 +60,9 @@ export interface EmulatorJSRef {
  */
 function loadEmulatorJSScript(): Promise<void> {
   return new Promise((resolve, reject) => {
+    // Set the path to data before loading the script (always set this)
+    window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+
     // Check if already loaded
     if (window.EJS_emulator) {
       console.log('[EmulatorJS] Script already loaded');
@@ -121,7 +136,7 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
   title = "Game",
   className = "",
   isHost = false,
-  peerConnectionRef,
+  peerConnectionRef: _peerConnectionRef,
   addVideoTrackToPeerConnection
 }: EmulatorJSProps, ref) => {
   const [isLoading, setIsLoading] = useState(true);
@@ -134,7 +149,7 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
   const containerRef = useRef<HTMLDivElement>(null);
   const gameContainerRef = useRef<HTMLDivElement>(null);
   const romBlobUrlRef = useRef<string | null>(null);
-  const emulatorInstanceRef = useRef<any>(null);
+  const emulatorInstanceRef = useRef<unknown>(null);
 
   // Expose methods via ref
   useImperativeHandle(ref, () => ({
@@ -195,7 +210,6 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         window.EJS_player = '#game-container';
         window.EJS_gameUrl = romUrl;
         window.EJS_core = system;
-        window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
         window.EJS_startOnLoaded = true;
         window.EJS_volume = isMuted ? 0 : 0.5;
         window.EJS_mute = isMuted;
@@ -204,10 +218,9 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         window.EJS_alignStartButton = 'center';
         window.EJS_fullscreenOnDoubleClick = true;
 
-        // Wait for container to be available
-        if (!gameContainerRef.current) {
-          throw new Error('Game container not found');
-        }
+        // Wait for container to be available with a short delay
+        await new Promise(requestAnimationFrame);
+        if (!gameContainerRef.current) throw new Error('Game container not found');
 
         // Clear any existing content
         gameContainerRef.current.innerHTML = '';
@@ -215,12 +228,11 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         console.log('[EmulatorJS] Starting emulator...');
 
         // Initialize the emulator
-        const emulatorInstance = new window.EJS_emulator(
+        const emulatorInstance = new (window.EJS_emulator as new (...args: unknown[]) => unknown)(
           '#game-container',
           {
             gameUrl: romUrl,
             core: system,
-            pathtodata: 'https://cdn.emulatorjs.org/stable/data/',
             startOnLoaded: true,
             volume: isMuted ? 0 : 0.5,
             mute: isMuted
@@ -262,8 +274,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
       if (emulatorInstanceRef.current) {
         try {
           // Try to stop/destroy the emulator if methods exist
-          if (typeof emulatorInstanceRef.current.destroy === 'function') {
-            emulatorInstanceRef.current.destroy();
+          if (emulatorInstanceRef.current && typeof (emulatorInstanceRef.current as { destroy?: () => void }).destroy === 'function') {
+            (emulatorInstanceRef.current as { destroy: () => void }).destroy();
           }
         } catch (error) {
           console.warn('[EmulatorJS] Error during cleanup:', error);
@@ -394,22 +406,22 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
       const elem = containerRef.current;
       if (elem?.requestFullscreen) {
         elem.requestFullscreen();
-      } else if ((elem as any).webkitRequestFullscreen) {
-        (elem as any).webkitRequestFullscreen();
-      } else if ((elem as any).mozRequestFullScreen) {
-        (elem as any).mozRequestFullScreen();
-      } else if ((elem as any).msRequestFullscreen) {
-        (elem as any).msRequestFullscreen();
+      } else if (elem?.webkitRequestFullscreen) {
+        elem.webkitRequestFullscreen();
+      } else if (elem?.mozRequestFullScreen) {
+        elem.mozRequestFullScreen();
+      } else if (elem?.msRequestFullscreen) {
+        elem.msRequestFullscreen();
       }
     } else {
       if (document.exitFullscreen) {
         document.exitFullscreen();
-      } else if ((document as any).webkitExitFullscreen) {
-        (document as any).webkitExitFullscreen();
-      } else if ((document as any).mozCancelFullScreen) {
-        (document as any).mozCancelFullScreen();
-      } else if ((document as any).msExitFullscreen) {
-        (document as any).msExitFullscreen();
+      } else if (document.webkitExitFullscreen) {
+        document.webkitExitFullscreen();
+      } else if (document.mozCancelFullScreen) {
+        document.mozCancelFullScreen();
+      } else if (document.msExitFullscreen) {
+        document.msExitFullscreen();
       }
     }
   };
@@ -422,8 +434,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
 
   const handleReset = () => {
     // Try to reset the emulator if possible
-    if (emulatorInstanceRef.current && typeof emulatorInstanceRef.current.restart === 'function') {
-      emulatorInstanceRef.current.restart();
+    if (emulatorInstanceRef.current && typeof (emulatorInstanceRef.current as { restart?: () => void }).restart === 'function') {
+      (emulatorInstanceRef.current as { restart: () => void }).restart();
     } else {
       // Fallback: reload the component
       window.location.reload();
@@ -438,8 +450,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     // Try to update EmulatorJS volume
     if (emulatorInstanceRef.current) {
       try {
-        if (typeof emulatorInstanceRef.current.setVolume === 'function') {
-          emulatorInstanceRef.current.setVolume(newMutedState ? 0 : 0.5);
+        if (typeof (emulatorInstanceRef.current as { setVolume?: (volume: number) => void }).setVolume === 'function') {
+          (emulatorInstanceRef.current as { setVolume: (volume: number) => void }).setVolume(newMutedState ? 0 : 0.5);
         }
       } catch (error) {
         console.warn('[EmulatorJS] Could not update volume:', error);

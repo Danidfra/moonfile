@@ -3,7 +3,22 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta http-equiv="content-security-policy" content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self' data:; connect-src 'self' https://* wss://*; worker-src 'self' blob:; media-src 'self' blob: data:; object-src 'none'; frame-ancestors 'none'; base-uri 'self';">
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="
+        default-src 'self';
+        script-src 'self' https://cdn.emulatorjs.org 'wasm-unsafe-eval';
+        style-src 'self' 'unsafe-inline';
+        img-src 'self' data: https: https://cdn.emulatorjs.org;
+        font-src 'self' data:;
+        connect-src 'self' https://* wss://* https://cdn.emulatorjs.org;
+        worker-src 'self' blob:;
+        media-src 'self' blob: data:;
+        object-src 'none';
+        frame-ancestors 'none';
+        base-uri 'self';
+      "
+    >
     <title>MoonFile - Decentralized Arcade Platform</title>
     <meta name="description" content="MoonFile is a decentralized arcade platform powered by Nostr. Play, create, and share games on the decentralized web.">
     <meta property="og:type" content="website" />
