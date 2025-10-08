@@ -182,21 +182,24 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     }
   }));
 
-  // Initialize EmulatorJS - wait for container ref to be available
+  // Initialize EmulatorJS with robust timing and canvas detection
   useLayoutEffect(() => {
     let isInitialized = false;
-    let animationFrameId: number | null = null;
+    let isMounted = true;
+    let canvasPollingId: number | null = null;
+    let initTimeoutId: NodeJS.Timeout | null = null;
     // Capture ref value at the beginning of the effect for cleanup
     const gameContainer = gameContainerRef.current;
 
     const initializeEmulator = async () => {
       try {
-        if (isInitialized) return; // Prevent multiple initializations
+        if (isInitialized || !isMounted) return; // Prevent multiple initializations
+
+        console.log('[EmulatorJS] Starting initialization for platform:', platform);
 
         setIsLoading(true);
         setError(null);
-
-        console.log('[EmulatorJS] Initializing emulator for platform:', platform);
+        setIsReady(false);
 
         const romUrl = createRomBlobUrl(romData);
         romBlobUrlRef.current = romUrl;
@@ -205,15 +208,22 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         const system = getEmulatorSystemFromPlatform(platform);
         console.log('[EmulatorJS] Using system:', system);
 
-        // Use the ref directly - it's guaranteed to be available at this point
-        const container = gameContainerRef.current!;
+        // Ensure container is still available and clear it
+        if (!gameContainerRef.current || !isMounted) {
+          throw new Error('Container no longer available');
+        }
+
+        const container = gameContainerRef.current;
         container.innerHTML = '';
 
-        (window as unknown as { EJS_gameID: string }).EJS_gameID = `game-${Date.now()}`;
+        // Set unique game ID to avoid conflicts
+        (window as unknown as { EJS_gameID: string }).EJS_gameID = `game-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
 
         await loadEmulatorJSScript();
 
-        console.log('[EmulatorJS] Starting emulator (manual constructor)...');
+        if (!isMounted) return; // Check if component was unmounted during async operation
+
+        console.log('[EmulatorJS] Creating emulator instance...');
 
         const emulatorInstance = new (window as unknown as { EJS_emulator: new (container: HTMLElement, config: unknown) => unknown }).EJS_emulator(container, {
           core: system,
@@ -224,52 +234,107 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
           mute: isMuted,
         });
 
+        if (!isMounted) return;
+
         emulatorInstanceRef.current = emulatorInstance;
         isInitialized = true;
 
-        const start = performance.now();
-        const poll = () => {
-          if (!gameContainerRef.current) return;
-          const canvas = gameContainerRef.current.querySelector('canvas');
-          if (canvas) {
-            setIsReady(true);
-            setIsLoading(false);
-            console.log('[EmulatorJS] Emulator ready (canvas found)');
-            return;
-          }
-          if (performance.now() - start > 5000) {
-            setIsLoading(false);
-            setError('Emulator did not render in time');
-            return;
-          }
-          requestAnimationFrame(poll);
-        };
-        requestAnimationFrame(poll);
+        console.log('[EmulatorJS] Emulator instance created, waiting for canvas...');
+
+        // Start polling for canvas with improved detection
+        startCanvasPolling();
 
       } catch (err) {
-        console.error('[EmulatorJS] Initialization error:', err);
-        setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
-        setIsLoading(false);
+        if (isMounted) {
+          console.error('[EmulatorJS] Initialization error:', err);
+          setError(err instanceof Error ? err.message : 'Failed to initialize emulator');
+          setIsLoading(false);
+        }
       }
     };
 
-    const waitForContainer = () => {
+    const startCanvasPolling = () => {
+      const startTime = performance.now();
+      const maxWaitTime = 10000; // 10 seconds timeout
+      let pollCount = 0;
+
+      const pollForCanvas = () => {
+        if (!isMounted || !gameContainerRef.current) {
+          console.log('[EmulatorJS] Component unmounted or container lost during polling');
+          return;
+        }
+
+        pollCount++;
+        const container = gameContainerRef.current;
+
+        // Look for canvas element with multiple selectors
+        const canvas = container.querySelector('canvas') ||
+                      container.querySelector('canvas[width]') ||
+                      container.querySelector('canvas[height]') ||
+                      container.querySelector('#canvas') ||
+                      container.querySelector('.emulator-canvas');
+
+        if (canvas) {
+          console.log(`[EmulatorJS] Canvas found after ${pollCount} polls! Element:`, canvas);
+          if (isMounted) {
+            setIsReady(true);
+            setIsLoading(false);
+            console.log('[EmulatorJS] Emulator ready - canvas detected and mounted');
+          }
+          return;
+        }
+
+        const elapsed = performance.now() - startTime;
+        if (elapsed > maxWaitTime) {
+          console.error('[EmulatorJS] Canvas detection timeout after', elapsed, 'ms');
+          if (isMounted) {
+            setIsLoading(false);
+            setError('Emulator canvas did not appear within timeout period');
+          }
+          return;
+        }
+
+        // Continue polling with progressive intervals
+        const interval = pollCount < 50 ? 16 : pollCount < 100 ? 50 : 100; // Start fast, then slow down
+        canvasPollingId = window.setTimeout(() => {
+          canvasPollingId = null;
+          pollForCanvas();
+        }, interval);
+      };
+
+      // Start polling immediately
+      pollForCanvas();
+    };
+
+    const waitForContainerAndInitialize = () => {
+      if (!isMounted) return;
+
       if (gameContainerRef.current) {
-        // Container ref is available, initialize immediately
-        initializeEmulator();
+        // Container is ready, wait a bit for DOM to be fully painted then initialize
+        initTimeoutId = setTimeout(() => {
+          if (isMounted) {
+            initializeEmulator();
+          }
+        }, 50); // Small delay to ensure DOM is painted
       } else {
-        // Container ref not ready yet, wait using requestAnimationFrame
-        animationFrameId = requestAnimationFrame(waitForContainer);
+        // Container not ready, try again next frame
+        requestAnimationFrame(waitForContainerAndInitialize);
       }
     };
 
-    // Start waiting for container
-    waitForContainer();
+    // Start the initialization process
+    waitForContainerAndInitialize();
 
     return () => {
-      // Cancel any pending animation frame
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
+      // Mark as unmounted to prevent state updates
+      isMounted = false;
+
+      // Cancel any pending timeouts/polling
+      if (initTimeoutId) {
+        clearTimeout(initTimeoutId);
+      }
+      if (canvasPollingId) {
+        clearTimeout(canvasPollingId);
       }
 
       // Cleanup blob URL
