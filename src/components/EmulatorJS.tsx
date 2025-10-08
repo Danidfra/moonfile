@@ -220,7 +220,7 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
 
         // Set the required EmulatorJS global variables before calling window.EmulatorJS()
         (window as any).EJS_gameID = `game-${Date.now()}`;
-        (window as any).EJS_gameUrl = romBlobUrlRef.current;
+        (window as any).EJS_gameUrl = romUrl;
         (window as any).EJS_core = system;
         (window as any).EJS_biosUrl = '';
 
