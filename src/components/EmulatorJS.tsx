@@ -218,12 +218,19 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         window.EJS_alignStartButton = 'center';
         window.EJS_fullscreenOnDoubleClick = true;
 
-        // Wait for container to be available with a short delay
+        // Set the required EmulatorJS global variables before calling window.EmulatorJS()
+        (window as any).EJS_gameID = `game-${Date.now()}`;
+        (window as any).EJS_gameUrl = romBlobUrlRef.current;
+        (window as any).EJS_core = system;
+        (window as any).EJS_biosUrl = '';
+
+        // Wait for the game container to exist before initializing
         await new Promise(requestAnimationFrame);
-        if (!gameContainerRef.current) throw new Error('Game container not found');
+        const container = document.getElementById('game-container');
+        if (!container) throw new Error('Game container not found');
 
         // Clear any existing content
-        gameContainerRef.current.innerHTML = '';
+        container.innerHTML = '';
 
         console.log('[EmulatorJS] Starting emulator...');
 

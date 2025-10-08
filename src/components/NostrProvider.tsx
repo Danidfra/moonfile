@@ -54,7 +54,7 @@ const NostrProvider: React.FC<NostrProviderProps> = (props) => {
   }
 
   return (
-    <NostrContext.Provider value={{ nostr: pool.current as unknown }}>
+    <NostrContext.Provider value={{ nostr: pool.current as NPool<NRelay1> }}>
       {children}
     </NostrContext.Provider>
   );

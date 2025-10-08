@@ -34,9 +34,19 @@ vi.mock('./useCurrentUser', () => ({
 }));
 
 describe('useNostrPublish - Relays Support', () => {
+  const signedEvent: NostrEvent = {
+    id: 'test-event-id',
+    pubkey: 'test-pubkey',
+    created_at: Date.now(),
+    kind: 1,
+    tags: [],
+    content: 'test content',
+    sig: 'test-signature'
+  };
+
   beforeEach(() => {
     vi.clearAllMocks();
-    
+
     // Mock window.location.protocol for client tag
     Object.defineProperty(window, 'location', {
       value: {
@@ -47,15 +57,6 @@ describe('useNostrPublish - Relays Support', () => {
     });
 
     // Mock successful event signing
-    const signedEvent: NostrEvent = {
-      id: 'test-event-id',
-      pubkey: 'test-pubkey',
-      created_at: Date.now(),
-      kind: 1,
-      tags: [],
-      content: 'test content',
-      sig: 'test-signature'
-    };
     mockSignEvent.mockResolvedValue(signedEvent);
   });
 
@@ -107,10 +108,10 @@ describe('useNostrPublish - Relays Support', () => {
 
     // Should create relay group with specified relays
     expect(mockGroup).toHaveBeenCalledWith(['wss://relay1.example.com', 'wss://relay2.example.com']);
-    
+
     // Should publish through relay group
     expect(mockRelayGroup.event).toHaveBeenCalledWith(signedEvent, { signal: AbortSignal.timeout(5000) });
-    
+
     // Should not use default nostr.event
     expect(mockEvent).not.toHaveBeenCalled();
   });
@@ -136,10 +137,10 @@ describe('useNostrPublish - Relays Support', () => {
 
     // Should create relay group with single relay
     expect(mockGroup).toHaveBeenCalledWith(['wss://single-relay.example.com']);
-    
+
     // Should publish through relay group
     expect(mockRelayGroup.event).toHaveBeenCalledWith(signedEvent, { signal: AbortSignal.timeout(5000) });
-    
+
     // Should not use default nostr.event
     expect(mockEvent).not.toHaveBeenCalled();
   });

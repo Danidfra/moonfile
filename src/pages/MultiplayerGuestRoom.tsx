@@ -486,7 +486,7 @@ export default function MultiplayerGuestRoom() {
             <Card className="border-gray-800 bg-gray-900">
               <CardContent className="p-4">
                 <div className="flex flex-wrap gap-3">
-                  {(connectionState === 'error' || connectionState === 'disconnected') && (
+                  {((connectionState as ConnectionState) === 'error' || connectionState === 'disconnected') && (
                     <Button onClick={handleRetry} className="bg-purple-600 hover:bg-purple-700">
                       <RefreshCw className="w-4 h-4 mr-2" />
                       Reconnect

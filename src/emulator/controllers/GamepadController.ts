@@ -32,7 +32,7 @@ interface _GamepadState {
 export default class GamepadController {
   private onButtonDown: (playerId: number, buttonId: number) => void;
   private onButtonUp: (playerId: number, buttonId: number) => void;
-  private gamepadState: unknown[];
+  private gamepadState: (Gamepad | null)[];
   private buttonCallback: ((info: ButtonInfo) => void) | null;
   private gamepadConfig?: GamepadConfig;
 
@@ -164,10 +164,7 @@ export default class GamepadController {
         }
       }
 
-      this.gamepadState[gamepadIndex] = {
-        buttons: buttons.map((b) => ({ pressed: b.pressed })),
-        axes: gamepad.axes.slice(0),
-      };
+      this.gamepadState[gamepadIndex] = gamepad;
     }
   };
 

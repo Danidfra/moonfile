@@ -53,7 +53,7 @@ interface EmulatorMethods {
 class Emulator extends Component<EmulatorProps> {
   private canvasRef: React.RefObject<HTMLCanvasElement> = React.createRef();
   screen: ScreenRef | null;
-  speakers: unknown | null;
+  speakers: Speakers | null;
   nes: NES;
   frameTimer: FrameTimerRef | null;
   gamepadController: GamepadControllerRef | null;
@@ -113,8 +113,8 @@ class Emulator extends Component<EmulatorProps> {
     this.nes = new NES({
       onFrame: this.screen ? this.screen.setBuffer : () => {},
       onStatusUpdate: console.log,
-      onAudioSample: this.speakers ? this.speakers.writeSample : () => {},
-      sampleRate: this.speakers ? this.speakers.getSampleRate() : 44100,
+      onAudioSample: this.speakers!.writeSample,
+      sampleRate: this.speakers!.getSampleRate(),
     });
 
     (window as unknown as Record<string, unknown>)["nes"] = this.nes;

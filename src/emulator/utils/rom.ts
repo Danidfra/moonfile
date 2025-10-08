@@ -130,7 +130,9 @@ export function parseINesHeader(bytes: Uint8Array): INesHeader {
 export async function sha256(bytes: Uint8Array): Promise<string> {
   console.log('[ROM] Computing SHA256 hash for', bytes.length, 'bytes');
 
-  const hashBuffer = await crypto.subtle.digest('SHA-256', bytes);
+  // Create a new Uint8Array with a proper ArrayBuffer to ensure compatibility
+  const buffer = new Uint8Array(bytes);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', buffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
   const hash = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 
