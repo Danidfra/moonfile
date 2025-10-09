@@ -1,31 +1,21 @@
-/**
- * EmulatorJS Component
- *
- * React component that loads EmulatorJS via CDN and supports multiple console systems
- * (NES, SNES, GBA, etc.) based on the platform tag from Nostr events.
- */
-
-import React, { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
-import { Button } from '@/components/ui/button';
-import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
-
 // Extend Window interface to include EmulatorJS
 declare global {
   interface Window {
-    EJS_emulator?: unknown;
-    EJS_player?: string;
+    EJS_gameID?: string;
     EJS_gameUrl?: string;
     EJS_core?: string;
-    EJS_pathtodata?: string;
     EJS_startOnLoaded?: boolean;
-    EJS_volume?: number;
     EJS_mute?: boolean;
+    EJS_volume?: number;
     EJS_gameParent?: HTMLElement;
+    EJS_player?: string;
+    EJS_emulator?: unknown;
+    EJS_pathtodata?: string;
     EJS_loadStateOnStart?: boolean;
     EJS_saveStateOnUnload?: boolean;
-    EJS_alignStartButton?: string;
+    EJS_alignStartButton?: boolean;
     EJS_fullscreenOnDoubleClick?: boolean;
+    EJS_start?: () => void;
   }
 
   interface HTMLElement {
@@ -40,6 +30,21 @@ declare global {
     msExitFullscreen?: () => Promise<void>;
   }
 }
+
+export {};
+
+/**
+ * EmulatorJS Component
+ *
+ * React component that loads EmulatorJS via CDN and supports multiple console systems
+ * (NES, SNES, GBA, etc.) based on the platform tag from Nostr events.
+ */
+
+import React, { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
+
 
 interface EmulatorJSProps {
   romData: Uint8Array; // ROM bytes
@@ -63,50 +68,53 @@ function loadEmulatorJSScript(): Promise<void> {
     console.log('[EmulatorJS] 🚀 Starting script loading process');
     console.time('[EmulatorJS] Script Loading Time');
 
-    // Set the path to data before loading the script (always set this)
-    console.log('[EmulatorJS] 📂 Setting EJS_pathtodata before script load');
-    window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-    console.log('[EmulatorJS] ✅ EJS_pathtodata set to:', window.EJS_pathtodata);
+    // Note: EJS_pathtodata is now set in initializeEmulator before calling this function
 
-    // Check if already loaded
+    // ✅ Check if EmulatorJS already initialized
     if (window.EJS_emulator) {
-      console.log('[EmulatorJS] ♻️ Script already loaded, resolving immediately');
-      console.log('[EmulatorJS] 📊 Current window.EJS_emulator:', window.EJS_emulator);
+      console.log('[EmulatorJS] ♻️ Emulator already initialized, resolving immediately');
       console.timeEnd('[EmulatorJS] Script Loading Time');
       return resolve();
     }
 
-    console.log('[EmulatorJS] 🌐 Loading script from CDN...');
-    console.log('[EmulatorJS] 📋 Script details:', {
-      src: 'https://cdn.emulatorjs.org/stable/data/loader.js',
-      async: true,
-      timestamp: new Date().toISOString()
-    });
+    // ✅ Check if script tag already exists (injected but maybe still loading)
+    const existingScript = document.getElementById('emulatorjs-loader') as HTMLScriptElement | null;
+    if (existingScript) {
+      console.log('[EmulatorJS] ⏳ Script tag already exists, waiting for load event...');
+      if (existingScript.dataset.loaded === 'true') {
+        console.log('[EmulatorJS] ✅ Existing script already loaded, resolving immediately');
+        console.timeEnd('[EmulatorJS] Script Loading Time');
+        return resolve();
+      }
+      existingScript.addEventListener('load', () => {
+        console.log('[EmulatorJS] ✅ Existing script finished loading');
+        console.timeEnd('[EmulatorJS] Script Loading Time');
+        resolve();
+      });
+      existingScript.addEventListener('error', (e) => reject(e));
+      return;
+    }
 
+    // ✅ Inject new script if none exists
+    console.log('[EmulatorJS] 🌐 Injecting loader.js script...');
     const script = document.createElement('script');
+    script.id = 'emulatorjs-loader';
     script.src = 'https://cdn.emulatorjs.org/stable/data/loader.js';
     script.async = true;
 
     script.onload = () => {
+      script.dataset.loaded = 'true';
       console.timeEnd('[EmulatorJS] Script Loading Time');
       console.log('[EmulatorJS] ✅ Script loaded successfully');
-      console.log('[EmulatorJS] 📊 Post-load window properties:', {
-        EJS_emulator: window.EJS_emulator,
-        EJS_pathtodata: window.EJS_pathtodata,
-        EJS_start: typeof (window as unknown as { EJS_start?: () => void }).EJS_start,
-        timestamp: new Date().toISOString()
-      });
       resolve();
     };
 
     script.onerror = (error) => {
       console.timeEnd('[EmulatorJS] Script Loading Time');
-      console.error('[EmulatorJS] ❌ Failed to load script');
-      console.error('[EmulatorJS] 🔍 Script error details:', error);
+      console.error('[EmulatorJS] ❌ Failed to load script', error);
       reject(new Error('Failed to load EmulatorJS'));
     };
 
-    console.log('[EmulatorJS] 📎 Appending script to document.body');
     document.body.appendChild(script);
     console.log('[EmulatorJS] ✅ Script element appended to DOM');
   });
@@ -272,6 +280,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
 
   // Component mount/unmount logging
   useEffect(() => {
+    console.log('[EmulatorJS][EFFECT] triggered at', performance.now());
+    console.log('[EmulatorJS][EFFECT] gameContainerRef.current:', gameContainerRef.current);
     console.log('[EmulatorJS] 🎯 Component mounted');
     const gameContainer = gameContainerRef.current;
     const container = containerRef.current;
@@ -357,6 +367,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
 
   // Initialize EmulatorJS with robust timing and canvas detection
   useLayoutEffect(() => {
+     console.log('[EmulatorJS][LAYOUT-EFFECT] triggered at', performance.now());
+    console.log('[EmulatorJS][LAYOUT-EFFECT] gameContainerRef.current:', gameContainerRef.current);
     console.log('[EmulatorJS] 🚀 useLayoutEffect triggered - Starting initialization');
     console.time('[EmulatorJS] Total Initialization Time');
     console.log('[EmulatorJS] 📊 Effect dependencies:', { platform, isMuted });
@@ -404,7 +416,7 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     };
 
     const initializeEmulator = async () => {
-      console.log('[EmulatorJS] 🎮 initializeEmulator function called');
+      console.log('[EmulatorJS] 🎮 initializeEmulator function called (RACE-FIX VERSION)');
       console.time('[EmulatorJS] Emulator Initialization');
 
       try {
@@ -426,16 +438,7 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         setIsReady(false);
         console.log('[EmulatorJS] ✅ State updates dispatched');
 
-        console.log('[EmulatorJS] 💾 Creating ROM blob URL...');
-        const romUrl = createRomBlobUrl(romData);
-        romBlobUrlRef.current = romUrl;
-        console.log('[EmulatorJS] ✅ ROM blob URL stored in ref:', romUrl);
-
-        console.log('[EmulatorJS] 🎯 Getting emulator system...');
-        const system = getEmulatorSystemFromPlatform(platform);
-        console.log('[EmulatorJS] ✅ System determined:', system);
-
-        // Ensure container is still available and clear it
+        // 1) Clear the container once before loading the script
         console.log('[EmulatorJS] 🔍 Checking container availability...');
         if (!gameContainerRef.current || !isMounted) {
           console.error('[EmulatorJS] ❌ Container check failed:', {
@@ -446,92 +449,110 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         }
 
         const container = gameContainerRef.current;
-        console.log('[EmulatorJS] ✅ Container available, clearing content...');
+        console.log('[EmulatorJS] ✅ Container available, clearing content ONCE...');
         console.log('[EmulatorJS] 📊 Container before clear:', {
           children: container.children.length,
           innerHTML: container.innerHTML.substring(0, 100) + '...'
         });
 
         container.innerHTML = '';
-        console.log('[EmulatorJS] ✅ Container cleared');
+        console.log('[EmulatorJS] ✅ Container cleared - DO NOT TOUCH AGAIN UNTIL CANVAS APPEARS');
 
-        // Set unique game ID to avoid conflicts
+        console.log('[EmulatorJS] 💾 Creating ROM blob URL...');
+        const romUrl = createRomBlobUrl(romData);
+        romBlobUrlRef.current = romUrl;
+        console.log('[EmulatorJS] ✅ ROM blob URL stored in ref:', romUrl);
+
+        console.log('[EmulatorJS] 🎯 Getting emulator system...');
+        const system = getEmulatorSystemFromPlatform(platform);
+        console.log('[EmulatorJS] ✅ System determined:', system);
+
+        // 2) Set the minimal global config BEFORE loading the script
         const gameId = `game-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
         console.log('[EmulatorJS] 🆔 Setting unique game ID:', gameId);
-        (window as unknown as { EJS_gameID: string }).EJS_gameID = gameId;
 
-        console.log('[EmulatorJS] ⚙️ Setting global config for EmulatorJS...');
+        console.log('[EmulatorJS] ⚙️ Setting MINIMAL global config for EmulatorJS (BEFORE script load)...');
         console.log('[EmulatorJS] 📊 Config values being set:', {
+          EJS_gameID: gameId,
+          EJS_pathtodata: 'https://cdn.emulatorjs.org/stable/data/',
           EJS_gameUrl: romUrl,
           EJS_core: system,
-          EJS_startOnLoaded: true,
           EJS_mute: isMuted,
           EJS_volume: isMuted ? 0 : 0.5,
           EJS_gameParent: 'HTMLDivElement',
-          EJS_player: 'custom'
+          EJS_startOnLoaded: true
         });
 
+        // Set minimal config - only what's absolutely necessary
+        window.EJS_gameID = gameId;
+        window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
         window.EJS_gameUrl = romUrl;
         window.EJS_core = system;
-        window.EJS_startOnLoaded = true;
         window.EJS_mute = isMuted;
         window.EJS_volume = isMuted ? 0 : 0.5;
-        window.EJS_gameParent = container;
-        window.EJS_player = 'custom';
+        window.EJS_gameParent = container;   // ✅ element node
+        window.EJS_startOnLoaded = true;     // ✅ let loader auto-start
 
-        console.log('[EmulatorJS] ✅ Global config set, verifying...');
-        console.log('[EmulatorJS] 📊 Full window EmulatorJS properties after config:', {
-          EJS_emulator: window.EJS_emulator,
-          EJS_player: window.EJS_player,
+        // ❌ Remove any EJS_player that might exist
+        if ((window as unknown as { EJS_player?: string }).EJS_player) {
+          console.log('[EmulatorJS] 🗑️ Removing existing EJS_player (id-based path)');
+          delete (window as unknown as { EJS_player?: string }).EJS_player;
+        }
+
+        console.log('[EmulatorJS] ✅ Minimal global config set, verifying...');
+        console.log('[EmulatorJS] 📊 Window EmulatorJS properties after minimal config:', {
+          EJS_gameID: window.EJS_gameID,
+          EJS_pathtodata: window.EJS_pathtodata,
           EJS_gameUrl: window.EJS_gameUrl,
           EJS_core: window.EJS_core,
-          EJS_pathtodata: window.EJS_pathtodata,
-          EJS_startOnLoaded: window.EJS_startOnLoaded,
-          EJS_volume: window.EJS_volume,
           EJS_mute: window.EJS_mute,
+          EJS_volume: window.EJS_volume,
           EJS_gameParent: window.EJS_gameParent?.tagName || 'null',
-          EJS_loadStateOnStart: window.EJS_loadStateOnStart,
-          EJS_saveStateOnUnload: window.EJS_saveStateOnUnload,
-          EJS_alignStartButton: window.EJS_alignStartButton,
-          EJS_fullscreenOnDoubleClick: window.EJS_fullscreenOnDoubleClick,
-          EJS_gameID: (window as unknown as { EJS_gameID?: string }).EJS_gameID
+          EJS_startOnLoaded: window.EJS_startOnLoaded,
+          EJS_player: (window as unknown as { EJS_player?: string }).EJS_player || 'undefined (CORRECT - should not exist)'
         });
 
-        // ✅ Load the script only once, AFTER setting globals
-        console.log('[EmulatorJS] 📜 Loading EmulatorJS script...');
+        // 3) Load the script and remove manual start/polling
+        console.log('[EmulatorJS] 📜 Loading EmulatorJS script (AFTER container is stable and config is set)...');
         await loadEmulatorJSScript();
-        console.log('[EmulatorJS] ✅ Script loading complete');
+        console.log('[EmulatorJS] ✅ Script loading complete - loader should auto-start via EJS_startOnLoaded: true');
 
         if (!isMounted) {
           console.log('[EmulatorJS] 🛑 Component unmounted during script loading, aborting');
           return;
         }
 
-        console.log('[EmulatorJS] 🔍 Checking for EJS_start function...');
-        if (typeof (window as unknown as { EJS_start?: () => void }).EJS_start === 'function') {
-          console.log('[EmulatorJS] ✅ EJS_start found, manually triggering...');
-          console.time('[EmulatorJS] EJS_start Execution');
-          (window as unknown as { EJS_start: () => void }).EJS_start();
-          console.timeEnd('[EmulatorJS] EJS_start Execution');
-          console.log('[EmulatorJS] ✅ EJS_start() executed');
-        } else {
-          console.warn('[EmulatorJS] ⚠️ EJS_start() not found on window');
-          console.log('[EmulatorJS] 🔍 Available window properties:', Object.keys(window).filter(key => key.includes('EJS')));
-        }
+        // ❌ Remove these - no manual EJS_start call or polling for it
+        console.log('[EmulatorJS] ✅ Script loaded - letting loader auto-start, NO manual EJS_start call');
 
         isInitialized = true;
         console.log('[EmulatorJS] ✅ Initialization flag set to true');
 
         if (!isMounted) {
-          console.log('[EmulatorJS] 🛑 Component unmounted after EJS_start, aborting');
+          console.log('[EmulatorJS] 🛑 Component unmounted after script load, aborting');
           return;
         }
 
-        console.log('[EmulatorJS] 🔍 Starting canvas polling...');
+        // ✅ Just begin watching for the canvas to appear
+        console.log('[EmulatorJS] 🔍 Starting canvas polling (waiting for auto-start to create canvas)...');
         startCanvasPolling();
 
         console.log('[EmulatorJS] 🔍 Starting DOM mutation logging...');
         startDOMMutationLogging();
+
+        // 5) Keep a handle to the emulator instance (non-blocking)
+        queueMicrotask(() => {
+          console.log('[EmulatorJS] 🎮 Capturing emulator instance reference...');
+          try {
+            (emulatorInstanceRef as { current: unknown }).current = (window as unknown as { EJS_emulator?: unknown }).EJS_emulator ?? null;
+            console.log('[EmulatorJS] ✅ Emulator instance captured:', {
+              hasInstance: !!(emulatorInstanceRef as { current: unknown }).current,
+              instanceType: typeof (emulatorInstanceRef as { current: unknown }).current
+            });
+          } catch (error) {
+            console.warn('[EmulatorJS] ⚠️ Failed to capture emulator instance:', error);
+          }
+        });
 
         console.log('[EmulatorJS] 📊 Final gameContainerRef state:', {
           exists: !!gameContainerRef.current,
@@ -688,6 +709,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         return;
       }
 
+      console.log('[EmulatorJS][INIT-CHECK] Frame check - gameContainerRef.current exists?', !!gameContainerRef.current);
+
       if (gameContainerRef.current) {
         console.log('[EmulatorJS] ✅ Container is ready!');
         console.log('[EmulatorJS] 📊 Container details:', {
@@ -695,6 +718,13 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
           id: gameContainerRef.current.id,
           className: gameContainerRef.current.className,
           children: gameContainerRef.current.children.length
+        });
+        console.log('[EmulatorJS][INIT-CHECK] ✅ Container became available!');
+        console.log('[EmulatorJS][INIT-CHECK] Container element details:', {
+          tagName: gameContainerRef.current?.tagName,
+          id: gameContainerRef.current?.id,
+          className: gameContainerRef.current?.className,
+          children: gameContainerRef.current?.children.length
         });
 
         // Container is ready, wait a bit for DOM to be fully painted then initialize
@@ -1101,38 +1131,40 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     console.log(`[EmulatorJS] ✅ Audio ${newMutedState ? 'muted' : 'unmuted'}`);
   };
 
-  if (error) {
-    return (
-      <div className={`flex items-center justify-center ${className}`}>
-        <Card className="w-full max-w-4xl border-destructive">
-          <CardContent className="p-8 text-center">
-            <div className="text-destructive text-6xl mb-4">⚠️</div>
-            <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Game</h3>
-            <p className="text-muted-foreground mb-4">{error}</p>
-            <Button onClick={() => window.location.reload()} variant="outline">
-              Try Again
-            </Button>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  // if (error) {
+  //   return (
+  //     <div className={`flex items-center justify-center ${className}`}>
+  //       <Card className="w-full max-w-4xl border-destructive">
+  //         <CardContent className="p-8 text-center">
+  //           <div className="text-destructive text-6xl mb-4">⚠️</div>
+  //           <h3 className="text-xl font-semibold text-destructive mb-2">Error Loading Game</h3>
+  //           <p className="text-muted-foreground mb-4">{error}</p>
+  //           <Button onClick={() => window.location.reload()} variant="outline">
+  //             Try Again
+  //           </Button>
+  //         </CardContent>
+  //       </Card>
+  //     </div>
+  //   );
+  // }
 
-  if (isLoading) {
-    return (
-      <div className={`flex items-center justify-center ${className}`}>
-        <Card className="w-full max-w-4xl">
-          <CardContent className="p-8 text-center">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
-            <p className="text-muted-foreground">Loading {title}...</p>
-            <p className="text-xs text-muted-foreground mt-2">
-              Initializing EmulatorJS for {platform}
-            </p>
-          </CardContent>
-        </Card>
-      </div>
-    );
-  }
+  // if (isLoading) {
+  //   return (
+  //     <div className={`flex items-center justify-center ${className}`}>
+  //       <Card className="w-full max-w-4xl">
+  //         <CardContent className="p-8 text-center">
+  //           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mx-auto mb-4"></div>
+  //           <p className="text-muted-foreground">Loading {title}...</p>
+  //           <p className="text-xs text-muted-foreground mt-2">
+  //             Initializing EmulatorJS for {platform}
+  //           </p>
+  //         </CardContent>
+  //       </Card>
+  //     </div>
+  //   );
+  // }
+
+  console.log('[EmulatorJS][RENDER-CHECK] Rendering game container div right now. Timestamp:', new Date().toISOString());
 
   return (
     <div
@@ -1151,12 +1183,41 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
       {/* Game Display */}
       <Card className={`w-full max-w-4xl bg-black border-2 ${isFullscreen ? 'fullscreen-card' : ''}`}>
         <CardContent className={`p-4 ${isFullscreen ? 'fullscreen-content' : ''}`}>
+          {/* Loading Overlay */}
+          {/*
+            {isLoading && !error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+                <p className="text-muted-foreground">Loading {title}...</p>
+              </div>
+            )}
+             */}
+
+            {/* Error Overlay */}
+            {error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
+                <p className="text-red-500 mb-2">Error loading emulator</p>
+                <p className="text-white text-sm">{String(error)}</p>
+              </div>
+            )}
+
           <div
-            ref={gameContainerRef}
+           id="EJS_player"
+            ref={(el) => {
+              console.log('[EmulatorJS][REF-CALLBACK] gameContainerRef assigned:', el);
+              console.trace('[EmulatorJS][REF-CALLBACK] Stack trace for ref assignment');
+              (gameContainerRef as { current: HTMLDivElement | null }).current = el;
+            }}
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
             {/* EmulatorJS will inject content here */}
+            {isLoading && !error && (
+              <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
+                <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+                <p className="text-muted-foreground">Loading {title}...</p>
+              </div>
+            )}
           </div>
         </CardContent>
       </Card>
