@@ -7,8 +7,10 @@ declare global {
     EJS_startOnLoaded?: boolean;
     EJS_mute?: boolean;
     EJS_volume?: number;
-    EJS_gameParent?: HTMLElement;
+
+    EJS_gameParent?: string;
     EJS_player?: string;
+
     EJS_emulator?: unknown;
     EJS_pathtodata?: string;
     EJS_loadStateOnStart?: boolean;
@@ -40,7 +42,7 @@ export {};
  * (NES, SNES, GBA, etc.) based on the platform tag from Nostr events.
  */
 
-import React, { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback } from 'react';
+import React, { useState, useEffect, useLayoutEffect, useRef, forwardRef, useImperativeHandle, useCallback, useMemo } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
@@ -218,6 +220,11 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     timestamp: new Date().toISOString()
   });
 
+  const mountId = useMemo(() => {
+    const uid = globalThis.crypto?.randomUUID?.() ?? Math.random().toString(36).slice(2);
+    return `ejs-${uid}`;
+  }, []);
+
   const [isLoading, _setIsLoading] = useState(true);
   const [error, _setError] = useState<string | null>(null);
   const [isReady, _setIsReady] = useState(false);
@@ -376,8 +383,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     let isInitialized = false;
     let isMounted = true;
     let canvasPollingId: number | null = null;
-    let initTimeoutId: NodeJS.Timeout | null = null;
-    let domMutationIntervalId: NodeJS.Timeout | null = null;
+    let initTimeoutId: ReturnType<typeof setTimeout> | null = null;
+    let domMutationIntervalId: ReturnType<typeof setInterval> | null = null;
 
     // Capture ref value at the beginning of the effect for cleanup
     const gameContainer = gameContainerRef.current;
@@ -449,14 +456,10 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         }
 
         const container = gameContainerRef.current;
-        console.log('[EmulatorJS] ✅ Container available, clearing content ONCE...');
         console.log('[EmulatorJS] 📊 Container before clear:', {
           children: container.children.length,
           innerHTML: container.innerHTML.substring(0, 100) + '...'
         });
-
-        container.innerHTML = '';
-        console.log('[EmulatorJS] ✅ Container cleared - DO NOT TOUCH AGAIN UNTIL CANVAS APPEARS');
 
         console.log('[EmulatorJS] 💾 Creating ROM blob URL...');
         const romUrl = createRomBlobUrl(romData);
@@ -479,43 +482,60 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
           EJS_core: system,
           EJS_mute: isMuted,
           EJS_volume: isMuted ? 0 : 0.5,
-          EJS_gameParent: 'HTMLDivElement',
           EJS_startOnLoaded: true
         });
 
         // Set minimal config - only what's absolutely necessary
-        window.EJS_gameID = gameId;
-        window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
-        window.EJS_gameUrl = romUrl;
-        window.EJS_core = system;
-        window.EJS_mute = isMuted;
-        window.EJS_volume = isMuted ? 0 : 0.5;
-        window.EJS_gameParent = container;   // ✅ element node
-        window.EJS_startOnLoaded = true;     // ✅ let loader auto-start
+        const w = window as any;
 
-        // ❌ Remove any EJS_player that might exist
-        if ((window as unknown as { EJS_player?: string }).EJS_player) {
-          console.log('[EmulatorJS] 🗑️ Removing existing EJS_player (id-based path)');
-          delete (window as unknown as { EJS_player?: string }).EJS_player;
-        }
+        const mountSelector = `#${mountId}`;
+
+        const mountEl = document.getElementById(mountId);
+        if (mountEl) mountEl.innerHTML = '';
+
+        w.EJS_gameID = gameId;
+        w.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
+        w.EJS_gameUrl = romUrl;
+        w.EJS_core = system;
+        w.EJS_mute = isMuted;
+        w.EJS_volume = isMuted ? 0 : 0.5;
+
+        w.EJS_player = mountSelector;
+
+        w.EJS_gameParent = mountSelector;
+
+        w.EJS_startOnLoaded = true;
+
+
+        console.log('[EmulatorJS] ✅ Global config set', {
+          EJS_gameID: w.EJS_gameID,
+          EJS_player: w.EJS_player,
+          EJS_core: w.EJS_core,
+        });
 
         console.log('[EmulatorJS] ✅ Minimal global config set, verifying...');
         console.log('[EmulatorJS] 📊 Window EmulatorJS properties after minimal config:', {
-          EJS_gameID: window.EJS_gameID,
-          EJS_pathtodata: window.EJS_pathtodata,
-          EJS_gameUrl: window.EJS_gameUrl,
-          EJS_core: window.EJS_core,
-          EJS_mute: window.EJS_mute,
-          EJS_volume: window.EJS_volume,
-          EJS_gameParent: window.EJS_gameParent?.tagName || 'null',
-          EJS_startOnLoaded: window.EJS_startOnLoaded,
-          EJS_player: (window as unknown as { EJS_player?: string }).EJS_player || 'undefined (CORRECT - should not exist)'
+          EJS_gameID: w.EJS_gameID,
+          EJS_pathtodata: w.EJS_pathtodata,
+          EJS_gameUrl: w.EJS_gameUrl,
+          EJS_core: w.EJS_core,
+          EJS_mute: w.EJS_mute,
+          EJS_volume: w.EJS_volume,
+          EJS_player: w.EJS_player,       // ✅ mostra o seletor real
+          EJS_gameParent: w.EJS_gameParent // ✅ string ou undefined
         });
 
-        // 3) Load the script and remove manual start/polling
         console.log('[EmulatorJS] 📜 Loading EmulatorJS script (AFTER container is stable and config is set)...');
+        const scriptEl = document.getElementById('emulatorjs-loader') as HTMLScriptElement | null;
+        const wasLoaded = !!scriptEl && scriptEl.dataset.loaded === 'true';
+
         await loadEmulatorJSScript();
         console.log('[EmulatorJS] ✅ Script loading complete - loader should auto-start via EJS_startOnLoaded: true');
+
+        if (wasLoaded && (window as any).EJS_start) {
+          console.log('[EmulatorJS] ▶️ Script já estava carregado — chamando EJS_start() manualmente');
+          (window as any).EJS_start();
+        }
 
         if (!isMounted) {
           console.log('[EmulatorJS] 🛑 Component unmounted during script loading, aborting');
@@ -810,22 +830,9 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         console.log('[EmulatorJS] ℹ️ No emulator instance to cleanup');
       }
 
-      // Clear container using captured ref value
-      console.log('[EmulatorJS] 🧹 Clearing game container...');
-      if (gameContainer) {
-        console.log('[EmulatorJS] 📊 Container before clear:', {
-          children: gameContainer.children.length,
-          innerHTML: gameContainer.innerHTML.substring(0, 100) + '...'
-        });
-        gameContainer.innerHTML = '';
-        console.log('[EmulatorJS] ✅ Game container cleared');
-      } else {
-        console.log('[EmulatorJS] ℹ️ No game container to clear');
-      }
-
       console.log('[EmulatorJS] ✅ Component cleanup completed');
     };
-  }, [romData, platform, isMuted, setError, setIsLoading, setIsReady]);
+  }, [romData, platform, isMuted, setError, setIsLoading, setIsReady, mountId]);
 
   // Handle fullscreen change events
   useEffect(() => {
@@ -1202,7 +1209,6 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
             )}
 
           <div
-           id="EJS_player"
             ref={(el) => {
               console.log('[EmulatorJS][REF-CALLBACK] gameContainerRef assigned:', el);
               console.trace('[EmulatorJS][REF-CALLBACK] Stack trace for ref assignment');
@@ -1211,7 +1217,8 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
             style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
           >
-            {/* EmulatorJS will inject content here */}
+            <div id={mountId} />
+
             {isLoading && !error && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
                 <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>

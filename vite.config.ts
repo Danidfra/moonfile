@@ -16,6 +16,16 @@ export default defineConfig(() => ({
     // Configure headers for WASM files
     headers: {
       'Cache-Control': 'no-store',
+      'Content-Security-Policy': [
+        "default-src 'self'",
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.emulatorjs.org blob:",
+        "worker-src 'self' blob:",
+        "connect-src 'self' https://cdn.emulatorjs.org blob: data: wss:",
+        "img-src 'self' https: data: blob:",
+        "media-src 'self' blob:",
+        "style-src 'self' 'unsafe-inline' https://cdn.emulatorjs.org",
+        "child-src blob:"
+      ].join('; ')
     }
   },
   plugins: [
