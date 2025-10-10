@@ -834,6 +834,27 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
     };
   }, [romData, platform, isMuted, setError, setIsLoading, setIsReady, mountId]);
 
+  // Canvas polling effect - ensures overlay is hidden when canvas is ready and properly sized
+  useEffect(() => {
+    const el = gameContainerRef.current;
+    if (!el) return;
+
+    let tries = 0;
+    const id = setInterval(() => {
+      tries++;
+      const canvas = el.querySelector('canvas') as HTMLCanvasElement | null;
+      if (canvas && canvas.width > 0 && canvas.height > 0) {
+        console.log('[EmulatorJS] 🎨 Canvas ready and sized:', { width: canvas.width, height: canvas.height, tries });
+        setIsLoading(false);
+        setIsReady(true);
+        clearInterval(id);
+      }
+      if (tries > 200) clearInterval(id); // ~10s
+    }, 50);
+
+    return () => clearInterval(id);
+  }, [gameContainerRef.current]);
+
   // Handle fullscreen change events
   useEffect(() => {
     console.log('[EmulatorJS] 🖥️ Setting up fullscreen event listeners');

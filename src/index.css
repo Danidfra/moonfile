@@ -148,3 +148,16 @@
     object-fit: contain;
   }
 }
+
+/* EmulatorJS Canvas Styling - Fix black screen but audio playing issue */
+.ejs_game, .ejs_game canvas {
+  width: 100% !important;
+  height: 100% !important;
+  display: block;
+  object-fit: contain;
+}
+
+/* Optional: Hide EmulatorJS internal loading cover during development */
+.ejs_loading_text, .ejs_screen_cover {
+  display: none !important;
+}
