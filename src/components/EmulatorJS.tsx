@@ -8,8 +8,8 @@ declare global {
     EJS_mute?: boolean;
     EJS_volume?: number;
 
-    EJS_gameParent?: string;
-    EJS_player?: string;
+    EJS_gameParent?: string | HTMLElement;
+    EJS_player?: string | HTMLElement;  
 
     EJS_emulator?: unknown;
     EJS_pathtodata?: string;
@@ -491,18 +491,23 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
         const mountSelector = `#${mountId}`;
 
         const mountEl = document.getElementById(mountId);
-        if (mountEl) mountEl.innerHTML = '';
+        if (!mountEl) throw new Error('Mount element not found');
+        mountEl.innerHTML = '';
 
+        mountEl.style.width = '100%';
+        mountEl.style.height = '100%';
+
+        
         w.EJS_gameID = gameId;
         w.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
         w.EJS_gameUrl = romUrl;
         w.EJS_core = system;
         w.EJS_mute = isMuted;
         w.EJS_volume = isMuted ? 0 : 0.5;
-
+        
         w.EJS_player = mountSelector;
-
-        w.EJS_gameParent = mountSelector;
+        
+        delete w.EJS_gameParent;
 
         w.EJS_startOnLoaded = true;
 
@@ -835,25 +840,41 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
   }, [romData, platform, isMuted, setError, setIsLoading, setIsReady, mountId]);
 
   // Canvas polling effect - ensures overlay is hidden when canvas is ready and properly sized
-  useEffect(() => {
-    const el = gameContainerRef.current;
-    if (!el) return;
+useEffect(() => {
+  const el = gameContainerRef.current;
+  if (!el) return;
 
-    let tries = 0;
-    const id = setInterval(() => {
-      tries++;
-      const canvas = el.querySelector('canvas') as HTMLCanvasElement | null;
-      if (canvas && canvas.width > 0 && canvas.height > 0) {
-        console.log('[EmulatorJS] 🎨 Canvas ready and sized:', { width: canvas.width, height: canvas.height, tries });
+  let tries = 0;
+  const id = setInterval(() => {
+    tries++;
+    const canvas = el.querySelector('canvas') as HTMLCanvasElement | null;
+
+    if (canvas) {
+      const rect = canvas.getBoundingClientRect();
+      // preferir tamanho renderizado
+      if (rect.width > 2 && rect.height > 2) {
+        console.log('[EmulatorJS] 🎨 Canvas visível no layout:', rect);
         setIsLoading(false);
         setIsReady(true);
         clearInterval(id);
+        return;
       }
-      if (tries > 200) clearInterval(id); // ~10s
-    }, 50);
 
-    return () => clearInterval(id);
-  }, [gameContainerRef.current]);
+      // fallback: se existe canvas há um tempinho, libera overlay mesmo assim
+      if (tries > 40) { // ~2s
+        console.log('[EmulatorJS] ⚠️ Canvas encontrado mas sem bitmap; liberando overlay por fallback');
+        setIsLoading(false);
+        setIsReady(true);
+        clearInterval(id);
+        return;
+      }
+    }
+
+    if (tries > 200) clearInterval(id); // ~10s
+  }, 50);
+
+  return () => clearInterval(id);
+}, []);
 
   // Handle fullscreen change events
   useEffect(() => {
@@ -1236,9 +1257,9 @@ const EmulatorJS = forwardRef<EmulatorJSRef, EmulatorJSProps>(({
               (gameContainerRef as { current: HTMLDivElement | null }).current = el;
             }}
             className={`relative bg-black rounded-lg overflow-hidden flex items-center justify-center ${isFullscreen ? 'fullscreen-canvas' : ''}`}
-            style={{ minHeight: isFullscreen ? '100vh' : '600px' }}
+            style={{ height: isFullscreen ? '100vh' : '600px' }}
           >
-            <div id={mountId} />
+            <div id={mountId} className="w-full h-full" />
 
             {isLoading && !error && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
