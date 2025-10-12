@@ -16,7 +16,7 @@ import { ArrowLeft, RefreshCw } from 'lucide-react';
 import { decodeBase64ToBytes, parseINesHeader, sha256, validateNESRom } from '@/emulator/utils/rom';
 import { analyzeRom, generateRecommendations, quickCompatibilityCheck } from '@/emulator/utils/romDebugger';
 import { isMultiplayerGame, getMaxPlayers } from '@/lib/gameUtils';
-import EmulatorJS from '@/components/EmulatorJS';
+import EmulatorIFrame, { EmulatorJSRef } from '@/components/EmulatorIFrame';
 import GameInteractionCard from '@/components/GameInteractionCard';
 import MultiplayerCard from '@/components/MultiplayerCard';
 import MultiplayerChat from '@/components/MultiplayerChat';
@@ -71,12 +71,10 @@ export default function GamePage() {
   const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
 
   // Refs for multiplayer integration
-  const emulatorRef = useRef<any>(null);
-  const [gameStream, setGameStream] = useState<MediaStream | null>(null);
+  const emulatorRef = useRef<EmulatorJSRef>(null);
 
   // Handle multiplayer stream start
-  const handleStreamStart = (stream: MediaStream) => {
-    setGameStream(stream);
+  const handleStreamStart = (_stream: MediaStream) => {
     console.log('[GamePage] Multiplayer stream started');
   };
 
@@ -352,7 +350,7 @@ export default function GamePage() {
         <div className="grid lg:grid-cols-4 gap-8">
           {/* Main game area */}
           <div className="lg:col-span-3">
-            <EmulatorJS
+            <EmulatorIFrame
               romData={romData}
               platform={platform}
               title={gameMeta.title}
