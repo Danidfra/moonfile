@@ -235,9 +235,9 @@ const Publish = () => {
                   variant="outline"
                   className="border-purple-500 text-purple-400 hover:bg-purple-500 hover:text-white text-lg px-8 py-6 rounded-full transition-all duration-300"
                 >
-                  <Link to="/games">
+                  <Link to="/publish-game">
                     <Upload className="w-4 h-4 mr-2" />
-                    Upload Tool
+                    Publish Game
                   </Link>
                 </Button>
                 <Button
