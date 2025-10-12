@@ -22,9 +22,11 @@ export default defineConfig(() => ({
         "worker-src 'self' blob:",
         "connect-src 'self' https://cdn.emulatorjs.org blob: data: wss:",
         "img-src 'self' https: data: blob:",
-        "media-src 'self' blob:",
+        "media-src 'self' data: blob:",
         "style-src 'self' 'unsafe-inline' https://cdn.emulatorjs.org",
-        "child-src blob:"
+        "frame-src 'self' blob:",
+        "child-src 'self' blob:",
+        "frame-ancestors 'self'"
       ].join('; ')
     }
   },

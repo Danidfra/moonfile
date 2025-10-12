@@ -64,73 +64,89 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const [error, setError] = useState<string | null>(null);
   const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
-  const [isMuted, setIsMuted] = useState(false);
+  const [isMuted, setIsMuted] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
-  const romBlobUrlRef = useRef<string | null>(null);
+  const [romUrl, setRomUrl] = useState('');
+
+  const postToEmbed = useCallback(
+    (payload: unknown): boolean => {
+      const win = iframeRef.current?.contentWindow;
+      if (!win) {
+        console.warn('[EmulatorIFrame] postToEmbed: iframe contentWindow indisponível');
+        return false;
+      }
+      try {
+        win.postMessage(payload, window.location.origin);
+        return true;
+      } catch (err) {
+        console.error('[EmulatorIFrame] postToEmbed: falha ao enviar mensagem', err);
+        return false;
+      }
+    }, []
+  );
 
   // Create blob URL from ROM data
   useEffect(() => {
     console.log('[EmulatorIFrame] Creating ROM blob URL');
-
-    // Create a new Uint8Array to ensure proper typing
-    const romBuffer = new Uint8Array(romData);
-    const blob = new Blob([romBuffer], { type: 'application/octet-stream' });
+    const blob = new Blob([new Uint8Array(romData)], { type: 'application/octet-stream' });
     const url = URL.createObjectURL(blob);
-    romBlobUrlRef.current = url;
-
+    setRomUrl(url);
     console.log('[EmulatorIFrame] ROM blob URL created:', url);
-
     return () => {
-      if (romBlobUrlRef.current) {
-        console.log('[EmulatorIFrame] Revoking ROM blob URL');
-        URL.revokeObjectURL(romBlobUrlRef.current);
-        romBlobUrlRef.current = null;
-      }
+      console.log('[EmulatorIFrame] Revoking ROM blob URL');
+      URL.revokeObjectURL(url);
     };
   }, [romData]);
 
   // Build iframe src URL
   const iframeSrc = React.useMemo(() => {
-    if (!romBlobUrlRef.current) return '';
+    if (!romUrl) return '';
 
     const core = getEmulatorCore(platform);
     const params = new URLSearchParams({
       core,
-      url: romBlobUrlRef.current,
-      mute: isMuted ? '1' : '0',
-      volume: isMuted ? '0' : '0.5',
+      url: romUrl,
+      mute: '1',
+      volume: '0',
       startOnLoaded: '1'
     });
 
     const src = `/embed.html?${params.toString()}`;
     console.log('[EmulatorIFrame] Built iframe src:', src);
     return src;
-  }, [platform, isMuted]);
+  }, [romUrl, platform]);
+
+  useEffect(() => {
+    if (!iframeSrc) return;
+    setIsLoading(true);
+    setIsReady(false);
+    setError(null);
+  }, [iframeSrc]);
 
   // Listen for iframe messages
   useEffect(() => {
     console.log('[EmulatorIFrame] Setting up message listener');
 
+    type EmbedMsg = { type?: string; message?: unknown; width?: number; height?: number; dpr?: number };
     const handleMessage = (event: MessageEvent) => {
-      // Validate origin for security (same-origin)
-      if (event.origin !== window.location.origin) {
-        console.warn('[EmulatorIFrame] Ignoring message from different origin:', event.origin);
-        return;
-      }
+      if (!iframeRef.current || event.source !== iframeRef.current.contentWindow) return;
+      if (event.origin !== window.location.origin) return;
+      const data = event.data as EmbedMsg;
+      if (!data || typeof data !== 'object') return;
 
-      console.log('[EmulatorIFrame] Received message:', event.data);
+      console.log('[EmulatorIFrame] Received message:', data);
 
-      if (event.data.type === 'ejs:ready') {
+      if (data.type === 'ejs:ready') {
         console.log('[EmulatorIFrame] Emulator ready signal received');
         setIsReady(true);
         setIsLoading(false);
         setError(null);
-      } else if (event.data.type === 'ejs:error') {
-        console.error('[EmulatorIFrame] Emulator error:', event.data.message);
-        setError(event.data.message);
+      } else if (data.type === 'ejs:error') {
+        console.error('[EmulatorIFrame] Emulator error:', data.message);
+        setError(String(data.message ?? 'Unknown error'));
         setIsLoading(false);
         setIsReady(false);
       }
@@ -146,20 +162,17 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
 
   // Timeout for initialization
   useEffect(() => {
+    if (!iframeSrc) return;
     console.log('[EmulatorIFrame] Setting up initialization timeout');
-
     const timeout = setTimeout(() => {
       if (!isReady && !error) {
         console.error('[EmulatorIFrame] Initialization timeout');
         setError('Emulator initialization timeout');
         setIsLoading(false);
       }
-    }, 10000); // 10 second timeout
-
-    return () => {
-      clearTimeout(timeout);
-    };
-  }, [isReady, error]);
+    }, 10000);
+    return () => clearTimeout(timeout);
+  }, [iframeSrc, isReady, error]);
 
   // Expose getCanvasStream method via ref
   useImperativeHandle(ref, () => ({
@@ -272,23 +285,37 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   }, []);
 
   const handlePlayPause = useCallback(() => {
-    setIsPaused(!isPaused);
-  }, [isPaused]);
-
-  const handleReset = useCallback(() => {
-    // Reload iframe to reset emulator
-    if (iframeRef.current) {
-      console.log('[EmulatorIFrame] Resetting emulator by reloading iframe');
-      iframeRef.current.src = iframeSrc;
-      setIsLoading(true);
-      setIsReady(false);
-      setError(null);
-    }
-  }, [iframeSrc]);
+    setIsPaused(prev => {
+      const next = !prev;
+      postToEmbed({ type: next ? 'ejs:pause' : 'ejs:resume' });
+      return next;
+    });
+  }, [postToEmbed]);
 
   const handleMuteToggle = useCallback(() => {
-    setIsMuted(!isMuted);
-  }, [isMuted]);
+    const next = !isMuted;
+    setIsMuted(next);
+    const ok = postToEmbed({
+      type: 'ejs:set-mute',
+      muted: next,
+      volume: next ? 0 : 0.5,
+    });
+    if (!ok) {
+      console.warn('[EmulatorIFrame] Não foi possível aplicar mute via postMessage (iframe ainda não pronto?)');
+    }
+  }, [isMuted, postToEmbed]);
+
+  const handleReset = useCallback(() => {
+    const sent = postToEmbed({ type: 'ejs:reset' });
+    setIsLoading(true);
+    setIsReady(false);
+    setError(null);
+    if (sent) return;
+    if (!iframeSrc || !iframeRef.current) return;
+    console.warn('[EmulatorIFrame] Reset via postMessage falhou — usando fallback de reload');
+    iframeRef.current.src = 'about:blank';
+    setTimeout(() => { if (iframeRef.current) iframeRef.current.src = iframeSrc; }, 0);
+  }, [iframeSrc, postToEmbed]);
 
   return (
     <div

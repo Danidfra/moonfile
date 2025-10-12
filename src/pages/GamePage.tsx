@@ -2,10 +2,10 @@
  * Game Page
  *
  * Displays and runs NES games from Nostr events (kind 31996).
- * Now uses the jsnes-based Emulator.tsx for game playback.
+ * Now uses an iframe-based Emulator (EmulatorIFrame + public/embed.html).
  */
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
 import { useNostr } from '@jsr/nostrify__react';
 import { Button } from '@/components/ui/button';
@@ -69,6 +69,7 @@ export default function GamePage() {
   const [platform, setPlatform] = useState<string>('nes-rom');
   const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
   const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
+  const [reloadToken, setReloadToken] = useState(0);
 
   // Refs for multiplayer integration
   const emulatorRef = useRef<EmulatorJSRef>(null);
@@ -89,8 +90,7 @@ export default function GamePage() {
   /**
    * Fetch game event and prepare ROM
    */
-  useEffect(() => {
-    const loadGameData = async () => {
+    const loadGameData = useCallback(async () => {
       if (!nostr || !id) return;
 
       try {
@@ -132,8 +132,8 @@ export default function GamePage() {
         const encodingTag = event.tags.find(tag => tag[0] === 'encoding');
         const encoding = encodingTag?.[1];
 
-        if (encoding !== 'base64') {
-          throw new Error(`Unsupported encoding: ${encoding || 'none'}. Expected base64.`);
+        if (encoding && encoding !== 'base64') {
+          throw new Error(`Unsupported encoding: ${encoding}. Expected base64.`);
         }
 
         console.log('[GamePage] Decoding base64 ROM from event content');
@@ -210,27 +210,21 @@ export default function GamePage() {
         setError(err instanceof Error ? err.message : 'Failed to load game');
         setStatus('error');
       }
-    };
+    }, [id, nostr]);
 
-    loadGameData();
-
-    // Cleanup
-    return () => {
-      // ROM data cleanup is handled by EmulatorJS component
-    };
-  }, [id, nostr]);
+    useEffect(() => {
+      loadGameData();
+    }, [loadGameData, reloadToken]);
 
   /**
    * Retry loading the game
    */
   const handleRetry = () => {
-    // Clean up current state
     setRomData(null);
     setRomInfo(null);
     setError(null);
-
-    // Restart loading process
     setStatus('loading');
+    setReloadToken(t => t + 1);
   };
 
   /**
@@ -351,6 +345,7 @@ export default function GamePage() {
           {/* Main game area */}
           <div className="lg:col-span-3">
             <EmulatorIFrame
+              key={`${id}-${romInfo?.sha256?.slice(0,8) ?? 'nohash'}-${reloadToken}`}
               romData={romData}
               platform={platform}
               title={gameMeta.title}

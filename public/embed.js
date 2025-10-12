@@ -16,7 +16,7 @@
     const error = 'Missing required parameters: core and url';
     console.error('[EmulatorJS Embed]', error);
     document.getElementById('game').innerHTML = `<div class="error">Error: ${error}</div>`;
-    window.parent.postMessage({ type: 'ejs:error', message: error }, '*');
+    window.parent.postMessage({ type: 'ejs:error', message: error }, window.location.origin);
     return;
   }
   
@@ -73,7 +73,7 @@
           width: rect.width,
           height: rect.height,
           dpr: window.devicePixelRatio || 1
-        }, '*');
+        }, window.location.origin);
         
         return;
       }
@@ -83,7 +83,7 @@
       const errorMsg = 'Canvas detection timeout - emulator failed to initialize';
       console.error('[EmulatorJS Embed]', errorMsg);
       document.getElementById('game').innerHTML = `<div class="error">${errorMsg}</div>`;
-      window.parent.postMessage({ type: 'ejs:error', message: errorMsg }, '*');
+      window.parent.postMessage({ type: 'ejs:error', message: errorMsg }, window.location.origin);
       return;
     }
     
@@ -120,9 +120,36 @@
     const errorMsg = 'Failed to load EmulatorJS script';
     console.error('[EmulatorJS Embed]', errorMsg);
     document.getElementById('game').innerHTML = `<div class="error">${errorMsg}</div>`;
-    window.parent.postMessage({ type: 'ejs:error', message: errorMsg }, '*');
+    window.parent.postMessage({ type: 'ejs:error', message: errorMsg }, window.location.origin);
   };
   
   document.head.appendChild(script);
+
+  window.addEventListener('message', (e) => {
+    if (e.origin !== window.location.origin) return;
+    const data = e.data || {};
+    try {
+      if (data.type === 'ejs:set-mute') {
+        const muted = !!data.muted;
+        const vol = typeof data.volume === 'number' ? data.volume : (muted ? 0 : 0.5);
+        window.EJS_mute = muted;
+        if (window.EJS_emulator && typeof window.EJS_emulator.setVolume === 'function') {
+          window.EJS_emulator.setVolume(vol);
+        }
+        } else if (data.type === 'ejs:pause') {
+          if (window.EJS_emulator && typeof window.EJS_emulator.pause === 'function') {
+            window.EJS_emulator.pause(true);
+          }
+        } else if (data.type === 'ejs:resume') {
+          if (window.EJS_emulator && typeof window.EJS_emulator.pause === 'function') {
+            window.EJS_emulator.pause(false);
+          }
+      } else if (data.type === 'ejs:reset') {
+        if (window.EJS_emulator && typeof window.EJS_emulator.restart === 'function') {
+          window.EJS_emulator.restart();
+        }
+      }
+    } catch (_) {}
+  });
   
 })();
