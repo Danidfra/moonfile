@@ -9,6 +9,27 @@ export function guessMimeFromFilename(filename: string): string | undefined {
 }
 
 /**
+ * Infer platform slug from a ROM MIME.
+ * e.g. "application/x-snes-rom" -> "snes-rom"
+ *      "application/x-nes-rom"  -> "nes-rom"
+ * Se não casar, retorna "html5" (fallback neutro).
+ */
+export function platformFromMime(mime: string): string {
+  const m = /^application\/x-([a-z0-9-]+)$/i.exec(mime);
+  return m?.[1] ?? 'html5';
+}
+
+/**
+ * Concat base platform with extra platforms (semicolon-separated)
+ */
+export function mergePlatforms(base: string, extra?: string): string {
+  const e = (extra ?? '').trim();
+  if (!e) return base;
+  return `${base};${e}`;
+}
+
+
+/**
  * Convert File to base64 string (without data: URL prefix)
  */
 export async function fileToBase64(file: File): Promise<string> {
@@ -51,24 +72,47 @@ export function toKebabCase(str: string): string {
  * Generate deterministic d-tag for game events
  * Format: game:<kebab-title>:<region-lowercase>:v<version>
  */
-export function generateDTag(title: string, region: string, version: string): string {
+export function generateDTag(
+  title: string,
+  region: string,
+  version: string,
+  publisher?: string
+): string {
   const kebabTitle = toKebabCase(title);
   const regionLower = region.toLowerCase();
-  return `game:${kebabTitle}:${regionLower}:v${version}`;
+  const pub = publisher ? `-${toKebabCase(publisher)}` : '';
+  // game:<title>-<region>[-<publisher>]:v<version>
+  return `game:${kebabTitle}-${regionLower}${pub}:v${version}`;
 }
+
+/**
+ * Escape value for single-quoted shell arg in nak preview.
+ */
+function escapeForSingleQuotes(v: string): string {
+  return String(v).replace(/'/g, `'\\''`);
+}
+
 
 /**
  * Generate nak command preview for debugging
  */
 export function generateNakPreview(event: { kind: number; content: string; tags: string[][] }): string {
-  let command = `nak event \\\n  -k ${event.kind} \\\n  -c '${event.content}'`;
-  
+  // Se o conteúdo for grande (ex: base64), prefira uma referência @arquivo
+  const dTag = event.tags.find(t => t[0] === 'd')?.[1] ?? 'content';
+  const shouldUseFileRef = event.content && event.content.length > 120;
+  const contentArg = shouldUseFileRef
+    ? `@${escapeForSingleQuotes(`${dTag}.base64.txt`)}`
+    : `'${escapeForSingleQuotes(event.content ?? '')}'`;
+
+  let command = `nak event \\\n  -k ${event.kind} \\\n  -c ${contentArg}`;
+
   for (const tag of event.tags) {
-    if (tag.length >= 2) {
-      command += ` \\\n  -t '${tag[0]}=${tag[1]}'`;
-    }
+    if (!tag || tag.length < 2) continue;
+    // suporte a tags com 2+ valores: key=val1=val2=...
+    const [k, ...vals] = tag;
+    const joined = [k, ...vals.map(escapeForSingleQuotes)].join('=');
+    command += ` \\\n  -t '${joined}'`;
   }
-  
   return command;
 }
 

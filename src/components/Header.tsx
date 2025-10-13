@@ -30,6 +30,12 @@ export function Header() {
             Games
           </Link>
           <Link
+            to="/publish-game"
+            className="text-sm font-medium text-gray-300 hover:text-purple-400 transition-colors hover:scale-105"
+          >
+            Publish Games
+          </Link>
+          <Link
             to="/about"
             className="text-sm font-medium text-gray-300 hover:text-purple-400 transition-colors hover:scale-105"
           >

@@ -11,20 +11,21 @@ import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Progress } from '@/components/ui/progress';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Upload, Link, AlertTriangle, CheckCircle, Copy, Eye } from 'lucide-react';
+import { Upload, AlertTriangle, CheckCircle, Copy, Eye } from 'lucide-react';
 import { useToast } from '@/hooks/useToast';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { ONE_MB } from '@/lib/gamePublishConstants';
 import { 
-  guessMimeFromFilename, 
-  fileToBase64, 
-  sha256Hex, 
-  generateDTag, 
+  guessMimeFromFilename,
+  fileToBase64,
+  sha256Hex,
+  generateDTag,
   generateNakPreview,
-  isValidHttpUrl 
+  isValidHttpUrl,
+  platformFromMime,
+  mergePlatforms,
 } from '@/lib/gamePublishHelpers';
 
 // Form schema
@@ -37,7 +38,18 @@ const formSchema = z.object({
   summary: z.string().optional(),
   credits: z.string().optional(),
   serial: z.string().optional(),
-  coverImageUrl: z.string().optional().refine(
+  status: z.enum(['released', 'beta', 'alpha', 'prototype']).default('released'),
+  publisher: z.string().min(1, 'Publisher is required'),
+  cartMbit: z.string().optional(),
+  crc: z.string().optional().refine(
+    (val) => !val || /^[0-9a-fA-F]{8}$/.test(val),
+    'CRC must be 8 hex chars'
+  ),
+  modes: z.array(z.enum(['singleplayer','multiplayer','co-op','competitive'])).optional(),
+  genresCsv: z.string().optional(),
+  extraPlatforms: z.string().optional(),
+  relaysRaw: z.string().min(1, 'At least one relay is required'),
+ coverImageUrl: z.string().optional().refine(
     (url) => !url || isValidHttpUrl(url),
     'Cover image URL must be a valid http(s) URL'
   ),
@@ -76,6 +88,8 @@ export function PublishGamePage() {
     resolver: zodResolver(formSchema),
     defaultValues: {
       version: '1.0',
+      status: 'released',
+      relaysRaw: 'wss://relay.ditto.pub'
     },
   });
 
@@ -103,8 +117,8 @@ export function PublishGamePage() {
       return;
     }
 
-    // Determine platform from MIME
-    const platform = mime.replace('application/x-', '').replace('-rom', '') + '-rom';
+    // Determine platform from MIME (ex.: "application/x-snes-rom" -> "snes-rom")
+    const platform = platformFromMime(mime);
 
     // Determine upload mode based on size
     const mode = size <= ONE_MB ? 'inline' : 'blossom';
@@ -129,7 +143,7 @@ export function PublishGamePage() {
       toast({
         title: 'Large file detected',
         description: 'Files larger than 1MB will be uploaded via Blossom for better performance.',
-        variant: 'warning',
+        variant: 'default',
       });
     }
   }, [setValue, toast]);
@@ -159,7 +173,7 @@ export function PublishGamePage() {
       return;
     }
 
-    const dTag = generateDTag(values.title, values.region, values.version);
+    const dTag = generateDTag(values.title, values.region, values.version, values.publisher);
     
     const tags: string[][] = [
       ['d', dTag],
@@ -168,6 +182,8 @@ export function PublishGamePage() {
       ['players', values.players],
       ['year', values.year],
       ['ver', values.version],
+      ['status', values.status],
+      ['publisher', values.publisher],
     ];
 
     // Add optional fields
@@ -175,36 +191,53 @@ export function PublishGamePage() {
     if (values.credits) tags.push(['credits', values.credits]);
     if (values.serial) tags.push(['serial', values.serial]);
     if (values.coverImageUrl) tags.push(['image', 'cover', values.coverImageUrl]);
+    if (values.cartMbit) tags.push(['cart_mbit', values.cartMbit]);
+    if (values.crc) tags.push(['crc', values.crc.toLowerCase()]);
+
+    // Modes -> t=...
+    if (values.modes?.length) {
+      for (const m of values.modes) tags.push(['t', m]);
+    }
+    // Genres CSV -> t=...
+    if (values.genresCsv) {
+      values.genresCsv
+        .split(',')
+        .map(s => s.trim())
+        .filter(Boolean)
+        .forEach(g => tags.push(['t', g]));
+    }
 
     let content = '';
-    let url = '';
 
     // Mode-specific tags and content
     if (uploadMode === 'inline' && fileInfo) {
       content = fileInfo.base64 || '';
+      const platforms = mergePlatforms(fileInfo.platform, values.extraPlatforms);
       tags.push(
         ['mime', fileInfo.mime],
         ['encoding', 'base64'],
-        ['platforms', fileInfo.platform],
+        ['platforms', platforms],
         ['compression', 'none'],
         ['size', fileInfo.size.toString()],
         ['sha256', fileInfo.sha256]
       );
     } else if (uploadMode === 'blossom' && fileInfo) {
+      const platforms = mergePlatforms(fileInfo.platform, values.extraPlatforms);
       tags.push(
         ['mime', fileInfo.mime],
         ['encoding', 'url'],
-        ['platforms', fileInfo.platform],
+        ['platforms', platforms],
         ['compression', 'none'],
         ['size', fileInfo.size.toString()],
         ['sha256', fileInfo.sha256],
         ['url', blossomUrl]
       );
     } else if (uploadMode === 'url' && values.gameUrl) {
+      const platforms = mergePlatforms('html5', values.extraPlatforms);
       tags.push(
         ['mime', 'text/html'],
         ['encoding', 'url'],
-        ['platforms', 'html5'],
+        ['platforms', platforms],
         ['compression', 'none'],
         ['url', values.gameUrl]
       );
@@ -241,6 +274,15 @@ export function PublishGamePage() {
     }
 
     try {
+      const relays = parseRelays(form.getValues('relaysRaw'));
+      if (!relays.length) {
+        toast({
+          title: 'No relays',
+          description: 'Add at least one relay',
+          variant: 'destructive',
+        });
+        return;
+      }
       // If blossom mode and no URL yet, upload the file
       if (uploadMode === 'blossom' && selectedFile && !blossomUrl) {
         const tags = await uploadFile(selectedFile);
@@ -257,10 +299,10 @@ export function PublishGamePage() {
         const updatedEvent = { ...previewEvent, tags: updatedTags };
         setPreviewEvent(updatedEvent);
         
-        // Publish the updated event
-        await publishEvent(updatedEvent);
+        // Publish the updated event (com relays)
+        await publishEvent({...updatedEvent, relays });
       } else {
-        await publishEvent(previewEvent);
+        await publishEvent({...previewEvent, relays });
       }
 
       toast({
@@ -288,6 +330,13 @@ export function PublishGamePage() {
   }, [user, previewEvent, uploadMode, selectedFile, blossomUrl, uploadFile, publishEvent, form, toast]);
 
   const isProcessing = isPublishing || isUploading;
+
+  const parseRelays = (raw: string): string[] =>
+    raw
+      .split(/\r?\n/)
+      .map(s => s.trim())
+      .filter(Boolean)
+      .map(s => s.startsWith('ws://') || s.startsWith('wss://') ? s : `wss://${s}`);
 
   useSeoMeta({
     title: 'Publish Game - MoonFile',
@@ -414,6 +463,106 @@ export function PublishGamePage() {
                   />
                 </div>
 
+                {/* Status */}
+                <div>
+                  <Label htmlFor="status" className="text-white">Status *</Label>
+                  <select
+                    id="status"
+                    {...form.register('status')}
+                    className="mt-1 w-full rounded-md bg-gray-800 border border-gray-700 text-white p-2"
+                  >
+                    <option value="released">released</option>
+                    <option value="beta">beta</option>
+                    <option value="alpha">alpha</option>
+                    <option value="prototype">prototype</option>
+                  </select>
+                  {errors.status && (
+                    <p className="text-red-400 text-sm mt-1">{String(errors.status.message)}</p>
+                  )}
+                </div>
+
+                {/* Publisher */}
+                <div>
+                  <Label htmlFor="publisher" className="text-white">Publisher *</Label>
+                  <Input
+                    id="publisher"
+                    {...form.register('publisher')}
+                    placeholder="Nintendo"
+                    className="bg-gray-800 border-gray-700 text-white"
+                  />
+                  {errors.publisher && (
+                    <p className="text-red-400 text-sm mt-1">{errors.publisher.message}</p>
+                  )}
+                </div>
+
+                {/* Cart size (Mbit) & CRC */}
+                <div className="grid grid-cols-2 gap-4">
+                  <div>
+                    <Label htmlFor="cartMbit" className="text-white">Cart size (Mbit)</Label>
+                    <Input
+                      id="cartMbit"
+                      {...form.register('cartMbit')}
+                      placeholder="8"
+                      className="bg-gray-800 border-gray-700 text-white"
+                    />
+                  </div>
+                  <div>
+                    <Label htmlFor="crc" className="text-white">CRC (8 hex)</Label>
+                    <Input
+                      id="crc"
+                      {...form.register('crc')}
+                      placeholder="9c1f11e4"
+                      className="bg-gray-800 border-gray-700 text-white"
+                    />
+                    {errors.crc && (
+                      <p className="text-red-400 text-sm mt-1">{errors.crc.message}</p>
+                    )}
+                  </div>
+                </div>
+
+                {/* Modes (t=...) */}
+                <div>
+                  <Label className="text-white">Modes (adds "t=" tags)</Label>
+                  <div className="mt-2 grid grid-cols-2 gap-2 text-sm text-white">
+                    {(['singleplayer','multiplayer','co-op','competitive'] as const).map(m => (
+                      <label key={m} className="inline-flex items-center gap-2">
+                        <input
+                          type="checkbox"
+                          value={m}
+                          {...form.register('modes')}
+                          className="h-4 w-4"
+                        />
+                        <span>{m}</span>
+                      </label>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Genres CSV -> t=... */}
+                <div>
+                  <Label htmlFor="genresCsv" className="text-white">Genres (comma-separated)</Label>
+                  <Input
+                    id="genresCsv"
+                    {...form.register('genresCsv')}
+                    placeholder="action, puzzle"
+                    className="bg-gray-800 border-gray-700 text-white"
+                  />
+                </div>
+
+                {/* Extra platforms (semicolon-separated) */}
+                <div>
+                  <Label htmlFor="extraPlatforms" className="text-white">Extra platforms (semicolon-separated)</Label>
+                  <Input
+                    id="extraPlatforms"
+                    {...form.register('extraPlatforms')}
+                    placeholder="html5"
+                    className="bg-gray-800 border-gray-700 text-white"
+                  />
+                  <p className="text-xs text-gray-500 mt-1">
+                    These will be appended to the base platform (e.g., "snes-rom;html5").
+                  </p>
+                </div>
+
                 <div>
                   <Label htmlFor="coverImageUrl" className="text-white">Cover Image URL</Label>
                   <Input
@@ -503,7 +652,7 @@ export function PublishGamePage() {
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-400">SHA256:</span>
-                          <span className="text-white font-mono text-xs">{fileInfo.sha256}</span>
+                          <span className="text-white font-mono text-xs truncate">{fileInfo.sha256}</span>
                         </div>
                         <div className="flex justify-between">
                           <span className="text-gray-400">Mode:</span>
@@ -525,6 +674,31 @@ export function PublishGamePage() {
                 )}
               </CardContent>
             </Card>
+
+    
+            {/* Publishing Options */}
+            <Card className="border-gray-800 bg-gray-900">
+              <CardHeader>
+                <CardTitle className="text-white">Publishing Options</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                <div>
+                  <Label htmlFor="relaysRaw" className="text-white">Relays *</Label>
+                  <Textarea
+                    id="relaysRaw"
+                    {...form.register('relaysRaw')}
+                    rows={3}
+                    placeholder={`wss://relay.ditto.pub\nwss://relay.primal.net`}
+                    className="bg-gray-800 border-gray-700 text-white"
+                  />
+                  {errors.relaysRaw && (
+                    <p className="text-red-400 text-sm mt-1">{errors.relaysRaw.message}</p>
+                  )}
+                  <p className="text-xs text-gray-500 mt-1">One relay per line. We’ll prefix “wss://” if missing.</p>
+                </div>
+              </CardContent>
+            </Card>
+
           </div>
 
           {/* Preview Section */}

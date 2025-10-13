@@ -20,7 +20,8 @@ export function useNostrPublish(): UseMutationResult<NostrEvent, Error, PublishE
   return useMutation({
     mutationFn: async (t: PublishEventParams) => {
       if (user) {
-        const tags = t.tags ?? [];
+        const baseTags = t.tags ?? [];
+        const tags = [...baseTags];
 
         // Add the client tag if it doesn't exist
         if (location.protocol === "https:" && !tags.some(([name]) => name === "client")) {
