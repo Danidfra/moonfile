@@ -19,14 +19,7 @@ export function platformFromMime(mime: string): string {
   return m?.[1] ?? 'html5';
 }
 
-/**
- * Concat base platform with extra platforms (semicolon-separated)
- */
-export function mergePlatforms(base: string, extra?: string): string {
-  const e = (extra ?? '').trim();
-  if (!e) return base;
-  return `${base};${e}`;
-}
+
 
 
 /**

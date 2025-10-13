@@ -17,7 +17,7 @@ import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useUploadFile } from '@/hooks/useUploadFile';
 import { ONE_MB } from '@/lib/gamePublishConstants';
-import { 
+import {
   guessMimeFromFilename,
   fileToBase64,
   sha256Hex,
@@ -25,8 +25,16 @@ import {
   generateNakPreview,
   isValidHttpUrl,
   platformFromMime,
-  mergePlatforms,
 } from '@/lib/gamePublishHelpers';
+
+/**
+ * Utility to merge tag sets, replacing specified keys from base with incoming tags
+ */
+function mergeTagSets(base: string[][], incoming: string[][], replaceKeys: string[] = []) {
+  const replace = new Set(replaceKeys.length ? replaceKeys : incoming.map(t => t[0]));
+  const filtered = base.filter(t => !replace.has(t[0]));
+  return [...filtered, ...incoming];
+}
 
 // Form schema
 const formSchema = z.object({
@@ -48,7 +56,7 @@ const formSchema = z.object({
   genresCsv: z.string().optional(),
   extraPlatforms: z.string().optional(),
   relaysRaw: z.string().min(1, 'At least one relay is required'),
- coverImageUrl: z.string().optional().refine(
+  coverImageUrl: z.string().optional().refine(
     (url) => !url || isValidHttpUrl(url),
     'Cover image URL must be a valid http(s) URL'
   ),
@@ -65,7 +73,7 @@ export function PublishGamePage() {
   const { user } = useCurrentUser();
   const { mutateAsync: publishEvent, isPending: isPublishing } = useNostrPublish();
   const { mutateAsync: uploadFile, isPending: isUploading } = useUploadFile();
-  
+
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [fileInfo, setFileInfo] = useState<{
     size: number;
@@ -75,7 +83,6 @@ export function PublishGamePage() {
     base64?: string;
   } | null>(null);
   const [uploadMode, setUploadMode] = useState<'inline' | 'blossom' | 'url' | null>(null);
-  const [blossomUrl, setBlossomUrl] = useState<string>('');
   const [showPreview, setShowPreview] = useState(false);
   const [previewEvent, setPreviewEvent] = useState<{
     kind: number;
@@ -99,13 +106,13 @@ export function PublishGamePage() {
   const handleFileSelect = useCallback(async (file: File) => {
     setSelectedFile(file);
     setValue('gameUrl', ''); // Clear URL when file is selected
-    
+
     // Calculate file info
     const size = file.size;
     const arrayBuffer = await file.arrayBuffer();
     const sha256 = await sha256Hex(arrayBuffer);
     const mime = guessMimeFromFilename(file.name);
-    
+
     if (!mime) {
       toast({
         title: 'Unsupported file type',
@@ -159,19 +166,19 @@ export function PublishGamePage() {
     }
   }, [setValue]);
 
-  function platformsTag(base: string, extra?: string) {
+  function createPlatformsTag(base: string, extra?: string): string[] {
     const extras = (extra ?? '')
       .split(';')
       .map(s => s.trim())
       .filter(Boolean);
     const unique = Array.from(new Set([base, ...extras]));
-    return ['platforms', ...unique] as string[];
+    return ['platforms', ...unique];
   }
 
   // Generate preview event
   const generatePreviewEvent = useCallback(async () => {
     const values = form.getValues();
-    
+
     if (!values.title || !values.region || !values.version || !values.players || !values.year) {
       toast({
         title: 'Missing required fields',
@@ -182,7 +189,7 @@ export function PublishGamePage() {
     }
 
     const dTag = generateDTag(values.title, values.region, values.version, values.publisher);
-    
+
     const tags: string[][] = [
       ['d', dTag],
       ['name', values.title],
@@ -201,11 +208,11 @@ export function PublishGamePage() {
     if (values.coverImageUrl) tags.push(['image', values.coverImageUrl]);
     if (values.crc) tags.push(['crc', values.crc.toLowerCase()]);
 
-    // Modes -> t=...
+    // Modes -> mode tags (not t tags)
     if (values.modes?.length) {
       for (const m of values.modes) tags.push(['mode', m]);
     }
-    // Genres CSV -> t=...
+    // Genres CSV -> genre tags (not t tags)
     if (values.genresCsv) {
       values.genresCsv
         .split(',')
@@ -219,31 +226,30 @@ export function PublishGamePage() {
     // Mode-specific tags and content
     if (uploadMode === 'inline' && fileInfo) {
       content = fileInfo.base64 || '';
-      const platforms = mergePlatforms(fileInfo.platform, values.extraPlatforms);
       tags.push(
         ['mime', fileInfo.mime],
         ['encoding', 'base64'],
-        ['platforms', platforms],
+        createPlatformsTag(fileInfo.platform, values.extraPlatforms),
         ['compression', 'none'],
         ['size', String(fileInfo.size)],
         ['sha256', fileInfo.sha256]
       );
     } else if (uploadMode === 'blossom' && fileInfo) {
-      const platforms = mergePlatforms(fileInfo.platform, values.extraPlatforms);
+      // For Blossom preview, do not include URL tag - it will be added after upload
       tags.push(
         ['mime', fileInfo.mime],
         ['encoding', 'url'],
-        ['platforms', platforms],
-        ['compression', 'none'],
-        ['size', String(fileInfo.size)],
-        ['sha256', fileInfo.sha256],
-        ['url', blossomUrl]
+        createPlatformsTag(fileInfo.platform, values.extraPlatforms),
+        ['compression', 'none']
+        // Optional: include local size/sha256, but expect them to be replaced by Blossom
+        // ['size', String(fileInfo.size)],
+        // ['sha256', fileInfo.sha256]
       );
     } else if (uploadMode === 'url' && values.gameUrl) {
       tags.push(
         ['mime', 'text/html'],
         ['encoding', 'url'],
-        platformsTag('html5', values.extraPlatforms),
+        createPlatformsTag('html5', values.extraPlatforms),
         ['compression', 'none'],
         ['url', values.gameUrl]
       );
@@ -257,7 +263,7 @@ export function PublishGamePage() {
 
     setPreviewEvent(event);
     setShowPreview(true);
-  }, [form, uploadMode, fileInfo, blossomUrl, toast]);
+  }, [form, uploadMode, fileInfo, toast]);
 
   // Publish game event
   const handlePublish = useCallback(async () => {
@@ -289,27 +295,37 @@ export function PublishGamePage() {
         });
         return;
       }
-      // If blossom mode and no URL yet, upload the file
-      if (uploadMode === 'blossom' && selectedFile && !blossomUrl) {
-        const tags = await uploadFile(selectedFile);
-        const urlTag = tags.find(tag => tag[0] === 'url');
+
+      let eventToPublish = previewEvent;
+
+      // If blossom mode and we have a file, upload it first
+      if (uploadMode === 'blossom' && selectedFile) {
+        const blossomTags = await uploadFile(selectedFile);
+
+        // Ensure a URL tag exists
+        const urlTag = blossomTags.find(tag => tag[0] === 'url');
         if (!urlTag) {
           throw new Error('No URL returned from Blossom upload');
         }
-        setBlossomUrl(urlTag[1]);
-        
-        // Update preview event with the URL
-        const updatedTags = previewEvent.tags.map(tag => 
-          tag[0] === 'url' ? ['url', urlTag[1]] : tag
+
+        // Merge Blossom tags into preview event, replacing keys like url, size, sha256, mime
+        const mergedTags = mergeTagSets(
+          previewEvent.tags,
+          blossomTags,
+          ['url', 'size', 'sha256', 'mime']
         );
-        const updatedEvent = { ...previewEvent, tags: updatedTags };
-        setPreviewEvent(updatedEvent);
-        
-        // Publish the updated event (com relays)
-        await publishEvent({...updatedEvent, relays });
-      } else {
-        await publishEvent({...previewEvent, relays });
+
+        eventToPublish = {
+          ...previewEvent,
+          tags: mergedTags
+        };
+
+        // Update local state for display
+        setPreviewEvent(eventToPublish);
       }
+
+      // Publish the event
+      await publishEvent({ ...eventToPublish, relays });
 
       toast({
         title: 'Game published successfully!',
@@ -321,7 +337,6 @@ export function PublishGamePage() {
       setSelectedFile(null);
       setFileInfo(null);
       setUploadMode(null);
-      setBlossomUrl('');
       setShowPreview(false);
       setPreviewEvent(null);
 
@@ -333,7 +348,7 @@ export function PublishGamePage() {
         variant: 'destructive',
       });
     }
-  }, [user, previewEvent, uploadMode, selectedFile, blossomUrl, uploadFile, publishEvent, form, toast]);
+  }, [user, previewEvent, uploadMode, selectedFile, uploadFile, publishEvent, form, toast]);
 
   const isProcessing = isPublishing || isUploading;
 
@@ -672,7 +687,7 @@ export function PublishGamePage() {
               </CardContent>
             </Card>
 
-    
+
             {/* Publishing Options */}
             <Card className="border-gray-800 bg-gray-900">
               <CardHeader>
