@@ -40,7 +40,6 @@ const formSchema = z.object({
   serial: z.string().optional(),
   status: z.enum(['released', 'beta', 'alpha', 'prototype']).default('released'),
   publisher: z.string().min(1, 'Publisher is required'),
-  cartMbit: z.string().optional(),
   crc: z.string().optional().refine(
     (val) => !val || /^[0-9a-fA-F]{8}$/.test(val),
     'CRC must be 8 hex chars'
@@ -160,6 +159,15 @@ export function PublishGamePage() {
     }
   }, [setValue]);
 
+  function platformsTag(base: string, extra?: string) {
+    const extras = (extra ?? '')
+      .split(';')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const unique = Array.from(new Set([base, ...extras]));
+    return ['platforms', ...unique] as string[];
+  }
+
   // Generate preview event
   const generatePreviewEvent = useCallback(async () => {
     const values = form.getValues();
@@ -190,13 +198,12 @@ export function PublishGamePage() {
     if (values.summary) tags.push(['summary', values.summary]);
     if (values.credits) tags.push(['credits', values.credits]);
     if (values.serial) tags.push(['serial', values.serial]);
-    if (values.coverImageUrl) tags.push(['image', 'cover', values.coverImageUrl]);
-    if (values.cartMbit) tags.push(['cart_mbit', values.cartMbit]);
+    if (values.coverImageUrl) tags.push(['image', values.coverImageUrl]);
     if (values.crc) tags.push(['crc', values.crc.toLowerCase()]);
 
     // Modes -> t=...
     if (values.modes?.length) {
-      for (const m of values.modes) tags.push(['t', m]);
+      for (const m of values.modes) tags.push(['mode', m]);
     }
     // Genres CSV -> t=...
     if (values.genresCsv) {
@@ -204,7 +211,7 @@ export function PublishGamePage() {
         .split(',')
         .map(s => s.trim())
         .filter(Boolean)
-        .forEach(g => tags.push(['t', g]));
+        .forEach(g => tags.push(['genre', g]));
     }
 
     let content = '';
@@ -218,7 +225,7 @@ export function PublishGamePage() {
         ['encoding', 'base64'],
         ['platforms', platforms],
         ['compression', 'none'],
-        ['size', fileInfo.size.toString()],
+        ['size', String(fileInfo.size)],
         ['sha256', fileInfo.sha256]
       );
     } else if (uploadMode === 'blossom' && fileInfo) {
@@ -228,16 +235,15 @@ export function PublishGamePage() {
         ['encoding', 'url'],
         ['platforms', platforms],
         ['compression', 'none'],
-        ['size', fileInfo.size.toString()],
+        ['size', String(fileInfo.size)],
         ['sha256', fileInfo.sha256],
         ['url', blossomUrl]
       );
     } else if (uploadMode === 'url' && values.gameUrl) {
-      const platforms = mergePlatforms('html5', values.extraPlatforms);
       tags.push(
         ['mime', 'text/html'],
         ['encoding', 'url'],
-        ['platforms', platforms],
+        platformsTag('html5', values.extraPlatforms),
         ['compression', 'none'],
         ['url', values.gameUrl]
       );
@@ -495,17 +501,8 @@ export function PublishGamePage() {
                   )}
                 </div>
 
-                {/* Cart size (Mbit) & CRC */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <Label htmlFor="cartMbit" className="text-white">Cart size (Mbit)</Label>
-                    <Input
-                      id="cartMbit"
-                      {...form.register('cartMbit')}
-                      placeholder="8"
-                      className="bg-gray-800 border-gray-700 text-white"
-                    />
-                  </div>
+                {/* CRC */}
+                <div>
                   <div>
                     <Label htmlFor="crc" className="text-white">CRC (8 hex)</Label>
                     <Input
@@ -703,90 +700,111 @@ export function PublishGamePage() {
 
           {/* Preview Section */}
           <div className="space-y-6">
-            <Card className="border-gray-800 bg-gray-900">
-              <CardHeader>
-                <CardTitle className="text-white flex items-center gap-2">
-                  <Eye className="w-5 h-5" />
-                  Preview
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-4">
-                  <Button
-                    onClick={generatePreviewEvent}
-                    disabled={!watchedValues.title || !watchedValues.region || !watchedValues.version || !watchedValues.players || !watchedValues.year || isProcessing}
-                    className="w-full"
-                  >
-                    Generate Preview
-                  </Button>
+          <Card className="border-gray-800 bg-gray-900">
+            <CardHeader>
+              <CardTitle className="text-white flex items-center gap-2">
+                <Eye className="w-5 h-5" />
+                Preview
+              </CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="space-y-4">
+                {/* Botão para gerar o preview */}
+                <Button
+                  type="button"
+                  onClick={generatePreviewEvent}
+                  disabled={
+                    !watchedValues.title ||
+                    !watchedValues.region ||
+                    !watchedValues.version ||
+                    !watchedValues.players ||
+                    !watchedValues.year ||
+                    isProcessing
+                  }
+                  className="w-full"
+                >
+                  Generate Preview
+                </Button>
 
-                  {showPreview && previewEvent && (
-                    <div className="space-y-4">
-                      <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-3">
-                        <div className="flex items-center gap-2 mb-2">
-                          <CheckCircle className="w-4 h-4 text-green-400" />
-                          <span className="text-green-400 font-medium">Ready to publish</span>
-                        </div>
-                        <p className="text-sm text-gray-300">
-                          Event generated successfully. Review the details below before publishing.
-                        </p>
+                {/* Mostra resultado + seções colapsáveis */}
+                {showPreview && previewEvent && (
+                  <div className="space-y-4">
+                    <div className="bg-green-900/20 border border-green-500/30 rounded-lg p-3">
+                      <div className="flex items-center gap-2 mb-2">
+                        <CheckCircle className="w-4 h-4 text-green-400" />
+                        <span className="text-green-400 font-medium">Ready to publish</span>
                       </div>
-
-                      <Button
-                        onClick={handlePublish}
-                        disabled={isProcessing}
-                        className="w-full bg-purple-600 hover:bg-purple-700"
-                      >
-                        {isProcessing ? (
-                          <div className="flex items-center gap-2">
-                            <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
-                            {isUploading ? 'Uploading...' : 'Publishing...'}
-                          </div>
-                        ) : (
-                          'Publish Game'
-                        )}
-                      </Button>
-
-                      {isProcessing && (
-                        <Progress value={isUploading ? 50 : 75} className="w-full" />
-                      )}
+                      <p className="text-sm text-gray-300">
+                        Event generated successfully. Review the details below before publishing.
+                      </p>
                     </div>
-                  )}
 
-                  {previewEvent && (
-                    <div className="space-y-4">
-                      <div>
-                        <h4 className="text-white font-medium mb-2">Event Preview</h4>
-                        <pre className="bg-gray-800 p-4 rounded-lg text-xs text-cyan-400 overflow-x-auto">
+                    {/* Event JSON (colapsado) */}
+                    <details className="group rounded-md border border-gray-800 bg-gray-800/60">
+                      <summary className="flex cursor-pointer items-center justify-between px-4 py-2 text-sm text-white hover:bg-gray-800/80">
+                        <span>Event Preview (JSON)</span>
+                        <span className="text-xs text-gray-400 group-open:hidden">Show</span>
+                        <span className="text-xs text-gray-400 hidden group-open:inline">Hide</span>
+                      </summary>
+                      <div className="px-4 pb-4">
+                        <pre className="bg-gray-900 p-4 rounded-lg text-xs text-cyan-400 overflow-x-auto">
                           {JSON.stringify(previewEvent, null, 2)}
                         </pre>
                       </div>
+                    </details>
 
-                      <div>
-                        <h4 className="text-white font-medium mb-2">nak Command</h4>
-                        <div className="bg-gray-800 p-4 rounded-lg">
-                          <pre className="text-xs text-cyan-400 overflow-x-auto whitespace-pre-wrap">
-                            {generateNakPreview(previewEvent)}
-                          </pre>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            onClick={() => {
-                              navigator.clipboard.writeText(generateNakPreview(previewEvent));
-                              toast({ title: 'Copied to clipboard' });
-                            }}
-                            className="mt-2"
-                          >
-                            <Copy className="w-4 h-4 mr-2" />
-                            Copy
-                          </Button>
-                        </div>
+                    {/* nak Command (colapsado) */}
+                    <details className="group rounded-md border border-gray-800 bg-gray-800/60">
+                      <summary className="flex cursor-pointer items-center justify-between px-4 py-2 text-sm text-white hover:bg-gray-800/80">
+                        <span>nak Command</span>
+                        <span className="text-xs text-gray-400 group-open:hidden">Show</span>
+                        <span className="text-xs text-gray-400 hidden group-open:inline">Hide</span>
+                      </summary>
+                      <div className="px-4 pb-4">
+                        <pre className="bg-gray-900 p-4 rounded-lg text-xs text-cyan-400 overflow-x-auto whitespace-pre-wrap">
+                          {generateNakPreview(previewEvent)}
+                        </pre>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            navigator.clipboard.writeText(generateNakPreview(previewEvent));
+                            toast({ title: 'Copied to clipboard' });
+                          }}
+                          className="mt-2"
+                        >
+                          <Copy className="w-4 h-4 mr-2" />
+                          Copy
+                        </Button>
                       </div>
-                    </div>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
+                    </details>
+
+                    {/* Botão de publicar abaixo do preview */}
+                    <Button
+                      type="button"
+                      onClick={handlePublish}
+                      disabled={!user || isProcessing}
+                      className="w-full bg-purple-600 hover:bg-purple-700"
+                    >
+                      {isProcessing ? (
+                        <div className="flex items-center gap-2">
+                          <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin" />
+                          {isUploading ? 'Uploading...' : 'Publishing...'}
+                        </div>
+                      ) : (
+                        'Publish Game'
+                      )}
+                    </Button>
+
+                    {isProcessing && (
+                      <Progress value={isUploading ? 50 : 75} className="w-full" />
+                    )}
+                  </div>
+                )}
+              </div>
+            </CardContent>
+          </Card>
 
             {!user && (
               <Alert>
