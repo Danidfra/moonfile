@@ -48,8 +48,8 @@ function getEmulatorCore(platform: string): string {
   };
 
   const knownCores = new Set(Object.values(mapping));
-  if (knownCores.has(platform)) return platform; // already a core
-  return mapping[platform] ?? platform; // map '*-rom' → core or pass-through
+  if (knownCores.has(platform)) return platform;
+  return mapping[platform] ?? (knownCores.has(platform) ? platform : 'nes');
 }
 
 const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
@@ -365,7 +365,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
                 ref={iframeRef}
                 src={iframeSrc}
                 className="w-full h-full border-0"
-                sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups"
+                sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
                 allow="fullscreen; gamepad; autoplay; clipboard-write"
                 title={`${title} Emulator`}
               />
