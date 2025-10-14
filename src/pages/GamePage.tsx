@@ -87,6 +87,7 @@ export default function GamePage() {
   const [gameEvent, setGameEvent] = useState<NostrEvent | null>(null);
   const [multiplayerSessionStatus, setMultiplayerSessionStatus] = useState<SessionStatus>('idle');
   const [reloadToken, setReloadToken] = useState(0);
+  const [challengeStarted, setChallengeStarted] = useState(false);
 
   // Refs for multiplayer integration
   const emulatorRef = useRef<EmulatorJSRef>(null);
@@ -133,6 +134,16 @@ export default function GamePage() {
 
         // Store the event for multiplayer detection
         setGameEvent(event);
+
+        // Check for challenge started tag
+        const challengeTag = getTag(event, 'challenge');
+        if (challengeTag?.[1] === 'started') {
+          console.log('[GamePage] Challenge detected as started');
+          setChallengeStarted(true);
+        } else {
+          console.log('[GamePage] No active challenge detected');
+          setChallengeStarted(false);
+        }
 
         // Parse game metadata from event
         const meta = parseGameMetadata(event);
@@ -463,7 +474,7 @@ export default function GamePage() {
                   maxPlayers={maxPlayers}
                 />
               ) : (
-                <GameInteractionCard />
+                <GameInteractionCard challengeStarted={challengeStarted} />
               )}
 
               {/* Show chat panel for multiplayer when session is active */}

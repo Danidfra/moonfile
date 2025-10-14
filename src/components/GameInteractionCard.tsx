@@ -17,7 +17,14 @@ import {
   // Heart
 } from 'lucide-react';
 
-export default function GameInteractionCard() {
+type GameInteractionCardProps = {
+  challengeStarted?: boolean; // defaults to false
+};
+
+export default function GameInteractionCard({ challengeStarted = false }: GameInteractionCardProps) {
+  // If challenge hasn't started, don't render anything
+  if (!challengeStarted) return null;
+
   // const [selectedChallenge, setSelectedChallenge] = useState('highest-score');
   // const [wagerAmount, setWagerAmount] = useState('');
   const [message, setMessage] = useState('');
@@ -111,7 +118,7 @@ export default function GameInteractionCard() {
       </Card>
 
       {/* Challenge Setup & Bet Options */}
-      {/* 
+      {/*
       <Card className="border-gray-800 bg-gray-900">
         <CardHeader className="pb-3">
           <CardTitle className="text-white flex items-center gap-2 text-lg">
