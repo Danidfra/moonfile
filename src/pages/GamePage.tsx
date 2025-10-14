@@ -201,18 +201,9 @@ export default function GamePage() {
           throw new Error(`Unsupported encoding: ${encoding}. Expected 'base64' or 'url'.`);
         }
 
-        // Map platform to emulator core
-        const platformToCore: Record<string, string> = {
-          'nes-rom':  'nes',
-          'snes-rom': 'snes',
-          'gb-rom':   'gb',
-          'gbc-rom':  'gbc',
-          'gba-rom':  'gba',
-          'n64-rom':  'n64',
-        };
-        const emuCore = platformToCore[detectedPlatform] ?? detectedPlatform;
-        setPlatform(emuCore);
-        console.log('[GamePage] Platform mapped to core:', detectedPlatform, '→', emuCore);
+        // Keep platform as raw value (*-rom), let EmulatorIFrame handle mapping
+        setPlatform(detectedPlatform);
+        console.log('[GamePage] Platform detected:', detectedPlatform);
 
         // Integrity check for Blossom URLs
         if (encoding === 'url') {
@@ -237,7 +228,7 @@ export default function GamePage() {
         }
 
         // Platform-specific ROM validation and processing
-        if (emuCore === 'nes') {
+        if (detectedPlatform === 'nes-rom') {
           console.log('[GamePage] Performing NES ROM validation and analysis');
 
           // Validate ROM format
@@ -395,6 +386,9 @@ export default function GamePage() {
   // Show chat when session is available or full
   const showMultiplayerChat = isMultiplayer && ['available', 'full'].includes(multiplayerSessionStatus);
 
+  // Create pretty platform label for UI
+  const prettyPlatform = platform.endsWith('-rom') ? platform.replace('-rom', '').toUpperCase() : platform.toUpperCase();
+
   return (
     <div className="min-h-screen bg-black text-white">
       {/* Header */}
@@ -410,11 +404,14 @@ export default function GamePage() {
               <div>
                 <h1 className="text-xl font-bold text-white">{gameMeta.title}</h1>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
-                  {platform === 'nes' && romInfo?.header.mapper !== undefined && (
+                  {platform === 'nes-rom' && romInfo?.header.mapper !== undefined && (
                     <span className="bg-gray-800 px-2 py-1 rounded text-xs">
                       Mapper {romInfo.header.mapper}
                     </span>
                   )}
+                  <span className="bg-gray-800 px-2 py-1 rounded text-xs">
+                    {prettyPlatform}
+                  </span>
                   {romInfo && (
                     <span className="text-xs">
                       {Math.round(romInfo.size / 1024)}KB
@@ -536,14 +533,14 @@ export default function GamePage() {
                       <div className="pt-2 border-t border-gray-800">
                         <span className="text-gray-500">ROM Info:</span>
                         <div className="text-xs text-gray-400 mt-1 space-y-1">
-                          {platform === 'nes' ? (
+                          {platform === 'nes-rom' ? (
                             <>
                               <div>PRG Banks: {romInfo.header.prgBanks}</div>
                               <div>CHR Banks: {romInfo.header.chrBanks}</div>
                               <div>Mapper: {romInfo.header.mapper}</div>
                             </>
                           ) : (
-                            <div>Platform: {platform.toUpperCase()}</div>
+                            <div>Platform: {prettyPlatform}</div>
                           )}
                           <div>Size: {Math.round(romInfo.size / 1024)}KB</div>
                           <div>SHA256: {romInfo.sha256.substring(0, 8)}...</div>

@@ -17,7 +17,7 @@ export interface EmulatorJSRef {
 }
 
 /**
- * Map platform tag to EmulatorJS core
+ * Map platform tag to EmulatorJS core with tolerant fallback
  */
 function getEmulatorCore(platform: string): string {
   const mapping: Record<string, string> = {
@@ -47,7 +47,9 @@ function getEmulatorCore(platform: string): string {
     'arcade-rom': 'arcade'
   };
 
-  return mapping[platform] || 'nes';
+  const knownCores = new Set(Object.values(mapping));
+  if (knownCores.has(platform)) return platform; // already a core
+  return mapping[platform] ?? platform; // map '*-rom' → core or pass-through
 }
 
 const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
