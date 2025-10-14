@@ -175,6 +175,23 @@ export function PublishGamePage() {
     return ['platforms', ...unique];
   }
 
+  function normalizeBlossomTags(tags: string[][]): string[][] {
+    const out: string[][] = [];
+    for (const [k, ...rest] of tags) {
+      if (k === 'm') out.push(['mime', ...rest]);
+      else if (k === 'x' || k === 'ox') out.push(['sha256', ...rest]);
+      else out.push([k, ...rest]);
+    }
+    // remove duplicatas de sha256 caso venham x e ox
+    const seen = new Set<string>();
+    return out.filter(([k, v]) => {
+      if (k !== 'sha256') return true;
+      if (seen.has(v)) return false;
+      seen.add(v);
+      return true;
+    });
+  }
+
   // Generate preview event
   const generatePreviewEvent = useCallback(async () => {
     const values = form.getValues();
@@ -188,7 +205,7 @@ export function PublishGamePage() {
       return;
     }
 
-    const dTag = generateDTag(values.title, values.region, values.version, values.publisher);
+    const dTag = generateDTag(values.title, values.version);
 
     const tags: string[][] = [
       ['d', dTag],
@@ -300,7 +317,8 @@ export function PublishGamePage() {
 
       // If blossom mode and we have a file, upload it first
       if (uploadMode === 'blossom' && selectedFile) {
-        const blossomTags = await uploadFile(selectedFile);
+        const blossomTagsRaw = await uploadFile(selectedFile);
+        const blossomTags = normalizeBlossomTags(blossomTagsRaw)
 
         // Ensure a URL tag exists
         const urlTag = blossomTags.find(tag => tag[0] === 'url');

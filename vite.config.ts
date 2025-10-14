@@ -20,7 +20,7 @@ export default defineConfig(() => ({
         "default-src 'self'",
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' https://cdn.emulatorjs.org blob:",
         "worker-src 'self' blob:",
-        "connect-src 'self' https://cdn.emulatorjs.org blob: data: wss:",
+        "connect-src 'self' https://cdn.emulatorjs.org https://blossom.primal.net blob: data: wss:",
         "img-src 'self' https: data: blob:",
         "media-src 'self' data: blob:",
         "style-src 'self' 'unsafe-inline' https://cdn.emulatorjs.org",

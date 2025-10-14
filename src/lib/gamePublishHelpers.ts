@@ -65,17 +65,11 @@ export function toKebabCase(str: string): string {
  * Generate deterministic d-tag for game events
  * Format: game:<kebab-title>:<region-lowercase>:v<version>
  */
-export function generateDTag(
-  title: string,
-  region: string,
-  version: string,
-  publisher?: string
-): string {
-  const kebabTitle = toKebabCase(title);
-  const regionLower = region.toLowerCase();
-  const pub = publisher ? `-${toKebabCase(publisher)}` : '';
-  // game:<title>-<region>[-<publisher>]:v<version>
-  return `game:${kebabTitle}-${regionLower}${pub}:v${version}`;
+export function generateDTag(title: string, version: string): string {
+  const slug = toKebabCase(title);
+  const v = version.trim();
+  const vTag = v.toLowerCase().startsWith('v') ? v : `v${v}`;
+  return `game:${slug}:${vTag}`;
 }
 
 /**
