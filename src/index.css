@@ -166,3 +166,12 @@
 .emulator-container {
   overscroll-behavior: contain;
 }
+
+/* Disable all page scrolling when applied */
+html.no-scroll,
+body.no-scroll {
+  overflow: hidden !important;
+  height: 100%;
+  overscroll-behavior: none;
+  touch-action: none;
+}

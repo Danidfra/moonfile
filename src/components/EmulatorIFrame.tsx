@@ -74,11 +74,35 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [romUrl, setRomUrl] = useState('');
 
-  // Keys that should be blocked when gaming
-  const blockedKeys = new Set([
-    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
-    ' ', 'Spacebar', 'PageUp', 'PageDown', 'Home', 'End'
-  ]);
+  // Check if iframe is focused
+  const iframeIsFocused = useCallback(() => {
+    return document.activeElement === iframeRef.current;
+  }, []);
+
+  // Derived boolean for interaction state
+  const isInteracting = isFullscreen || hovering || iframeIsFocused();
+
+  // Utility to toggle global scroll lock
+  const toggleScrollLock = useCallback((lock: boolean) => {
+    const html = document.documentElement;
+    const body = document.body;
+    if (!html || !body) return;
+    [html, body].forEach(el => {
+      if (lock) {
+        el.classList.add('no-scroll');
+      } else {
+        el.classList.remove('no-scroll');
+      }
+    });
+  }, []);
+
+  // Apply/remove class on interaction change
+  useEffect(() => {
+    toggleScrollLock(isInteracting);
+    return () => {
+      toggleScrollLock(false);
+    };
+  }, [isInteracting, toggleScrollLock]);
 
   // Focus the iframe when clicked
   const focusIFrame = useCallback(() => {
@@ -292,13 +316,6 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     const handleFullscreenChange = () => {
       const isNowFullscreen = !!document.fullscreenElement;
       setIsFullscreen(isNowFullscreen);
-
-      // Manage body overflow for fullscreen
-      if (isNowFullscreen) {
-        document.documentElement.style.overflow = 'hidden';
-      } else {
-        document.documentElement.style.overflow = '';
-      }
     };
 
     const events = ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange'];
@@ -310,37 +327,50 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
       events.forEach(event => {
         document.removeEventListener(event, handleFullscreenChange);
       });
-      // Restore overflow on cleanup
-      document.documentElement.style.overflow = '';
     };
   }, []);
 
-  // Handle keyboard scroll lock
+  // Block keyboard + wheel + touch while interacting
   useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      // Check if we should block this key
-      const shouldBlock = blockedKeys.has(event.key) || blockedKeys.has(event.code);
+    if (!isInteracting) return;
 
-      if (!shouldBlock) return;
+    const blockedKeys = new Set([
+      'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+      ' ', 'Space', 'Spacebar',
+      'PageUp', 'PageDown', 'Home', 'End'
+    ]);
 
-      // Check if iframe is focused or mouse is hovering
-      const isIFrameFocused = document.activeElement === iframeRef.current;
-      const isHoveringGame = hovering;
-
-      if (isIFrameFocused || isHoveringGame) {
-        event.preventDefault();
-        event.stopPropagation();
-        console.log('[EmulatorIFrame] Blocked key:', event.key);
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (blockedKeys.has(e.key) || blockedKeys.has((e as any).code)) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('[EmulatorIFrame] Blocked key:', e.key);
       }
     };
 
-    // Add event listener with capture and non-passive to ensure preventDefault works
-    window.addEventListener('keydown', handleKeyDown, { capture: true, passive: false });
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[EmulatorIFrame] Blocked wheel event');
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[EmulatorIFrame] Blocked touchmove event');
+    };
+
+    // Add event listeners with capture and non-passive to ensure preventDefault works
+    window.addEventListener('keydown', onKeyDown, { capture: true, passive: false });
+    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown, { capture: true, passive: false });
+      window.removeEventListener('keydown', onKeyDown, { capture: true } as any);
+      window.removeEventListener('wheel', onWheel, { capture: true } as any);
+      window.removeEventListener('touchmove', onTouchMove, { capture: true } as any);
     };
-  }, [hovering, blockedKeys]);
+  }, [isInteracting]);
 
   // Control handlers
   const toggleFullscreen = useCallback(() => {
@@ -390,9 +420,9 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     <div
       ref={containerRef}
       className={`emulator-container flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
-      onClick={focusIFrame}
       onMouseEnter={() => setHovering(true)}
       onMouseLeave={() => setHovering(false)}
+      onClick={focusIFrame}
     >
       {/* Game Title - Hidden in fullscreen */}
       {!isFullscreen && (
