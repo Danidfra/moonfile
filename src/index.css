@@ -161,3 +161,8 @@
 .ejs_loading_text, .ejs_screen_cover {
   display: none !important;
 }
+
+/* Emulator container scroll lock */
+.emulator-container {
+  overscroll-behavior: contain;
+}

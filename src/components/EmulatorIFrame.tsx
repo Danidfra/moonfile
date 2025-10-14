@@ -68,10 +68,22 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [hovering, setHovering] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [romUrl, setRomUrl] = useState('');
+
+  // Keys that should be blocked when gaming
+  const blockedKeys = new Set([
+    'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
+    ' ', 'Spacebar', 'PageUp', 'PageDown', 'Home', 'End'
+  ]);
+
+  // Focus the iframe when clicked
+  const focusIFrame = useCallback(() => {
+    iframeRef.current?.focus();
+  }, []);
 
   const postToEmbed = useCallback(
     (payload: unknown): boolean => {
@@ -176,6 +188,24 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     return () => clearTimeout(timeout);
   }, [iframeSrc, isReady, error]);
 
+  // Auto-focus iframe when it loads
+  useEffect(() => {
+    const iframe = iframeRef.current;
+    if (!iframe) return;
+
+    const handleLoad = () => {
+      console.log('[EmulatorIFrame] Iframe loaded, auto-focusing');
+      setTimeout(() => {
+        iframe.focus();
+      }, 100); // Small delay to ensure iframe is ready
+    };
+
+    iframe.addEventListener('load', handleLoad);
+    return () => {
+      iframe.removeEventListener('load', handleLoad);
+    };
+  }, []);
+
   // Expose getCanvasStream method via ref
   useImperativeHandle(ref, () => ({
     getCanvasStream: () => {
@@ -260,7 +290,15 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   // Handle fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
-      setIsFullscreen(!!document.fullscreenElement);
+      const isNowFullscreen = !!document.fullscreenElement;
+      setIsFullscreen(isNowFullscreen);
+
+      // Manage body overflow for fullscreen
+      if (isNowFullscreen) {
+        document.documentElement.style.overflow = 'hidden';
+      } else {
+        document.documentElement.style.overflow = '';
+      }
     };
 
     const events = ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange'];
@@ -272,8 +310,37 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
       events.forEach(event => {
         document.removeEventListener(event, handleFullscreenChange);
       });
+      // Restore overflow on cleanup
+      document.documentElement.style.overflow = '';
     };
   }, []);
+
+  // Handle keyboard scroll lock
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Check if we should block this key
+      const shouldBlock = blockedKeys.has(event.key) || blockedKeys.has(event.code);
+
+      if (!shouldBlock) return;
+
+      // Check if iframe is focused or mouse is hovering
+      const isIFrameFocused = document.activeElement === iframeRef.current;
+      const isHoveringGame = hovering;
+
+      if (isIFrameFocused || isHoveringGame) {
+        event.preventDefault();
+        event.stopPropagation();
+        console.log('[EmulatorIFrame] Blocked key:', event.key);
+      }
+    };
+
+    // Add event listener with capture and non-passive to ensure preventDefault works
+    window.addEventListener('keydown', handleKeyDown, { capture: true, passive: false });
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown, { capture: true, passive: false });
+    };
+  }, [hovering, blockedKeys]);
 
   // Control handlers
   const toggleFullscreen = useCallback(() => {
@@ -322,7 +389,10 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   return (
     <div
       ref={containerRef}
-      className={`flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
+      className={`emulator-container flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
+      onClick={focusIFrame}
+      onMouseEnter={() => setHovering(true)}
+      onMouseLeave={() => setHovering(false)}
     >
       {/* Game Title - Hidden in fullscreen */}
       {!isFullscreen && (
@@ -365,6 +435,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
                 ref={iframeRef}
                 src={iframeSrc}
                 className="w-full h-full border-0"
+                tabIndex={0}
                 sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
                 allow="fullscreen; gamepad; autoplay; clipboard-write"
                 title={`${title} Emulator`}
