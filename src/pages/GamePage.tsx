@@ -24,6 +24,23 @@ import GameControls from '@/components/GameControls';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
+/**
+ * Helper functions for flexible tag parsing
+ */
+function getTag(event: NostrEvent, name: string) {
+  return event.tags.find(t => t[0] === name);
+}
+
+function getTagValuesFlex(event: NostrEvent, name: string) {
+  const out = [];
+  for (const t of event.tags) {
+    if (t[0] === name) {
+      out.push(...t.slice(1).filter(Boolean));
+    }
+  }
+  return out;
+}
+
 type PlayerState = 'loading' | 'ready' | 'error';
 type SessionStatus = 'idle' | 'creating' | 'available' | 'full' | 'error';
 
@@ -123,37 +140,75 @@ export default function GamePage() {
         console.log('[GamePage] Game metadata parsed:', meta);
 
         // Extract platform from platforms tag
-        const platformsTag = event.tags.find(tag => tag[0] === 'platforms');
-        const detectedPlatform = platformsTag?.[1] || 'nes-rom';
+        const platforms = getTagValuesFlex(event, 'platforms');
+        const detectedPlatform = platforms[0] || 'nes-rom';
         setPlatform(detectedPlatform);
         console.log('[GamePage] Platform detected:', detectedPlatform);
 
         // Check encoding tag
-        const encodingTag = event.tags.find(tag => tag[0] === 'encoding');
+        const encodingTag = getTag(event, 'encoding');
         const encoding = encodingTag?.[1];
 
-        if (encoding && encoding !== 'base64') {
-          throw new Error(`Unsupported encoding: ${encoding}. Expected base64.`);
-        }
+        console.log('[GamePage] Encoding detected:', encoding || 'base64 (legacy)');
 
-        console.log('[GamePage] Decoding base64 ROM from event content');
-
-        // Decode ROM from event content
+        // Decode ROM based on encoding
         let romBytes: Uint8Array;
-        try {
-          romBytes = decodeBase64ToBytes(event.content);
-          console.log('[GamePage] ROM decoded, size:', romBytes.length, 'bytes');
-        } catch (decodeError) {
-          throw new Error(`Failed to decode base64 ROM: ${decodeError instanceof Error ? decodeError.message : 'Invalid base64 data'}`);
+
+        if (encoding === 'url') {
+          console.log('[GamePage] Loading ROM from URL (Blossom)');
+
+          // Get URL from url tag
+          const urlTag = getTag(event, 'url');
+          const romUrl = urlTag?.[1];
+
+          if (!romUrl) {
+            throw new Error('encoding=url specified but no url tag found');
+          }
+
+          console.log('[GamePage] Fetching ROM from URL:', romUrl);
+
+          try {
+            const response = await fetch(romUrl, {
+              method: 'GET',
+              mode: 'cors',
+              credentials: 'omit'
+            });
+
+            if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+            }
+
+            const arrayBuffer = await response.arrayBuffer();
+            romBytes = new Uint8Array(arrayBuffer);
+            console.log('[GamePage] ROM fetched from URL, size:', romBytes.length, 'bytes');
+
+          } catch (fetchError) {
+            throw new Error(`Failed to fetch ROM from URL: ${fetchError instanceof Error ? fetchError.message : 'Network error'}`);
+          }
+
+        } else if (encoding === 'base64' || !encoding) {
+          // Legacy base64 encoding
+          console.log('[GamePage] Decoding base64 ROM from event content');
+
+          try {
+            romBytes = decodeBase64ToBytes(event.content);
+            console.log('[GamePage] ROM decoded, size:', romBytes.length, 'bytes');
+          } catch (decodeError) {
+            throw new Error(`Failed to decode base64 ROM: ${decodeError instanceof Error ? decodeError.message : 'Invalid base64 data'}`);
+          }
+
+        } else {
+          throw new Error(`Unsupported encoding: ${encoding}. Expected 'base64' or 'url'.`);
         }
 
-        // For NES ROMs, perform additional validation and analysis
+        // Platform-specific ROM validation and processing
         if (detectedPlatform === 'nes-rom') {
+          console.log('[GamePage] Performing NES ROM validation and analysis');
+
           // Validate ROM format
           validateNESRom(romBytes);
 
           // Perform detailed ROM analysis
-          console.log('[GamePage] Performing detailed ROM analysis...');
           const romAnalysis = analyzeRom(romBytes);
           const recommendations = generateRecommendations(romAnalysis);
           const compatCheck = quickCompatibilityCheck(romBytes);
@@ -172,7 +227,7 @@ export default function GamePage() {
           const header = parseINesHeader(romBytes);
           const hash = await sha256(romBytes);
 
-          console.log('[GamePage] ROM validation passed');
+          console.log('[GamePage] NES ROM validation passed');
 
           const info: RomInfo = {
             size: romBytes.length,
@@ -186,7 +241,9 @@ export default function GamePage() {
 
           setRomInfo(info);
         } else {
-          // For non-NES ROMs, just set basic info
+          // For non-NES ROMs, skip NES validation and just compute hash
+          console.log('[GamePage] Processing non-NES ROM, skipping NES validation');
+
           const hash = await sha256(romBytes);
           const info: RomInfo = {
             size: romBytes.length,
@@ -478,28 +535,45 @@ function parseGameMetadata(event: NostrEvent): GameMetadata {
     return tag?.[1];
   };
 
-  const getTagValues = (tagName: string): string[] => {
-    return event.tags
-      .filter(t => t[0] === tagName)
-      .map(t => t[1])
-      .filter(Boolean);
-  };
+  // Get genres and modes from new taxonomy (mode/genre tags)
+  // Fall back to legacy t tags for backward compatibility
+  const newGenres = getTagValuesFlex(event, 'genre');
+  const newModes = getTagValuesFlex(event, 'mode');
 
+  const legacyTags = getTagValuesFlex(event, 't');
+  const knownModes = ['singleplayer', 'multiplayer', 'co-op', 'competitive'];
+
+  // If we have new taxonomy tags, use them
+  const genres = newGenres.length > 0 ? newGenres : legacyTags.filter(t => !knownModes.includes(t));
+  const modes = newModes.length > 0 ? newModes : legacyTags.filter(t => knownModes.includes(t));
+
+  // Get asset URLs, supporting both new ["image","type",url] and legacy ["image",url] formats
   const getAssetUrl = (assetType: string): string | undefined => {
-    const tag = event.tags.find(t => t[0] === 'image' && t[1] === assetType);
-    return tag?.[2];
+    // Try new format first: ["image", "cover", url]
+    const newFormatTag = event.tags.find(t => t[0] === 'image' && t[1] === assetType);
+    if (newFormatTag?.[2]) {
+      return newFormatTag[2];
+    }
+
+    // Fall back to legacy format: ["image", url] (treated as cover)
+    if (assetType === 'cover') {
+      const legacyTag = event.tags.find(t => t[0] === 'image' && t.length === 2);
+      return legacyTag?.[1];
+    }
+
+    return undefined;
   };
 
   return {
     id: getTagValue('d') || event.id,
     title: getTagValue('name') || 'Unknown Game',
     summary: getTagValue('summary'),
-    genres: getTagValues('t').filter(t => !['singleplayer', 'multiplayer', 'co-op', 'competitive'].includes(t)),
-    modes: getTagValues('t').filter(t => ['singleplayer', 'multiplayer', 'co-op', 'competitive'].includes(t)),
+    genres,
+    modes,
     status: getTagValue('status'),
     version: getTagValue('version'),
     credits: getTagValue('credits'),
-    platforms: getTagValues('platforms'),
+    platforms: getTagValuesFlex(event, 'platforms'),
     assets: {
       cover: getAssetUrl('cover'),
       icon: getAssetUrl('icon'),
