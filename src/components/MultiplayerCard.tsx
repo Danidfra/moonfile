@@ -123,7 +123,7 @@ export default function MultiplayerCard({
       // Notify parent component about the stream
       onStreamStart?.(stream);
 
-      // Start the multiplayer session
+      // Start the multiplayer session (no offer created immediately)
       await startSession(stream, maxPlayersRef.current);
 
       setInteractionMode('idle');

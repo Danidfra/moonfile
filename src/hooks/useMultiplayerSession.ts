@@ -15,7 +15,6 @@ export interface MultiplayerSession {
   status: SessionStatus;
   guests: string[];
   connected: string[];
-  signal?: string;
 }
 
 export interface ConnectedPlayer {
@@ -29,6 +28,34 @@ export interface PeerConnection {
   pubkey: string;
   connection: RTCPeerConnection;
   dataChannel?: RTCDataChannel;
+}
+
+// Type definitions for the new signaling protocol
+export type SignalEventType = 'session' | 'join' | 'offer' | 'answer' | 'candidate';
+
+export interface SignalPayload {
+  type: 'offer' | 'answer' | 'candidate';
+  sdp?: RTCSessionDescriptionInit;
+  candidate?: RTCIceCandidateInit;
+}
+
+export interface SessionEvent {
+  kind: 31997;
+  tags: string[][];
+  content: string;
+}
+
+export interface ParsedSessionEvent {
+  type: SignalEventType;
+  sessionId: string;
+  from?: string;
+  to?: string;
+  signal?: string;
+  host?: string;
+  players?: string;
+  status?: SessionStatus;
+  guests?: string[];
+  connected?: string[];
 }
 
 export function useMultiplayerSession(gameId: string) {
@@ -48,9 +75,11 @@ export function useMultiplayerSession(gameId: string) {
   // WebRTC connections - one per guest for the host
   const peerConnectionsRef = useRef<Map<string, PeerConnection>>(new Map());
   const hostVideoStreamRef = useRef<MediaStream | null>(null);
+  const processedEventIdsRef = useRef<Set<string>>(new Set());
 
   // Track if session subscription is already active to prevent multiple subscriptions
   const sessionSubscribedRef = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
 
   // Stable reference to current values for use in subscription
   const currentValuesRef = useRef({
@@ -71,38 +100,107 @@ export function useMultiplayerSession(gameId: string) {
   };
 
   /**
-   * Stable parse session data function using useRef
+   * Parse session event according to new protocol
    */
-  const parseSessionDataRef = useRef<(event: NostrEvent, currentSessionId: string, currentGameId: string) => MultiplayerSession | null>();
+  const parseSessionEvent = useCallback((event: NostrEvent): ParsedSessionEvent | null => {
+    const tags = event.tags || [];
 
-  parseSessionDataRef.current = (event: NostrEvent, currentSessionId: string, currentGameId: string): MultiplayerSession | null => {
-    const hostTag = event.tags.find(t => t[0] === 'host');
-    const playersTag = event.tags.find(t => t[0] === 'players');
-    const statusTag = event.tags.find(t => t[0] === 'status');
-    const signalTag = event.tags.find(t => t[0] === 'signal');
-    const guestTags = event.tags.filter(t => t[0] === 'guest');
-    const connectedTags = event.tags.filter(t => t[0] === 'connected');
+    const getTag = (name: string) => tags.find(t => t[0] === name)?.[1];
+    const getTagValues = (name: string) => tags.filter(t => t[0] === name).map(t => t[1]);
 
-    if (hostTag && playersTag && statusTag) {
-      return {
-        sessionId: currentSessionId,
-        gameId: currentGameId,
-        hostPubkey: hostTag[1],
-        maxPlayers: parseInt(playersTag[1]),
-        status: statusTag[1] as SessionStatus,
-        guests: guestTags.map(t => t[1]),
-        connected: connectedTags.map(t => t[1]),
-        signal: signalTag?.[1]
-      };
-    }
+    const type = getTag('type') as SignalEventType;
+    if (!type) return null;
 
-    return null;
-  };
+    const parsed: ParsedSessionEvent = {
+      type,
+      sessionId: getTag('d') || '',
+    };
+
+    // Optional fields
+    const from = getTag('from');
+    const to = getTag('to');
+    const signal = getTag('signal');
+    const host = getTag('host');
+    const players = getTag('players');
+    const status = getTag('status') as SessionStatus;
+    const guests = getTagValues('guest');
+    const connected = getTagValues('connected');
+
+    if (from) parsed.from = from;
+    if (to) parsed.to = to;
+    if (signal) parsed.signal = signal;
+    if (host) parsed.host = host;
+    if (players) parsed.players = players;
+    if (status) parsed.status = status;
+    if (guests.length > 0) parsed.guests = guests;
+    if (connected.length > 0) parsed.connected = connected;
+
+    return parsed;
+  }, []);
 
   /**
-   * Create WebRTC peer connection
+   * Publish session state update
    */
-  const createPeerConnection = useCallback((guestPubkey?: string): RTCPeerConnection => {
+  const publishSessionState = useCallback(async (updates: {
+    status?: SessionStatus;
+    guests?: string[];
+    connected?: string[];
+    maxPlayers?: number;
+  }) => {
+    if (!user || !sessionId) return;
+
+    const tags = [
+      ['d', sessionId],
+      ['type', 'session'],
+      ['host', user.pubkey],
+      ['players', (updates.maxPlayers || session?.maxPlayers || 2).toString()],
+    ];
+
+    if (updates.status) tags.push(['status', updates.status]);
+    if (updates.guests) updates.guests.forEach(g => tags.push(['guest', g]));
+    if (updates.connected) updates.connected.forEach(c => tags.push(['connected', c]));
+
+    publishEvent({
+      kind: 31997,
+      content: '',
+      tags,
+      relays: [config.relayUrl]
+    });
+  }, [user, sessionId, session, publishEvent, config.relayUrl]);
+
+  /**
+   * Publish signal message
+   */
+  const publishSignal = useCallback(async (
+    type: 'offer' | 'answer' | 'candidate' | 'join',
+    to: string,
+    payload?: any
+  ) => {
+    if (!user || !sessionId) return;
+
+    const tags = [
+      ['d', sessionId],
+      ['type', type],
+      ['from', user.pubkey],
+      ['to', to],
+    ];
+
+    if (payload) {
+      tags.push(['signal', btoa(JSON.stringify(payload))]);
+    }
+
+    publishEvent({
+      kind: 31997,
+      content: '',
+      tags,
+      relays: [config.relayUrl]
+    });
+  }, [user, sessionId, publishEvent, config.relayUrl]);
+
+  /**
+   * Create WebRTC peer connection for a specific guest
+   */
+  const createPeerConnection = useCallback((guestPubkey: string): RTCPeerConnection => {
     const peerConnection = new RTCPeerConnection({
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
@@ -117,9 +215,9 @@ export function useMultiplayerSession(gameId: string) {
       });
     }
 
-    // Create data channel for game input
-    if (isHost && guestPubkey) {
-      const dataChannel = peerConnection.createDataChannel('gameInput', {
+    // Create data channel for game input (host only)
+    if (isHost) {
+      const dataChannel = peerConnection.createDataChannel('inputs', {
         ordered: true
       });
 
@@ -128,173 +226,241 @@ export function useMultiplayerSession(gameId: string) {
       };
 
       dataChannel.onmessage = (event) => {
-        console.log('[MultiplayerSession] Received game input:', event.data);
-        // Handle game input from guest
+        try {
+          const input = JSON.parse(event.data);
+          if (input.type === 'input' && input.key !== undefined) {
+            // Forward to emulator iframe
+            const emulatorElement = document.querySelector('iframe') as HTMLIFrameElement;
+            if (emulatorElement?.contentWindow) {
+              emulatorElement.contentWindow.postMessage({
+                type: 'remote-input',
+                payload: { key: input.key, pressed: input.pressed }
+              }, window.location.origin);
+            }
+          }
+        } catch (err) {
+          console.error('[MultiplayerSession] Failed to parse data channel message:', err);
+        }
       };
 
-      // Store the peer connection
+      // Store the peer connection with data channel
       peerConnectionsRef.current.set(guestPubkey, {
         pubkey: guestPubkey,
         connection: peerConnection,
         dataChannel
       });
+    } else {
+      // Guest side - just store the connection
+      peerConnectionsRef.current.set(guestPubkey, {
+        pubkey: guestPubkey,
+        connection: peerConnection
+      });
     }
 
-    peerConnection.onconnectionstatechange = () => {
-      console.log('[MultiplayerSession] Connection state:', peerConnection.connectionState);
-
-      if (guestPubkey) {
-        setConnectedPlayers(prev =>
-          prev.map(player =>
-            player.pubkey === guestPubkey
-              ? { ...player, status: peerConnection.connectionState === 'connected' ? 'connected' : 'connecting' }
-              : player
-          )
-        );
+    // Handle ICE candidates
+    peerConnection.onicecandidate = (event) => {
+      if (event.candidate) {
+        publishSignal('candidate', guestPubkey, event.candidate);
       }
     };
 
+    // Handle connection state changes
+    peerConnection.onconnectionstatechange = () => {
+      console.log('[MultiplayerSession] Connection state for guest:', guestPubkey, peerConnection.connectionState);
+
+      setConnectedPlayers(prev =>
+        prev.map(player =>
+          player.pubkey === guestPubkey
+            ? { ...player, status: peerConnection.connectionState === 'connected' ? 'connected' : 'connecting' }
+            : player
+        )
+      );
+    };
+
+    // Guest side: handle incoming data channel
+    if (!isHost) {
+      peerConnection.ondatachannel = (event) => {
+        const dataChannel = event.channel;
+        dataChannel.onopen = () => {
+          console.log('[MultiplayerSession] Guest data channel opened');
+        };
+
+        // Store data channel reference
+        const existing = peerConnectionsRef.current.get(guestPubkey);
+        if (existing) {
+          existing.dataChannel = dataChannel;
+        }
+      };
+    }
+
     return peerConnection;
-  }, [isHost]);
+  }, [isHost, publishSignal]);
 
 
 
   /**
-   * Unified subscription for all session events - handles session updates and guest responses
-   * This is the ONLY subscription handler for kind 31997 events
+   * Unified subscription handler for all session events
    */
-  const startUnifiedSessionSubscription = useCallback((sessionIdToSubscribe: string, abortController: AbortController) => {
-    if (!nostr || !config) {
-      console.error('[MultiplayerSession] Cannot start session subscription - nostr or config not available');
+  const handleSessionEvent = useCallback(async (event: NostrEvent) => {
+    if (processedEventIdsRef.current.has(event.id)) {
+      return; // Skip already processed events
+    }
+    processedEventIdsRef.current.add(event.id);
+
+    const parsed = parseSessionEvent(event);
+    if (!parsed || !parsed.sessionId) {
       return;
     }
 
-    if (sessionSubscribedRef.current) {
-      console.warn('[MultiplayerSession] Subscription already active for session:', sessionIdToSubscribe);
+    console.log('[MultiplayerSession] Handling event:', { id: event.id, parsed });
+
+    const { user: currentUser, isHost: currentIsHost } = currentValuesRef.current;
+
+    // Handle session state updates
+    if (parsed.type === 'session' && parsed.host) {
+      const newSession: MultiplayerSession = {
+        sessionId: parsed.sessionId,
+        gameId,
+        hostPubkey: parsed.host,
+        maxPlayers: parseInt(parsed.players || '2'),
+        status: parsed.status || 'available',
+        guests: parsed.guests || [],
+        connected: parsed.connected || [],
+      };
+
+      setSession(newSession);
+      setStatus(newSession.status);
+      return;
+    }
+
+    // Host-side event handling
+    if (currentIsHost && currentUser) {
+      switch (parsed.type) {
+        case 'join':
+          if (parsed.from && parsed.to === currentUser.pubkey) {
+            console.log('[MultiplayerSession] Guest joined:', parsed.from);
+
+            // Create peer connection for this guest
+            const peerConnection = createPeerConnection(parsed.from);
+
+            // Add to connected players
+            setConnectedPlayers(prev => [
+              ...prev.filter(p => p.pubkey !== parsed.from),
+              { pubkey: parsed.from!, status: 'connecting' }
+            ]);
+
+            // Create and send offer
+            try {
+              const offer = await peerConnection.createOffer();
+              await peerConnection.setLocalDescription(offer);
+              publishSignal('offer', parsed.from, offer);
+            } catch (err) {
+              console.error('[MultiplayerSession] Failed to create offer:', err);
+            }
+          }
+          break;
+
+        case 'answer':
+          if (parsed.from && parsed.to === currentUser.pubkey && parsed.signal) {
+            console.log('[MultiplayerSession] Received answer from:', parsed.from);
+            const peer = peerConnectionsRef.current.get(parsed.from);
+            if (peer) {
+              try {
+                const answer = JSON.parse(atob(parsed.signal));
+                await peer.connection.setRemoteDescription(answer);
+              } catch (err) {
+                console.error('[MultiplayerSession] Failed to set remote answer:', err);
+              }
+            }
+          }
+          break;
+
+        case 'candidate':
+          if (parsed.from && parsed.to === currentUser.pubkey && parsed.signal) {
+            console.log('[MultiplayerSession] Received candidate from:', parsed.from);
+            const peer = peerConnectionsRef.current.get(parsed.from);
+            if (peer) {
+              try {
+                const candidate = JSON.parse(atob(parsed.signal));
+                await peer.connection.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (err) {
+                console.error('[MultiplayerSession] Failed to add ICE candidate:', err);
+              }
+            }
+          }
+          break;
+      }
+    }
+
+    // Guest-side event handling
+    if (!currentIsHost && currentUser) {
+      switch (parsed.type) {
+        case 'offer':
+          if (parsed.to === currentUser.pubkey && parsed.signal && parsed.from) {
+            console.log('[MultiplayerSession] Received offer from host');
+
+            // Create peer connection for host
+            const peerConnection = createPeerConnection(parsed.from);
+
+            try {
+              const offer = JSON.parse(atob(parsed.signal));
+              await peerConnection.setRemoteDescription(offer);
+
+              const answer = await peerConnection.createAnswer();
+              await peerConnection.setLocalDescription(answer);
+              publishSignal('answer', parsed.from, answer);
+            } catch (err) {
+              console.error('[MultiplayerSession] Failed to handle offer:', err);
+            }
+          }
+          break;
+
+        case 'candidate':
+          if (parsed.to === currentUser.pubkey && parsed.signal && parsed.from) {
+            console.log('[MultiplayerSession] Received candidate from host');
+            const peer = peerConnectionsRef.current.get(parsed.from);
+            if (peer) {
+              try {
+                const candidate = JSON.parse(atob(parsed.signal));
+                await peer.connection.addIceCandidate(new RTCIceCandidate(candidate));
+              } catch (err) {
+                console.error('[MultiplayerSession] Failed to add ICE candidate:', err);
+              }
+            }
+          }
+          break;
+      }
+    }
+  }, [parseSessionEvent, createPeerConnection, publishSignal]);
+
+  /**
+   * Start unified session subscription
+   */
+  const startUnifiedSessionSubscription = useCallback((sessionIdToSubscribe: string) => {
+    if (!nostr || !config || sessionSubscribedRef.current) {
       return;
     }
 
     console.log('[MultiplayerSession] Starting unified session subscription for:', sessionIdToSubscribe);
+    sessionSubscribedRef.current = true;
 
-    // Use only the main relay for session subscription
+    // Create new AbortController for this subscription
+    abortControllerRef.current = new AbortController();
+
     const mainRelay = nostr.relay(config.relayUrl);
 
-    // Async function to handle subscription
     const handleSubscription = async () => {
       try {
-        console.log('[MultiplayerSession] Starting unified session subscription for:', sessionIdToSubscribe);
-
-        // Use async-iterable pattern for single subscription
         for await (const ev of mainRelay.req([{
           kinds: [31997],
           '#d': [sessionIdToSubscribe],
-          since: Math.floor(Date.now() / 1000) - 60 // Events from last minute
-        }], { signal: abortController.signal })) {
+          since: Math.floor(Date.now() / 1000) - 60
+        }], { signal: abortControllerRef.current!.signal })) {
           if (ev[0] === 'EVENT') {
             const event = ev[2];
-            console.log('[MultiplayerSession] Received session event:', event);
-
-            // Parse session data using current values
-            const { gameId: currentGameId, isHost: currentIsHost, user: currentUser } = currentValuesRef.current;
-            const sessionData = parseSessionDataRef.current?.(event, sessionIdToSubscribe, currentGameId);
-
-            if (sessionData) {
-              setSession(sessionData);
-              setStatus(sessionData.status);
-
-              // Handle guest responses if we're the host
-              if (currentIsHost && currentUser && event.pubkey !== currentUser.pubkey && sessionData.signal) {
-                console.log('[MultiplayerSession] Detected potential guest response from:', event.pubkey);
-
-                try {
-                  const parsed = JSON.parse(atob(sessionData.signal));
-                  if (parsed.type === 'answer') {
-                    console.log('[MultiplayerSession] Processing guest answer from:', event.pubkey);
-
-                    // Handle guest answer - do not create new offer, just process the answer
-                    try {
-                      console.log('[MultiplayerSession] Processing guest answer from:', event.pubkey);
-
-                      // Create peer connection for this guest (without creating new offer)
-                      const peerConnection = createPeerConnection(event.pubkey);
-
-                      // Set the guest's answer as remote description (offer was already created in initial host event)
-                      await peerConnection.setRemoteDescription(parsed);
-
-                      // Add guest to connected players UI
-                      setConnectedPlayers(prev => [
-                        ...prev.filter(p => p.pubkey !== event.pubkey),
-                        { pubkey: event.pubkey, status: 'connecting' }
-                      ]);
-
-                      // Use the most current session data from sessionData (not from ref to avoid stale state)
-                      const mostCurrentSession = sessionData;
-                      if (mostCurrentSession) {
-                        // Deduplicate guest and connected lists using current session data
-                        const existingGuests = mostCurrentSession.guests || [];
-                        const existingConnected = mostCurrentSession.connected || [];
-
-                        // Only add guest if not already present (deduplication)
-                        const updatedGuests = existingGuests.includes(event.pubkey)
-                          ? existingGuests
-                          : [...existingGuests, event.pubkey];
-
-                        // Only add to connected if not already present (deduplication)
-                        const updatedConnected = existingConnected.includes(event.pubkey)
-                          ? existingConnected
-                          : [...existingConnected, event.pubkey];
-
-                        // Only proceed if there are actual changes (avoid duplicate publications)
-                        const hasGuestChanges = !existingGuests.includes(event.pubkey);
-                        const hasConnectedChanges = !existingConnected.includes(event.pubkey);
-
-                        if (hasGuestChanges || hasConnectedChanges) {
-                          const newStatus: SessionStatus = updatedConnected.length + 1 >= mostCurrentSession.maxPlayers ? 'full' : 'available';
-
-                          console.log('[MultiplayerSession] Publishing host session update with new guest:', event.pubkey);
-
-                          // Publish updated host session event retaining original signal
-                          publishEvent({
-                            kind: 31997,
-                            content: '',
-                            created_at: Math.floor(Date.now() / 1000),
-                            tags: [
-                              ['d', mostCurrentSession.sessionId],
-                              ['host', currentUser.pubkey],
-                              ['players', mostCurrentSession.maxPlayers.toString()],
-                              ['signal', mostCurrentSession.signal || ''], // Retain original signal (offer)
-                              ...updatedGuests.map(g => ['guest', g]),
-                              ...updatedConnected.map(g => ['connected', g]),
-                              ['status', newStatus]
-                            ]
-                          });
-
-                          // Update local session state immediately with most current data
-                          const updatedSession: MultiplayerSession = {
-                            ...mostCurrentSession,
-                            guests: updatedGuests,
-                            connected: updatedConnected,
-                            status: newStatus
-                          };
-
-                          setSession(updatedSession);
-                          setStatus(newStatus);
-                        } else {
-                          console.log('[MultiplayerSession] Guest already exists, skipping duplicate publication');
-                        }
-                      }
-
-                    } catch (guestErr) {
-                      console.error('[MultiplayerSession] Failed to handle guest answer:', guestErr);
-                    }
-                  }
-                } catch (err) {
-                  console.error('[MultiplayerSession] Failed to parse guest signal:', err);
-                }
-              }
-            }
+            handleSessionEvent(event);
           } else if (ev[0] === 'EOSE') {
-            console.log('[MultiplayerSession] Session subscription ended');
+            console.log('[MultiplayerSession] Session subscription EOSE');
           }
         }
       } catch (err) {
@@ -303,23 +469,21 @@ export function useMultiplayerSession(gameId: string) {
         } else {
           console.error('[MultiplayerSession] Session subscription error:', err);
         }
+        sessionSubscribedRef.current = false;
       }
     };
 
     handleSubscription();
-
-    console.log('[MultiplayerSession] Unified session subscription started successfully');
-  }, [nostr, config]);
+  }, [nostr, config, handleSessionEvent]);
 
 
   /**
-   * Generate unique session ID in the format: game:gameId:room:sessionId
+   * Generate unique session ID in the format: game:<gameDTag>:room:<randomId>
    */
   const generateSessionId = (gameId: string): string => {
-    const randomId = 'session_' + Math.random().toString(36).substring(2, 15) +
+    const randomId = 'room_' + Math.random().toString(36).substring(2, 15) +
       Math.random().toString(36).substring(2, 15);
     // gameId already includes "game:" prefix from the d tag
-    // Just append :room:sessionId to it
     return `${gameId}:room:${randomId}`;
   };
 
@@ -343,22 +507,12 @@ export function useMultiplayerSession(gameId: string) {
       // Store the video stream
       hostVideoStreamRef.current = videoStream;
 
-      // Create initial offer (will be updated for each guest)
-      const peerConnection = createPeerConnection();
-      const offer = await peerConnection.createOffer();
-      await peerConnection.setLocalDescription(offer);
-
-      // Publish initial session event
-      publishEvent({
-        kind: 31997,
-        content: '',
-        tags: [
-          ['d', newSessionId],
-          ['host', user.pubkey],
-          ['players', maxPlayers.toString()],
-          ['status', 'available'],
-          ['signal', btoa(JSON.stringify(offer))]
-        ]
+      // Publish initial session state (no offer yet)
+      await publishSessionState({
+        status: 'available',
+        maxPlayers,
+        guests: [],
+        connected: []
       });
 
       setStatus('available');
@@ -369,7 +523,7 @@ export function useMultiplayerSession(gameId: string) {
       setError(err instanceof Error ? err.message : 'Failed to start session');
       setStatus('error');
     }
-  }, [user, gameId, publishEvent, createPeerConnection]);
+  }, [user, gameId, publishSessionState]);
 
   /**
    * Join existing session as guest
@@ -383,8 +537,10 @@ export function useMultiplayerSession(gameId: string) {
     try {
       setStatus('creating');
       setError(null);
+      setSessionId(sessionId);
+      setIsHost(false);
 
-      // Fetch session event
+      // Fetch the latest session event to get host pubkey
       const events = await nostr.query([{
         kinds: [31997],
         '#d': [sessionId],
@@ -396,45 +552,15 @@ export function useMultiplayerSession(gameId: string) {
       }
 
       const sessionEvent = events[0] as NostrEvent;
-      const hostPubkey = sessionEvent.tags.find(t => t[0] === 'host')?.[1];
-      const signalTag = sessionEvent.tags.find(t => t[0] === 'signal');
+      const parsed = parseSessionEvent(sessionEvent);
 
-      if (!hostPubkey || !signalTag) {
-        throw new Error('Invalid session data');
+      if (!parsed || !parsed.host || parsed.status === 'full') {
+        throw new Error('Invalid session or session is full');
       }
 
-      // Parse the host's offer
-      const offer = JSON.parse(atob(signalTag[1]));
+      // Publish join intent
+      await publishSignal('join', parsed.host);
 
-      // Create peer connection and answer
-      const peerConnection = createPeerConnection();
-      await peerConnection.setRemoteDescription(offer);
-
-      // Set up ontrack to receive host's video stream
-      peerConnection.ontrack = (event) => {
-        console.log('[MultiplayerSession] Received remote stream');
-        const [_remoteStream] = event.streams;
-        // This will be handled by the component that calls this hook
-        // The component should provide a callback or ref
-      };
-
-      const answer = await peerConnection.createAnswer();
-      await peerConnection.setLocalDescription(answer);
-
-      // Publish answer to join the session
-      publishEvent({
-        kind: 31997,
-        content: '',
-        tags: [
-          ['d', sessionId],
-          ['host', hostPubkey],
-          ['guest', user.pubkey],
-          ['signal', btoa(JSON.stringify(answer))]
-        ]
-      });
-
-      setSessionId(sessionId);
-      setIsHost(false);
       setStatus('available');
       console.log('[MultiplayerSession] Joined session:', sessionId);
 
@@ -443,27 +569,25 @@ export function useMultiplayerSession(gameId: string) {
       setError(err instanceof Error ? err.message : 'Failed to join session');
       setStatus('error');
     }
-  }, [user, gameId, nostr, publishEvent, createPeerConnection]);
+  }, [user, nostr, publishSignal, parseSessionEvent]);
 
   /**
-   * Subscribe to session updates - ensures only one subscription per sessionId
+   * Subscribe to session updates
    */
   useEffect(() => {
     if (!sessionId || !nostr || sessionSubscribedRef.current) return;
 
     console.log('[MultiplayerSession] Initializing session subscription for:', sessionId);
-
-    // Create AbortController for subscription cancellation
-    const controller = new AbortController();
-
-    // Start unified session subscription (handles all session events and guest responses)
-    startUnifiedSessionSubscription(sessionId, controller);
-    sessionSubscribedRef.current = true;
+    startUnifiedSessionSubscription(sessionId);
 
     return () => {
-      console.log('[MultiplayerSession] Cleaning up unified session subscription for:', sessionId);
-      controller.abort();
+      console.log('[MultiplayerSession] Cleaning up session subscription for:', sessionId);
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       sessionSubscribedRef.current = false;
+      processedEventIdsRef.current.clear();
     };
   }, [sessionId, startUnifiedSessionSubscription]);
 
@@ -471,6 +595,12 @@ export function useMultiplayerSession(gameId: string) {
    * Leave session
    */
   const leaveSession = useCallback(() => {
+    // Abort any ongoing subscription
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort();
+      abortControllerRef.current = null;
+    }
+
     // Close all peer connections
     peerConnectionsRef.current.forEach(({ connection }) => {
       connection.close();
@@ -485,9 +615,8 @@ export function useMultiplayerSession(gameId: string) {
     setConnectedPlayers([]);
     setError(null);
     hostVideoStreamRef.current = null;
-
-    // Reset subscription tracking
     sessionSubscribedRef.current = false;
+    processedEventIdsRef.current.clear();
   }, []);
 
   /**
@@ -501,7 +630,7 @@ export function useMultiplayerSession(gameId: string) {
   /**
    * Send game input via data channel (guest only)
    */
-  const sendGameInput = useCallback((inputData: any) => {
+  const sendGameInput = useCallback((inputData: { key: string; pressed: boolean }) => {
     if (isHost) return; // Only guests send input
 
     // Find the host connection (guests only have one connection)
@@ -512,7 +641,7 @@ export function useMultiplayerSession(gameId: string) {
         dataChannel.send(JSON.stringify({
           type: 'input',
           timestamp: Date.now(),
-          data: inputData
+          ...inputData
         }));
       }
     }

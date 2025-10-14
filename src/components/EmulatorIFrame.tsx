@@ -14,6 +14,7 @@ interface EmulatorIFrameProps {
 
 export interface EmulatorJSRef {
   getCanvasStream: () => MediaStream | null;
+  postRemoteInput?: (input: { key: string; pressed: boolean }) => void;
 }
 
 /**
@@ -230,7 +231,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     };
   }, []);
 
-  // Expose getCanvasStream method via ref
+  // Expose getCanvasStream and postRemoteInput methods via ref
   useImperativeHandle(ref, () => ({
     getCanvasStream: () => {
       console.log('[EmulatorIFrame] getCanvasStream called');
@@ -257,6 +258,14 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
         console.error('[EmulatorIFrame] Failed to capture canvas stream:', error);
         return null;
       }
+    },
+
+    postRemoteInput: (input: { key: string; pressed: boolean }) => {
+      console.log('[EmulatorIFrame] postRemoteInput called:', input);
+      return postToEmbed({
+        type: 'remote-input',
+        payload: input
+      });
     }
   }));
 

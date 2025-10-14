@@ -32,10 +32,10 @@ function getTag(event: NostrEvent, name: string) {
 }
 
 function getTagValuesFlex(event: NostrEvent, name: string) {
-  const out = [];
+  const out: string[] = [];
   for (const t of event.tags) {
     if (t[0] === name) {
-      out.push(...t.slice(1).filter(Boolean));
+      out.push(...t.slice(1).filter((value): value is string => Boolean(value)));
     }
   }
   return out;
