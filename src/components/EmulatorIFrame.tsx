@@ -462,7 +462,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
       {/* Game Title - Hidden in fullscreen */}
       {!isFullscreen && (
         <Card className="w-full max-w-4xl">
-          <CardHeader className="pb-2">
+          <CardHeader>
             <CardTitle className="text-center">{title}</CardTitle>
           </CardHeader>
         </Card>
@@ -535,8 +535,8 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
       {!isFullscreen && (
         <>
           <Card className="w-full max-w-4xl">
-            <CardContent className="p-4">
-              <div className="flex items-center justify-center gap-4">
+            <CardContent className="p-3 sm:p-4">
+              <div className="flex flex-wrap items-stretch justify-center gap-2 sm:gap-3">
                 <Button
                   onClick={handlePlayPause}
                   variant={isPaused ? "default" : "secondary"}
