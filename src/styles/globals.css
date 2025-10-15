@@ -14,3 +14,16 @@
 .aspect-ratio {
   transition: aspect-ratio 0.2s ease-in-out;
 }
+
+/* Emulator canvas container - scroll containment */
+.emulator-canvas-wrap {
+  overscroll-behavior: contain; /* stops scroll chaining without killing the whole page */
+}
+
+.emulator-canvas-wrap iframe {
+  touch-action: pan-y; /* allow vertical scrolling by default on mobile */
+}
+
+.emulator-canvas-wrap.locked iframe {
+  touch-action: none; /* block touch when control lock is on */
+}

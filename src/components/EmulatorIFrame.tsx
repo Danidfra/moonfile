@@ -96,18 +96,19 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const [isMuted, setIsMuted] = useState(true);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [hovering, setHovering] = useState(false);
+  const [controlLock, setControlLock] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [romUrl, setRomUrl] = useState('');
 
-  // Check if iframe is focused
+  // Check if iframe is focused (desktop only for keyboard)
   const iframeIsFocused = useCallback(() => {
     return document.activeElement === iframeRef.current;
   }, []);
 
-  // Derived boolean for interaction state
-  const isInteracting = isFullscreen || hovering || iframeIsFocused();
+  // Derived boolean for interaction state - only fullscreen affects global scroll
+  const isInteracting = isFullscreen;
 
   // Utility to toggle global scroll lock
   const toggleScrollLock = useCallback((lock: boolean) => {
@@ -123,13 +124,13 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     });
   }, []);
 
-  // Apply/remove class on interaction change
+  // Apply/remove class on fullscreen change only
   useEffect(() => {
-    toggleScrollLock(isInteracting);
+    toggleScrollLock(isFullscreen);
     return () => {
       toggleScrollLock(false);
     };
-  }, [isInteracting, toggleScrollLock]);
+  }, [isFullscreen, toggleScrollLock]);
 
   // Focus the iframe when clicked
   const focusIFrame = useCallback(() => {
@@ -365,9 +366,9 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     };
   }, []);
 
-  // Block keyboard + wheel + touch while interacting
+  // Block keyboard + wheel + touch when in fullscreen or controlLock is active
   useEffect(() => {
-    if (!isInteracting) return;
+    if (!isFullscreen && !controlLock) return;
 
     const blockedKeys = new Set([
       'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
@@ -395,17 +396,20 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
       console.log('[EmulatorIFrame] Blocked touchmove event');
     };
 
-    // Add event listeners with capture and non-passive to ensure preventDefault works
-    window.addEventListener('keydown', onKeyDown, { capture: true, passive: false });
-    window.addEventListener('wheel', onWheel, { capture: true, passive: false });
-    window.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
+    // Add event listeners to container with capture and non-passive
+    const container = containerRef.current;
+    if (!container) return;
+
+    container.addEventListener('keydown', onKeyDown, { capture: true, passive: false });
+    container.addEventListener('wheel', onWheel, { capture: true, passive: false });
+    container.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
 
     return () => {
-      window.removeEventListener('keydown', onKeyDown, { capture: true } as any);
-      window.removeEventListener('wheel', onWheel, { capture: true } as any);
-      window.removeEventListener('touchmove', onTouchMove, { capture: true } as any);
+      container.removeEventListener('keydown', onKeyDown, { capture: true } as any);
+      container.removeEventListener('wheel', onWheel, { capture: true } as any);
+      container.removeEventListener('touchmove', onTouchMove, { capture: true } as any);
     };
-  }, [isInteracting]);
+  }, [isFullscreen, controlLock]);
 
   // Control handlers
   const toggleFullscreen = useCallback(() => {
@@ -510,9 +514,9 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
               )}
             </div>
           ) : (
-            // Normal mode - aspect ratio based container
+            // Normal mode - aspect ratio based container with scroll containment
             <div
-              className="relative bg-black rounded-lg overflow-hidden"
+              className={`relative bg-black rounded-lg overflow-hidden emulator-canvas-wrap ${controlLock ? 'locked' : ''}`}
               style={{ aspectRatio: getEmulatorAspect(platform) }}
             >
               {iframeSrc && (
@@ -526,6 +530,21 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
                   title={`${title} Emulator`}
                 />
               )}
+            </div>
+          )}
+
+          {/* Mobile Control Lock Toggle - Only visible on mobile */}
+          {!isFullscreen && (
+            <div className="lg:hidden absolute top-2 right-2 z-10">
+              <Button
+                size="sm"
+                variant={controlLock ? "default" : "secondary"}
+                onClick={() => setControlLock(!controlLock)}
+                className="bg-gray-800/80 backdrop-blur-sm border border-gray-700"
+                title={controlLock ? "Unlock page scrolling" : "Lock page scrolling"}
+              >
+                {controlLock ? "🔓" : "🔓"}
+              </Button>
             </div>
           )}
         </CardContent>
