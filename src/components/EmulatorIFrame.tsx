@@ -510,13 +510,16 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
                   sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
                   allow="fullscreen; gamepad; autoplay; clipboard-write"
                   title={`${title} Emulator`}
+                  style={{ pointerEvents: (isFullscreen || controlLock) ? 'auto' : 'none' }}
                 />
               )}
             </div>
           ) : (
             // Normal mode - aspect ratio based container with scroll containment
             <div
-              className={`relative bg-black rounded-lg overflow-hidden emulator-canvas-wrap ${controlLock ? 'locked' : ''}`}
+               className={`relative bg-black rounded-lg overflow-hidden emulator-canvas-wrap
+              ${controlLock ? 'touch-none' : 'touch-pan-y'}
+              overscroll-contain`}
               style={{ aspectRatio: getEmulatorAspect(platform) }}
             >
               {iframeSrc && (
@@ -528,7 +531,24 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
                   sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
                   allow="fullscreen; gamepad; autoplay; clipboard-write"
                   title={`${title} Emulator`}
+                  style={{ pointerEvents: (isFullscreen || controlLock) ? 'auto' : 'none' }}
                 />
+              )}
+
+              {!isFullscreen && !controlLock && (
+                <>
+                  <button
+                    type="button"
+                    className="absolute inset-0 z-10 cursor-default bg-transparent"
+                    onClick={() => setControlLock(true)}
+                    aria-label="Enable controls"
+                    style={{ WebkitTapHighlightColor: 'transparent' }}
+                  />
+
+                  <div className="absolute left-2 top-2 z-20 rounded bg-black/60 px-2 py-1 text-xs text-white">
+                    Tap to play • Scroll unlocked
+                  </div>
+                </>
               )}
             </div>
           )}
@@ -543,7 +563,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
                 className="bg-gray-800/80 backdrop-blur-sm border border-gray-700"
                 title={controlLock ? "Unlock page scrolling" : "Lock page scrolling"}
               >
-                {controlLock ? "🔓" : "🔓"}
+                {controlLock ? "🔒" : "🔓"}
               </Button>
             </div>
           )}

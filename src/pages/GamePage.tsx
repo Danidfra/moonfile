@@ -339,7 +339,7 @@ export default function GamePage() {
             <div className="mt-4">
               <Button onClick={handleBack} variant="outline" size="sm">
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Games
+                Back
               </Button>
             </div>
           </CardContent>
@@ -363,7 +363,7 @@ export default function GamePage() {
               </Button>
               <Button onClick={handleBack} variant="outline" className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Games
+                Back
               </Button>
             </div>
           </CardContent>
@@ -381,7 +381,7 @@ export default function GamePage() {
             <div className="mt-4">
               <Button onClick={handleBack} variant="outline">
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Games
+                Back
               </Button>
             </div>
           </CardContent>
@@ -409,7 +409,7 @@ export default function GamePage() {
             <div className="flex items-center gap-4">
               <Button variant="ghost" size="sm" onClick={handleBack} className="text-gray-300 hover:text-white">
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Games
+                Back
               </Button>
 
               <div className="min-w-0 flex-1">

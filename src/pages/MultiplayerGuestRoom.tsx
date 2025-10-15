@@ -497,7 +497,7 @@ export default function MultiplayerGuestRoom() {
             <div className="space-y-2">
               <Button onClick={handleLeave} variant="outline" className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                Back to Games
+                Back
               </Button>
             </div>
           </CardContent>
