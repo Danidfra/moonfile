@@ -53,6 +53,32 @@ function getEmulatorCore(platform: string): string {
   return mapping[platform] ?? (knownCores.has(platform) ? platform : 'nes');
 }
 
+/**
+ * Map platform to aspect ratio
+ */
+function getEmulatorAspect(platform: string): string {
+  const aspectByCore: Record<string, string> = {
+    // 4:3 aspect ratio (most consoles)
+    nes: '4 / 3',
+    snes: '4 / 3',
+    n64: '4 / 3',
+    segaMD: '4 / 3', // Genesis
+    segaMS: '4 / 3', // Master System
+    psx: '4 / 3', // PlayStation
+
+    // 10:9 aspect ratio (handhelds)
+    gb: '10 / 9', // Game Boy
+    gbc: '10 / 9', // Game Boy Color
+    segaGG: '10 / 9', // Game Gear
+
+    // 3:2 aspect ratio (GBA)
+    gba: '3 / 2',
+  };
+
+  const core = getEmulatorCore(platform);
+  return aspectByCore[core] ?? '4 / 3'; // Fallback to 4:3
+}
+
 const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   romData,
   platform,
@@ -465,22 +491,43 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
           )}
 
           {/* Iframe Container */}
-          <div
-            className={`relative bg-black rounded-lg overflow-hidden ${isFullscreen ? 'fullscreen-canvas' : ''}`}
-            style={{ height: isFullscreen ? '100vh' : '600px' }}
-          >
-            {iframeSrc && (
-              <iframe
-                ref={iframeRef}
-                src={iframeSrc}
-                className="w-full h-full border-0"
-                tabIndex={0}
-                sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
-                allow="fullscreen; gamepad; autoplay; clipboard-write"
-                title={`${title} Emulator`}
-              />
-            )}
-          </div>
+          {isFullscreen ? (
+            // Fullscreen mode - maintain aspect ratio with letterboxing
+            <div
+              className="relative bg-black rounded-lg overflow-hidden fullscreen-canvas"
+              style={{ minHeight: '100dvh', aspectRatio: getEmulatorAspect(platform) }}
+            >
+              {iframeSrc && (
+                <iframe
+                  ref={iframeRef}
+                  src={iframeSrc}
+                  className="absolute inset-0 w-full h-full border-0"
+                  tabIndex={0}
+                  sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
+                  allow="fullscreen; gamepad; autoplay; clipboard-write"
+                  title={`${title} Emulator`}
+                />
+              )}
+            </div>
+          ) : (
+            // Normal mode - aspect ratio based container
+            <div
+              className="relative bg-black rounded-lg overflow-hidden"
+              style={{ aspectRatio: getEmulatorAspect(platform) }}
+            >
+              {iframeSrc && (
+                <iframe
+                  ref={iframeRef}
+                  src={iframeSrc}
+                  className="absolute inset-0 w-full h-full border-0"
+                  tabIndex={0}
+                  sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
+                  allow="fullscreen; gamepad; autoplay; clipboard-write"
+                  title={`${title} Emulator`}
+                />
+              )}
+            </div>
+          )}
         </CardContent>
       </Card>
 

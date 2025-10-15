@@ -43,6 +43,7 @@ interface MultiplayerCardProps {
   onStreamStart?: (stream: MediaStream) => void;
   getGameStream?: () => MediaStream | null;
   maxPlayers?: number;
+  defaultExpanded?: boolean;
 }
 
 type SessionStatus = 'idle' | 'creating' | 'available' | 'full' | 'error';
@@ -54,7 +55,8 @@ export default function MultiplayerCard({
   onSessionStatusChange,
   onStreamStart,
   getGameStream,
-  maxPlayers = 2
+  maxPlayers = 2,
+  defaultExpanded
 }: MultiplayerCardProps) {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -82,7 +84,7 @@ export default function MultiplayerCard({
 
   const [interactionMode, setInteractionMode] = useState<InteractionMode>('idle');
   const [joinSessionId, setJoinSessionId] = useState<string>('');
-  const [isExpanded, setIsExpanded] = useState(true);
+  const [isExpanded, setIsExpanded] = useState(defaultExpanded ?? true);
 
   // Set max players from props
   const maxPlayersRef = useRef(maxPlayers);

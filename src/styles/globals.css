@@ -1,0 +1,16 @@
+@supports (height: 100svh) {
+  .min-h-dvh {
+    min-height: 100svh;
+  }
+}
+
+@supports (height: 100dvh) {
+  .min-h-dvh {
+    min-height: 100dvh;
+  }
+}
+
+/* Ensure smooth aspect ratio transitions */
+.aspect-ratio {
+  transition: aspect-ratio 0.2s ease-in-out;
+}

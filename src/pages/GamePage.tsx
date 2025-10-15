@@ -401,9 +401,9 @@ export default function GamePage() {
   const prettyPlatform = platform.endsWith('-rom') ? platform.replace('-rom', '').toUpperCase() : platform.toUpperCase();
 
   return (
-    <div className="min-h-screen bg-black text-white">
-      {/* Header */}
-      <div className="border-b border-gray-800 bg-gray-900/50 backdrop-blur-sm">
+    <div className="min-h-screen bg-black text-white pb-[calc(env(safe-area-inset-bottom)+24px)]">
+      {/* Sticky Header */}
+      <div className="sticky top-0 z-40 border-b border-gray-800 bg-gray-900/50 backdrop-blur supports-[backdrop-filter]:bg-gray-900/40">
         <div className="container mx-auto px-4 py-4">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-4">
@@ -412,11 +412,11 @@ export default function GamePage() {
                 Back to Games
               </Button>
 
-              <div>
-                <h1 className="text-xl font-bold text-white">{gameMeta.title}</h1>
-                <div className="flex items-center gap-2 text-sm text-gray-400">
+              <div className="min-w-0 flex-1">
+                <h1 className="text-lg md:text-xl font-bold text-white truncate">{gameMeta.title}</h1>
+                <div className="flex items-center gap-1 md:gap-2 text-xs md:text-sm text-gray-400 flex-wrap">
                   {platform === 'nes-rom' && romInfo?.header.mapper !== undefined && (
-                    <span className="bg-gray-800 px-2 py-1 rounded text-xs">
+                    <span className="bg-gray-800 px-2 py-1 rounded text-xs hidden sm:inline">
                       Mapper {romInfo.header.mapper}
                     </span>
                   )}
@@ -429,12 +429,12 @@ export default function GamePage() {
                     </span>
                   )}
                   {gameMeta.version && (
-                    <span className="bg-blue-800 px-2 py-1 rounded text-xs">
+                    <span className="bg-blue-800 px-2 py-1 rounded text-xs hidden sm:inline">
                       v{gameMeta.version}
                     </span>
                   )}
                   {gameMeta.status && (
-                    <span className="bg-purple-800 px-2 py-1 rounded text-xs">
+                    <span className="bg-purple-800 px-2 py-1 rounded text-xs hidden sm:inline">
                       {gameMeta.status}
                     </span>
                   )}
@@ -445,9 +445,10 @@ export default function GamePage() {
         </div>
       </div>
 
-      <div className="container mx-auto px-4 py-8">
-        <div className="grid lg:grid-cols-4 gap-8">
-          {/* Main game area */}
+      <div className="container mx-auto px-4 py-6">
+        {/* Mobile-first layout: stacked on small screens, grid on large screens */}
+        <div className="grid gap-6 lg:grid-cols-4 lg:gap-8">
+          {/* Main game area - full width on mobile, 3/4 on desktop */}
           <div className="lg:col-span-3">
             <EmulatorIFrame
               key={`${id}-${romInfo?.sha256?.slice(0,8) ?? 'nohash'}-${reloadToken}`}
@@ -461,7 +462,7 @@ export default function GamePage() {
             />
           </div>
 
-          {/* Side panel */}
+          {/* Side panel - full width on mobile, 1/4 on desktop */}
           <div className="lg:col-span-1">
             <div className="space-y-6">
               {/* Conditional rendering: MultiplayerCard for multiplayer games, GameInteractionCard for single-player */}
@@ -472,6 +473,7 @@ export default function GamePage() {
                   onStreamStart={handleStreamStart}
                   getGameStream={getGameCanvas}
                   maxPlayers={maxPlayers}
+                  defaultExpanded={false} // Collapsed by default on mobile
                 />
               ) : (
                 <GameInteractionCard challengeStarted={challengeStarted} />
@@ -548,7 +550,7 @@ export default function GamePage() {
                             <>
                               <div>PRG Banks: {romInfo.header.prgBanks}</div>
                               <div>CHR Banks: {romInfo.header.chrBanks}</div>
-                              <div>Mapper: {romInfo.header.mapper}</div>
+                              <div className="hidden sm:block">Mapper: {romInfo.header.mapper}</div>
                             </>
                           ) : (
                             <div>Platform: {prettyPlatform}</div>
