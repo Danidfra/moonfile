@@ -28,6 +28,23 @@ import type { SessionStatus } from '@/hooks/useMultiplayerSession';
 const KIND_SESSION = 31997;  // replaceable snapshot
 const KIND_SIGNAL = 21997;   // ephemeral signaling
 
+/**
+ * Session ID helpers to ensure consistent format: "game:gameId:room:roomId"
+ */
+const ensureGamePrefix = (id: string): string => {
+  return id.startsWith('game:') ? id : `game:${id}`;
+};
+
+const stripGamePrefix = (id: string): string => {
+  return id.startsWith('game:') ? id.slice(5) : id;
+};
+
+const parseSessionId = (sessionId: string): { gameId: string; roomId: string } => {
+  const [left, roomId = ''] = sessionId.split(':room:');
+  const gameId = ensureGamePrefix(stripGamePrefix(left));
+  return { gameId, roomId };
+};
+
 type ConnectionState = 'connecting' | 'connected' | 'receiving' | 'error' | 'disconnected';
 
 interface GameMetadata {
@@ -211,49 +228,50 @@ export default function MultiplayerGuestRoom() {
         setError(null);
 
         // Parse session ID to extract game ID
-        // Expected format: game:<gameId>:room:<actualSessionId>
-        if (!sessionId.startsWith('game:') || !sessionId.includes(':room:')) {
-          throw new Error('Invalid session ID format. Expected: game:gameId:room:sessionId');
-        }
+        const { gameId } = parseSessionId(sessionId);
+        setGameId(gameId);
 
-        // Find the ':room:' delimiter and extract gameId
-        const roomIndex = sessionId.indexOf(':room:');
-        const extractedGameId = sessionId.substring(5, roomIndex); // Remove "game:" prefix
-        setGameId(extractedGameId);
+        // 1. Fetch game metadata in parallel (best-effort, non-blocking)
+        const fetchGameMetadata = async () => {
+          try {
+            const mainRelay = nostr.relay(config.relayUrl);
+            const gameEvents = await mainRelay.query([{
+              kinds: [31996],
+              '#d': [gameId],
+              limit: 1
+            }], { signal: AbortSignal.timeout(10000) });
 
-        // 1. Fetch the game event to get game info from main relay only
-        const mainRelay = nostr.relay(config.relayUrl);
-        const gameEvents = await mainRelay.query([{
-          kinds: [31996],
-          '#d': [`game:${extractedGameId}`],
-          limit: 1
-        }], { signal: AbortSignal.timeout(10000) });
+            if (gameEvents.length > 0) {
+              const gameEvent = gameEvents[0] as NostrEvent;
 
-        if (gameEvents.length === 0) {
-          throw new Error(`Game "${extractedGameId}" not found`);
-        }
+              // Parse game metadata
+              const getTagValue = (tagName: string): string | undefined => {
+                const tag = gameEvent.tags.find(t => t[0] === tagName);
+                return tag?.[1];
+              };
 
-        const gameEvent = gameEvents[0] as NostrEvent;
-
-        // Parse game metadata
-        const getTagValue = (tagName: string): string | undefined => {
-          const tag = gameEvent.tags.find(t => t[0] === tagName);
-          return tag?.[1];
+              setGameMeta({
+                id: gameId,
+                title: getTagValue('name') || 'Unknown Game',
+                summary: getTagValue('summary'),
+                genres: gameEvent.tags.filter(t => t[0] === 't').map(t => t[1]).filter(Boolean),
+                modes: gameEvent.tags.filter(t => t[0] === 'mode').map(t => t[1]).filter(Boolean),
+                status: getTagValue('status'),
+                platforms: gameEvent.tags.filter(t => t[0] === 'platform').map(t => t[1]).filter(Boolean),
+                assets: {
+                  cover: gameEvent.tags.find(t => t[0] === 'image' && t[1] === 'cover')?.[2],
+                  screenshots: []
+                }
+              });
+            }
+          } catch (err) {
+            console.warn('[GuestRoom] Failed to fetch game metadata:', err);
+            // Game metadata fetch failure doesn't block join
+          }
         };
 
-        setGameMeta({
-          id: extractedGameId,
-          title: getTagValue('name') || 'Unknown Game',
-          summary: getTagValue('summary'),
-          genres: gameEvent.tags.filter(t => t[0] === 't').map(t => t[1]).filter(Boolean),
-          modes: gameEvent.tags.filter(t => t[0] === 'mode').map(t => t[1]).filter(Boolean),
-          status: getTagValue('status'),
-          platforms: gameEvent.tags.filter(t => t[0] === 'platform').map(t => t[1]).filter(Boolean),
-          assets: {
-            cover: gameEvent.tags.find(t => t[0] === 'image' && t[1] === 'cover')?.[2],
-            screenshots: []
-          }
-        });
+        // Start game metadata fetch in parallel (non-blocking)
+        fetchGameMetadata();
 
         // 2. Fetch the latest session event from main relay only
         const sessionEvents = await mainRelay.query([{
@@ -267,6 +285,63 @@ export default function MultiplayerGuestRoom() {
         }
 
         const sessionEvent = sessionEvents[0] as NostrEvent;
+
+        // Parse session data
+        const getTag = (name: string) => sessionEvent.tags.find(t => t[0] === name)?.[1];
+        const getTagValues = (name: string) => sessionEvent.tags.filter(t => t[0] === name).map(t => t[1]);
+
+        const typeTag = getTag('type');
+        const hostTag = getTag('host');
+        const statusTag = getTag('status');
+        const playersTag = getTag('players');
+        const connectedTags = getTagValues('connected');
+
+        if (typeTag !== 'session' || !hostTag) {
+          throw new Error('Invalid session data');
+        }
+
+        if (statusTag === 'full') {
+          throw new Error('Session is full');
+        }
+
+        setHostPubkey(hostTag);
+        setConnectedPlayers(connectedTags.length + 1); // +1 for host
+
+        // Start signaling subscription BEFORE sending join
+        if (user) {
+          const signalingController = new AbortController();
+          const mainRelay = nostr.relay(config.relayUrl);
+
+          // Subscribe to signaling events addressed to this guest
+          const handleSignalingSubscription = async () => {
+            try {
+              for await (const ev of mainRelay.req([{
+                kinds: [KIND_SIGNAL],
+                '#d': [sessionId],
+                '#p': [user.pubkey],
+                since: Math.floor(Date.now() / 1000) - 2
+              }], { signal: signalingController.signal })) {
+                if (ev[0] === 'EVENT') {
+                  const event = ev[2];
+                  handleSignalingEvent(event);
+                } else if (ev[0] === 'EOSE') {
+                  console.log('[GuestRoom] Signaling subscription EOSE');
+                }
+              }
+            } catch (err) {
+              if (err.name === 'AbortError') {
+                console.log('[GuestRoom] Signaling subscription aborted');
+              } else {
+                console.error('[GuestRoom] Signaling subscription error:', err);
+              }
+            }
+          };
+
+          handleSignalingSubscription();
+
+          // Store controller for cleanup
+          signalingAbortControllerRef.current = signalingController;
+        }
 
         // Parse session data
         const getTag = (name: string) => sessionEvent.tags.find(t => t[0] === name)?.[1];

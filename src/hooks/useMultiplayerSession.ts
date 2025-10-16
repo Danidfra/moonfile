@@ -34,6 +34,35 @@ export interface PeerConnection {
 const KIND_SESSION = 31997;  // replaceable snapshot
 const KIND_SIGNAL = 21997;   // ephemeral signaling
 
+/**
+ * Session ID helpers to ensure consistent format: "game:gameId:room:roomId"
+ */
+const ensureGamePrefix = (id: string): string => {
+  return id.startsWith('game:') ? id : `game:${id}`;
+};
+
+const stripGamePrefix = (id: string): string => {
+  return id.startsWith('game:') ? id.slice(5) : id;
+};
+
+const buildSessionId = (gameId: string, roomId: string): string => {
+  const base = ensureGamePrefix(gameId);
+  return `${base}:room:${roomId}`;
+};
+
+const parseSessionId = (sessionId: string): { gameId: string; roomId: string } => {
+  const [left, roomId = ''] = sessionId.split(':room:');
+  const gameId = ensureGamePrefix(stripGamePrefix(left));
+  return { gameId, roomId };
+};
+
+const generateSessionId = (gameId: string): string => {
+  const room = Math.random().toString(36).substring(2, 15) +
+    Math.random().toString(36).substring(2, 15);
+  const base = ensureGamePrefix(gameId);
+  return `${base}:room:${room}`;
+};
+
 // Type definitions for the new signaling protocol
 export type SessionEventType = 'session' | 'join';
 export type SignalEventType = 'offer' | 'answer' | 'candidate';
@@ -113,14 +142,7 @@ export function useMultiplayerSession(gameId: string) {
     gameId
   };
 
-  /**
-   * Generate unique session ID in the format: game:gameId:room:randomId
-   */
-  const generateSessionId = useCallback((gameId: string): string => {
-    const randomId = Math.random().toString(36).substring(2, 15) + 
-                     Math.random().toString(36).substring(2, 15);
-    return `game:${gameId}:room:${randomId}`;
-  }, []);
+
 
   /**
    * Publish session state (type=session) to relay
@@ -233,7 +255,7 @@ export function useMultiplayerSession(gameId: string) {
       };
 
       await publishEvent(event);
-      
+
       // Robust logging as requested
       console.log(`[SIG/PUB] kind=${KIND_SIGNAL} type=${type} d=${sessionId} to=${to.substring(0, 8)}... ok=true`);
     } catch (error) {
@@ -247,7 +269,7 @@ export function useMultiplayerSession(gameId: string) {
    */
   const handleSignalEvent = useCallback(async (parsed: SignalParsed) => {
     const { type, from, payload } = parsed;
-    
+
     console.log(`[SIG/RECV] ${type} from ${from.substring(0, 8)}...`);
 
     try {
@@ -264,14 +286,14 @@ export function useMultiplayerSession(gameId: string) {
         if (type === 'answer' && payload.sdp) {
           await pc.setRemoteDescription(payload.sdp);
           console.log(`[SIG/RECV] Remote description set for guest ${from.substring(0, 8)}...`);
-          
+
           // Flush queued ICE candidates
           const queue = iceCandidateQueuesRef.current.get(from) || [];
           for (const candidate of queue) {
             await pc.addIceCandidate(candidate);
           }
           iceCandidateQueuesRef.current.delete(from);
-          
+
         } else if (type === 'candidate' && payload.candidate) {
           if (pc.remoteDescription) {
             await pc.addIceCandidate(payload.candidate);
@@ -294,17 +316,17 @@ export function useMultiplayerSession(gameId: string) {
           await pc.setRemoteDescription(payload.sdp);
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
-          
+
           await publishSignalEphemeral(from, 'answer', { sdp: answer });
           console.log(`[SIG/RECV] Sent answer to host ${from.substring(0, 8)}...`);
-          
+
           // Flush queued ICE candidates
           const queue = iceCandidateQueuesRef.current.get(from) || [];
           for (const candidate of queue) {
             await pc.addIceCandidate(candidate);
           }
           iceCandidateQueuesRef.current.delete(from);
-          
+
         } else if (type === 'candidate' && payload.candidate) {
           if (pc.remoteDescription) {
             await pc.addIceCandidate(payload.candidate);
@@ -328,7 +350,7 @@ export function useMultiplayerSession(gameId: string) {
     if (!user || !sessionId || !nostr) return;
 
     const peerKey = getPeerKey(user.pubkey, remotePubkey);
-    
+
     // Don't reuse existing subscription
     if (peerSubscriptionsRef.current.has(peerKey)) {
       console.log(`[SIG/SUB] Already subscribed to peer ${remotePubkey.substring(0, 8)}...`);
@@ -354,10 +376,10 @@ export function useMultiplayerSession(gameId: string) {
         if (msg[0] === 'EVENT') {
           const event = msg[2];
           if (processedEventIdsRef.current.has(event.id)) continue;
-          
+
           processedEventIdsRef.current.add(event.id);
           const parsed = parseSignalEvent(event);
-          
+
           if (parsed && parsed.to === user.pubkey) {
             await handleSignalEvent(parsed);
           }
@@ -375,10 +397,10 @@ export function useMultiplayerSession(gameId: string) {
    */
   const stopPeerSignalingSubscription = useCallback((remotePubkey: string) => {
     if (!user) return;
-    
+
     const peerKey = getPeerKey(user.pubkey, remotePubkey);
     const controller = peerSubscriptionsRef.current.get(peerKey);
-    
+
     if (controller) {
       controller.abort();
       peerSubscriptionsRef.current.delete(peerKey);
@@ -408,7 +430,7 @@ export function useMultiplayerSession(gameId: string) {
 
     // Create data channel for input handling
     const dataChannel = peerConnection.createDataChannel('inputs', { ordered: true });
-    
+
     dataChannel.onopen = () => {
       console.log(`[DataChannel] Opened for guest ${guestPubkey.substring(0, 8)}...`);
     };
@@ -417,7 +439,7 @@ export function useMultiplayerSession(gameId: string) {
       try {
         const input = JSON.parse(event.data);
         console.log(`[DataChannel] Received input from guest ${guestPubkey.substring(0, 8)}...`, input);
-        
+
         if (input.type === 'input') {
           // Emit custom event that EmulatorIFrame can listen for
           window.dispatchEvent(new CustomEvent('remoteInput', { detail: input }));
@@ -481,10 +503,10 @@ export function useMultiplayerSession(gameId: string) {
     peerConnection.ondatachannel = (event) => {
       const dataChannel = event.channel;
       console.log('[DataChannel] Received from host:', dataChannel.label);
-      
+
       // Store reference for sending inputs
       guestDataChannelRef.current = dataChannel;
-      
+
       dataChannel.onopen = () => {
         console.log('[DataChannel] Guest channel opened');
       };
@@ -534,13 +556,13 @@ export function useMultiplayerSession(gameId: string) {
     } else if (parsed.type === 'join' && isHost && user && parsed.to === user.pubkey && parsed.from) {
       // Host received join request - start per-peer signaling
       const guestPubkey = parsed.from;
-      
+
       // Start per-peer signaling subscription for this guest
       await startPeerSignalingSubscription(guestPubkey);
-      
+
       // Create peer connection
       const pc = createHostPeerConnection(guestPubkey);
-      
+
       // Add to UI
       setConnectedPlayers(prev => [
         ...prev.filter(p => p.pubkey !== guestPubkey),
@@ -552,7 +574,7 @@ export function useMultiplayerSession(gameId: string) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await publishSignalEphemeral(guestPubkey, 'offer', { sdp: offer });
-        
+
         console.log(`[HOST] Offer sent to guest ${guestPubkey.substring(0, 8)}...`);
       } catch (error) {
         console.error(`[HOST] Failed to create/send offer to ${guestPubkey.substring(0, 8)}...`, error);
@@ -576,15 +598,15 @@ export function useMultiplayerSession(gameId: string) {
 
     try {
       const relay = nostr.relay(config.relayUrl);
-      
+
       console.log(`[SESSION/SUB] Starting for session ${sessionId}`);
-      
+
       for await (const msg of relay.req([{
         kinds: [KIND_SESSION],
         '#d': [sessionId],
         since: Math.floor(Date.now() / 1000) - 2 // Small cushion
       }], { signal: controller.signal })) {
-        
+
         if (msg[0] === 'EVENT') {
           await handleSessionEvent(msg[2]);
         }
@@ -663,7 +685,7 @@ export function useMultiplayerSession(gameId: string) {
 
       const sessionEvent = events[0];
       const parsed = parseSessionEvent(sessionEvent);
-      
+
       if (!parsed || parsed.type !== 'session' || !parsed.host) {
         throw new Error('Invalid session data');
       }
