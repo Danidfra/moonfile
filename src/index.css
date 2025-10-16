@@ -111,42 +111,6 @@
     50% { background-position: 100% 50%; }
     100% { background-position: 0% 50%; }
   }
-
-  /* EmulatorJS Fullscreen Styles */
-  .fullscreen-mode {
-    position: fixed !important;
-    top: 0;
-    left: 0;
-    width: 100vw !important;
-    height: 100vh !important;
-    z-index: 9999;
-    background: black;
-  }
-
-  .fullscreen-card {
-    height: 100vh !important;
-    width: 100vw !important;
-    max-width: none !important;
-    border: none !important;
-    border-radius: 0 !important;
-  }
-
-  .fullscreen-content {
-    height: 100vh !important;
-    padding: 0 !important;
-  }
-
-  .fullscreen-canvas {
-    height: 100vh !important;
-    width: 100vw !important;
-    border-radius: 0 !important;
-  }
-
-  .fullscreen-canvas canvas {
-    width: 100% !important;
-    height: 100% !important;
-    object-fit: contain;
-  }
 }
 
 /* EmulatorJS Canvas Styling - Fix black screen but audio playing issue */

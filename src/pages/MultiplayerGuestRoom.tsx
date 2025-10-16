@@ -126,7 +126,7 @@ export default function MultiplayerGuestRoom() {
     console.log('[GuestRoom] Handling signaling event:', parsed);
 
     // Only handle events directed to this guest
-    if (parsed.to !== user.pubkey) {
+    if (parsed.to !== user?.pubkey) {
       return;
     }
 
@@ -143,7 +143,7 @@ export default function MultiplayerGuestRoom() {
 
             // Publish answer
             const fromPubkey = parsed.from;
-            if (fromPubkey) {
+            if (fromPubkey && user?.pubkey && sessionId) {
               publishEvent({
                 kind: 31997,
                 content: '',
@@ -336,17 +336,19 @@ export default function MultiplayerGuestRoom() {
         };
 
         // 4. Publish join intent to main relay only
-        publishEvent({
-          kind: 31997,
-          content: '',
-          tags: [
-            ['d', sessionId],
-            ['type', 'join'],
-            ['from', user.pubkey],
-            ['to', hostTag]
-          ],
-          relays: [config.relayUrl]
-        });
+        if (sessionId && user?.pubkey) {
+          publishEvent({
+            kind: 31997,
+            content: '',
+            tags: [
+              ['d', sessionId],
+              ['type', 'join'],
+              ['from', user.pubkey],
+              ['to', hostTag]
+            ],
+            relays: [config.relayUrl]
+          });
+        }
 
         setConnectionState('connected');
         console.log('[GuestRoom] Join intent sent, waiting for offer from host');

@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle, us
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Play, Pause, RotateCcw, Volume2, VolumeX, Maximize, Minimize } from 'lucide-react';
+import { useFullscreen } from '@/hooks/useFullscreen';
 
 interface EmulatorIFrameProps {
   romData: Uint8Array;
@@ -94,43 +95,24 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const [isReady, setIsReady] = useState(false);
   const [isPaused, setIsPaused] = useState(false);
   const [isMuted, setIsMuted] = useState(true);
-  const [isFullscreen, setIsFullscreen] = useState(false);
-  const [hovering, setHovering] = useState(false);
   const [controlLock, setControlLock] = useState(false);
 
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [romUrl, setRomUrl] = useState('');
 
-  // Check if iframe is focused (desktop only for keyboard)
-  const iframeIsFocused = useCallback(() => {
-    return document.activeElement === iframeRef.current;
-  }, []);
-
-  // Derived boolean for interaction state - only fullscreen affects global scroll
-  const isInteracting = isFullscreen;
-
-  // Utility to toggle global scroll lock
-  const toggleScrollLock = useCallback((lock: boolean) => {
-    const html = document.documentElement;
-    const body = document.body;
-    if (!html || !body) return;
-    [html, body].forEach(el => {
-      if (lock) {
-        el.classList.add('no-scroll');
-      } else {
-        el.classList.remove('no-scroll');
-      }
-    });
-  }, []);
-
-  // Apply/remove class on fullscreen change only
-  useEffect(() => {
-    toggleScrollLock(isFullscreen);
-    return () => {
-      toggleScrollLock(false);
-    };
-  }, [isFullscreen, toggleScrollLock]);
+  // Use the fullscreen hook
+  const {
+    isFullscreenUI,
+    setIsFullscreenUI,
+    supportsNativeFS,
+    isNativeFS,
+    enterNativeFS,
+    exitNativeFS,
+    onFSChange,
+    lockLandscapeIfSupported,
+    unlockOrientationSafe
+  } = useFullscreen();
 
   // Focus the iframe when clicked
   const focusIFrame = useCallback(() => {
@@ -184,6 +166,13 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     console.log('[EmulatorIFrame] Built iframe src:', src);
     return src;
   }, [romUrl, platform]);
+
+  // Get aspect ratio for the platform
+  const aspect = React.useMemo(() => {
+    const aspectStr = getEmulatorAspect(platform);
+    const [w, h] = aspectStr.split(' / ').map(Number);
+    return w / h;
+  }, [platform]);
 
   useEffect(() => {
     if (!iframeSrc) return;
@@ -350,25 +339,21 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   // Handle fullscreen changes
   useEffect(() => {
     const handleFullscreenChange = () => {
-      const isNowFullscreen = !!document.fullscreenElement;
-      setIsFullscreen(isNowFullscreen);
+      const isNowNativeFS = isNativeFS();
+
+      // If we exit native fullscreen, also exit our UI fullscreen
+      if (!isNowNativeFS && isFullscreenUI) {
+        setIsFullscreenUI(false);
+        unlockOrientationSafe();
+      }
     };
 
-    const events = ['fullscreenchange', 'webkitfullscreenchange', 'mozfullscreenchange'];
-    events.forEach(event => {
-      document.addEventListener(event, handleFullscreenChange);
-    });
-
-    return () => {
-      events.forEach(event => {
-        document.removeEventListener(event, handleFullscreenChange);
-      });
-    };
-  }, []);
+    return onFSChange(handleFullscreenChange);
+  }, [isFullscreenUI, isNativeFS, setIsFullscreenUI, unlockOrientationSafe, onFSChange]);
 
   // Block keyboard + wheel + touch when in fullscreen or controlLock is active
   useEffect(() => {
-    if (!isFullscreen && !controlLock) return;
+    if (!isFullscreenUI && !controlLock) return;
 
     const blockedKeys = new Set([
       'ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight',
@@ -377,7 +362,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     ]);
 
     const onKeyDown = (e: KeyboardEvent) => {
-      if (blockedKeys.has(e.key) || blockedKeys.has((e as any).code)) {
+      if (blockedKeys.has(e.key) || blockedKeys.has(e.code)) {
         e.preventDefault();
         e.stopPropagation();
         console.log('[EmulatorIFrame] Blocked key:', e.key);
@@ -405,22 +390,56 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     container.addEventListener('touchmove', onTouchMove, { capture: true, passive: false });
 
     return () => {
-      container.removeEventListener('keydown', onKeyDown, { capture: true } as any);
-      container.removeEventListener('wheel', onWheel, { capture: true } as any);
-      container.removeEventListener('touchmove', onTouchMove, { capture: true } as any);
+      container.removeEventListener('keydown', onKeyDown, { capture: true });
+      container.removeEventListener('wheel', onWheel, { capture: true });
+      container.removeEventListener('touchmove', onTouchMove, { capture: true });
     };
-  }, [isFullscreen, controlLock]);
+  }, [isFullscreenUI, controlLock]);
 
   // Control handlers
-  const toggleFullscreen = useCallback(() => {
-    if (!containerRef.current) return;
+  const toggleFullscreen = useCallback(async () => {
+    const container = containerRef.current;
+    if (!container) return;
 
-    if (!document.fullscreenElement) {
-      containerRef.current.requestFullscreen?.();
-    } else {
-      document.exitFullscreen?.();
+    try {
+      if (!isNativeFS()) {
+        // Try to enter native fullscreen first
+        if (supportsNativeFS()) {
+          try {
+            await enterNativeFS(container);
+
+            // Wait a bit for native fullscreen to activate
+            setTimeout(async () => {
+              if (isNativeFS()) {
+                // Native fullscreen succeeded
+                await lockLandscapeIfSupported();
+                setIsFullscreenUI(true);
+              } else {
+                // Native fullscreen failed, use overlay fallback
+                setIsFullscreenUI(true);
+              }
+            }, 120);
+          } catch (error) {
+            // Native fullscreen failed, use overlay fallback
+            console.warn('[EmulatorIFrame] Native fullscreen failed, using overlay:', error);
+            setIsFullscreenUI(true);
+          }
+        } else {
+          // No native fullscreen support, use overlay fallback
+          setIsFullscreenUI(true);
+        }
+      } else {
+        // Exit fullscreen
+        await exitNativeFS();
+        unlockOrientationSafe();
+        setIsFullscreenUI(false);
+      }
+    } catch (error) {
+      console.error('[EmulatorIFrame] Fullscreen toggle error:', error);
+      // Emergency fallback - just toggle UI state
+      setIsFullscreenUI(!isFullscreenUI);
     }
-  }, []);
+  }, [supportsNativeFS, isNativeFS, enterNativeFS, exitNativeFS, lockLandscapeIfSupported, unlockOrientationSafe, setIsFullscreenUI, isFullscreenUI]);
 
   const handlePlayPause = useCallback(() => {
     setIsPaused(prev => {
@@ -455,26 +474,91 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
     setTimeout(() => { if (iframeRef.current) iframeRef.current.src = iframeSrc; }, 0);
   }, [iframeSrc, postToEmbed]);
 
+  // Render fullscreen UI when isFullscreenUI is true
+  if (isFullscreenUI) {
+    return (
+      <Card className="fixed inset-0 z-[9999] bg-black border-0 rounded-none">
+        <CardContent className="p-0 relative">
+          <div
+            className="w-full h-full grid place-items-center"
+            style={{
+              padding: 'env(safe-area-inset-top) env(safe-area-inset-right) env(safe-area-inset-bottom) env(safe-area-inset-left)'
+            }}
+          >
+            <div
+              className="relative"
+              style={{
+                width: `min(100svw, calc(100svh * ${aspect}))`,
+                height: `min(100svh, calc(100svw / ${aspect}))`,
+              }}
+            >
+              {/* Loading Overlay */}
+              {isLoading && !error && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
+                  <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-primary mb-4"></div>
+                  <p className="text-muted-foreground">Loading {title}...</p>
+                </div>
+              )}
+
+              {/* Error Overlay */}
+              {error && (
+                <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
+                  <p className="text-red-500 mb-2">Error loading emulator</p>
+                  <p className="text-white text-sm">{error}</p>
+                  <Button onClick={handleReset} className="mt-4" variant="outline">
+                    Try Again
+                  </Button>
+                </div>
+              )}
+
+              {iframeSrc && (
+                <iframe
+                  ref={iframeRef}
+                  src={iframeSrc}
+                  className="absolute inset-0 w-full h-full border-0"
+                  tabIndex={0}
+                  allowFullScreen
+                  sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads allow-forms"
+                  allow="fullscreen; gamepad; autoplay; clipboard-write"
+                  title={`${title} Emulator`}
+                  style={{ pointerEvents: 'auto' }}
+                />
+              )}
+
+              {/* Exit fullscreen button */}
+              <Button
+                onClick={toggleFullscreen}
+                variant="ghost"
+                size="sm"
+                className="absolute top-4 right-4 z-20 bg-black/50 hover:bg-black/70 text-white"
+                title="Exit fullscreen"
+              >
+                <Minimize className="w-4 h-4" />
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // Normal (non-fullscreen) UI
   return (
     <div
       ref={containerRef}
-      className={`emulator-container flex flex-col items-center space-y-4 ${className} ${isFullscreen ? 'fullscreen-mode' : ''}`}
-      onMouseEnter={() => setHovering(true)}
-      onMouseLeave={() => setHovering(false)}
+      className={`emulator-container flex flex-col items-center space-y-4 ${className}`}
       onClick={focusIFrame}
     >
-      {/* Game Title - Hidden in fullscreen */}
-      {!isFullscreen && (
-        <Card className="w-full max-w-4xl">
-          <CardHeader>
-            <CardTitle className="text-center">{title}</CardTitle>
-          </CardHeader>
-        </Card>
-      )}
+      {/* Game Title */}
+      <Card className="w-full max-w-4xl">
+        <CardHeader>
+          <CardTitle className="text-center">{title}</CardTitle>
+        </CardHeader>
+      </Card>
 
       {/* Game Display */}
-      <Card className={`w-full max-w-4xl bg-black border-2 ${isFullscreen ? 'fullscreen-card' : ''}`}>
-        <CardContent className={`p-4 relative ${isFullscreen ? 'fullscreen-content' : ''}`}>
+      <Card className="w-full max-w-4xl bg-black border-2">
+        <CardContent className="p-4 relative">
           {/* Loading Overlay */}
           {isLoading && !error && (
             <div className="absolute inset-0 flex flex-col items-center justify-center bg-black bg-opacity-70 z-10">
@@ -495,145 +579,118 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
           )}
 
           {/* Iframe Container */}
-          {isFullscreen ? (
-            // Fullscreen mode - maintain aspect ratio with letterboxing
-            <div
-              className="relative bg-black rounded-lg overflow-hidden fullscreen-canvas"
-              style={{ minHeight: '100dvh', aspectRatio: getEmulatorAspect(platform) }}
-            >
-              {iframeSrc && (
-                <iframe
-                  ref={iframeRef}
-                  src={iframeSrc}
-                  className="absolute inset-0 w-full h-full border-0"
-                  tabIndex={0}
-                  sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
-                  allow="fullscreen; gamepad; autoplay; clipboard-write"
-                  title={`${title} Emulator`}
-                  style={{ pointerEvents: (isFullscreen || controlLock) ? 'auto' : 'none' }}
-                />
-              )}
-            </div>
-          ) : (
-            // Normal mode - aspect ratio based container with scroll containment
-            <div
-               className={`relative bg-black rounded-lg overflow-hidden emulator-canvas-wrap
-              ${controlLock ? 'touch-none' : 'touch-pan-y'}
-              overscroll-contain`}
-              style={{ aspectRatio: getEmulatorAspect(platform) }}
-            >
-              {iframeSrc && (
-                <iframe
-                  ref={iframeRef}
-                  src={iframeSrc}
-                  className="absolute inset-0 w-full h-full border-0"
-                  tabIndex={0}
-                  sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads"
-                  allow="fullscreen; gamepad; autoplay; clipboard-write"
-                  title={`${title} Emulator`}
-                  style={{ pointerEvents: (isFullscreen || controlLock) ? 'auto' : 'none' }}
-                />
-              )}
+          <div
+            className={`relative bg-black rounded-lg overflow-hidden emulator-canvas-wrap
+            ${controlLock ? 'touch-none' : 'touch-pan-y'}
+            overscroll-contain`}
+            style={{ aspectRatio: getEmulatorAspect(platform) }}
+          >
+            {iframeSrc && (
+              <iframe
+                ref={iframeRef}
+                src={iframeSrc}
+                className="absolute inset-0 w-full h-full border-0"
+                tabIndex={0}
+                allowFullScreen
+                sandbox="allow-scripts allow-same-origin allow-pointer-lock allow-popups allow-downloads allow-forms"
+                allow="fullscreen; gamepad; autoplay; clipboard-write"
+                title={`${title} Emulator`}
+                style={{ pointerEvents: (isFullscreenUI || controlLock) ? 'auto' : 'none' }}
+              />
+            )}
 
-              {!isFullscreen && !controlLock && (
-                <>
-                  <button
-                    type="button"
-                    className="absolute inset-0 z-10 cursor-default bg-transparent"
-                    onClick={() => setControlLock(true)}
-                    aria-label="Enable controls"
-                    style={{ WebkitTapHighlightColor: 'transparent' }}
-                  />
+            {!isFullscreenUI && !controlLock && (
+              <>
+                <button
+                  type="button"
+                  className="absolute inset-0 z-10 cursor-default bg-transparent"
+                  onClick={() => setControlLock(true)}
+                  aria-label="Enable controls"
+                  style={{ WebkitTapHighlightColor: 'transparent' }}
+                />
 
-                  <div className="absolute left-2 top-2 z-20 rounded bg-black/60 px-2 py-1 text-xs text-white">
-                    Tap to play • Scroll unlocked
-                  </div>
-                </>
-              )}
-            </div>
-          )}
+                <div className="absolute left-2 top-2 z-20 rounded bg-black/60 px-2 py-1 text-xs text-white">
+                  Tap to play • Scroll unlocked
+                </div>
+              </>
+            )}
+          </div>
 
           {/* Mobile Control Lock Toggle - Only visible on mobile */}
-          {!isFullscreen && (
-            <div className="lg:hidden absolute top-2 right-2 z-10">
-              <Button
-                size="sm"
-                variant={controlLock ? "default" : "secondary"}
-                onClick={() => setControlLock(!controlLock)}
-                className="bg-gray-800/80 backdrop-blur-sm border border-gray-700"
-                title={controlLock ? "Unlock page scrolling" : "Lock page scrolling"}
-              >
-                {controlLock ? "🔒" : "🔓"}
-              </Button>
-            </div>
-          )}
+          <div className="lg:hidden absolute top-2 right-2 z-10">
+            <Button
+              size="sm"
+              variant={controlLock ? "default" : "secondary"}
+              onClick={() => setControlLock(!controlLock)}
+              className="bg-gray-800/80 backdrop-blur-sm border border-gray-700"
+              title={controlLock ? "Unlock page scrolling" : "Lock page scrolling"}
+            >
+              {controlLock ? "🔒" : "🔓"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
-      {/* Controls - Hidden in fullscreen */}
-      {!isFullscreen && (
-        <>
-          <Card className="w-full max-w-4xl">
-            <CardContent className="p-3 sm:p-4">
-              <div className="flex flex-wrap items-stretch justify-center gap-2 sm:gap-3">
-                <Button
-                  onClick={handlePlayPause}
-                  variant={isPaused ? "default" : "secondary"}
-                  size="lg"
-                >
-                  {isPaused ? <Play className="w-5 h-5 mr-2" /> : <Pause className="w-5 h-5 mr-2" />}
-                  {isPaused ? 'Play' : 'Pause'}
-                </Button>
+      {/* Controls */}
+      <Card className="w-full max-w-4xl">
+        <CardContent className="p-3 sm:p-4">
+          <div className="flex flex-wrap items-stretch justify-center gap-2 sm:gap-3">
+            <Button
+              onClick={handlePlayPause}
+              variant={isPaused ? "default" : "secondary"}
+              size="lg"
+            >
+              {isPaused ? <Play className="w-5 h-5 mr-2" /> : <Pause className="w-5 h-5 mr-2" />}
+              {isPaused ? 'Play' : 'Pause'}
+            </Button>
 
-                <Button
-                  onClick={handleReset}
-                  variant="outline"
-                  size="lg"
-                >
-                  <RotateCcw className="w-5 h-5 mr-2" />
-                  Reset
-                </Button>
+            <Button
+              onClick={handleReset}
+              variant="outline"
+              size="lg"
+            >
+              <RotateCcw className="w-5 h-5 mr-2" />
+              Reset
+            </Button>
 
-                <Button
-                  onClick={handleMuteToggle}
-                  variant="ghost"
-                  size="lg"
-                >
-                  {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
-                </Button>
+            <Button
+              onClick={handleMuteToggle}
+              variant="ghost"
+              size="lg"
+            >
+              {isMuted ? <VolumeX className="w-5 h-5" /> : <Volume2 className="w-5 h-5" />}
+            </Button>
 
-                <Button
-                  onClick={toggleFullscreen}
-                  variant="ghost"
-                  size="lg"
-                  title="Toggle fullscreen"
-                >
-                  {isFullscreen ? <Minimize className="w-5 h-5" /> : <Maximize className="w-5 h-5" />}
-                </Button>
+            <Button
+              onClick={toggleFullscreen}
+              variant="ghost"
+              size="lg"
+              title="Toggle fullscreen"
+            >
+              <Maximize className="w-5 h-5" />
+            </Button>
 
-                <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                  <div className={`w-2 h-2 rounded-full ${
-                    error ? 'bg-red-500' : isReady ? 'bg-green-500' : 'bg-yellow-500'
-                  }`}></div>
-                  {error ? 'Error' : isReady ? 'Ready' : 'Loading'}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <div className={`w-2 h-2 rounded-full ${
+                error ? 'bg-red-500' : isReady ? 'bg-green-500' : 'bg-yellow-500'
+              }`}></div>
+              {error ? 'Error' : isReady ? 'Ready' : 'Loading'}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
 
-          {/* Platform Info */}
-          <Card className="w-full max-w-4xl">
-            <CardContent className="p-4">
-              <div className="text-center space-y-2">
-                <h4 className="font-semibold text-sm">Platform: {platform.replace('-rom', '').toUpperCase()}</h4>
-                <p className="text-xs text-muted-foreground">
-                  Powered by EmulatorJS • Double-click for fullscreen
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </>
-      )}
+      {/* Platform Info */}
+      <Card className="w-full max-w-4xl">
+        <CardContent className="p-4">
+          <div className="text-center space-y-2">
+            <h4 className="font-semibold text-sm">Platform: {platform.replace('-rom', '').toUpperCase()}</h4>
+            <p className="text-xs text-muted-foreground">
+              Powered by EmulatorJS • Click fullscreen for best experience
+            </p>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 });
