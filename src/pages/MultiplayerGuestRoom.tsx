@@ -24,6 +24,10 @@ import { genUserName } from '@/lib/genUserName';
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 import type { SessionStatus } from '@/hooks/useMultiplayerSession';
 
+// Constants for event kinds
+const KIND_SESSION = 31997;  // replaceable snapshot
+const KIND_SIGNAL = 21997;   // ephemeral signaling
+
 type ConnectionState = 'connecting' | 'connected' | 'receiving' | 'error' | 'disconnected';
 
 interface GameMetadata {
