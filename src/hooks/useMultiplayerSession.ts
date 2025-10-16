@@ -90,6 +90,11 @@ export function useMultiplayerSession(gameId: string) {
     gameId
   });
 
+  // Track if remoteDescription was set per peer
+  const remoteDescSetRef = useRef<Map<string, boolean>>(new Map());
+  // Queue ICE candidates that arrive before remoteDescription is set
+  const pendingRemoteCandidatesRef = useRef<Map<string, RTCIceCandidateInit[]>>(new Map());
+
   // Update current values ref on each render
   currentValuesRef.current = {
     isHost,
@@ -97,6 +102,32 @@ export function useMultiplayerSession(gameId: string) {
     session,
     sessionId,
     gameId
+  };
+
+  /**
+   * 
+   */
+  const buildSnapshot = (): {
+    status: SessionStatus;
+    guests: string[];
+    connected: string[];
+    maxPlayers: number;
+  } => {
+    const s = currentValuesRef.current.session;
+    const connected = Array
+      .from(peerConnectionsRef.current.values())
+      .filter(p => p.connection.connectionState === 'connected')
+      .map(p => p.pubkey);
+
+    const maxP = s?.maxPlayers ?? 2;
+    const status: SessionStatus = connected.length + 1 >= maxP ? 'full' : 'available'; // +1 host
+
+    return {
+      status,
+      guests: s?.guests ?? [],
+      connected,
+      maxPlayers: maxP,
+    };
   };
 
   /**
@@ -211,58 +242,23 @@ export function useMultiplayerSession(gameId: string) {
       ]
     });
 
-    // Add video track if host
-    if (isHost && hostVideoStreamRef.current) {
-      hostVideoStreamRef.current.getTracks().forEach(track => {
-        peerConnection.addTrack(track, hostVideoStreamRef.current!);
-      });
-    }
+  const { isHost: isHostNow } = currentValuesRef.current;
 
-    // Create data channel for game input (host only)
-    if (isHost) {
-      const dataChannel = peerConnection.createDataChannel('inputs', {
-        ordered: true
-      });
-
-      dataChannel.onopen = () => {
-        console.log('[MultiplayerSession] Data channel opened for guest:', guestPubkey);
-      };
-
-      dataChannel.onmessage = (event) => {
-        try {
-          const input = JSON.parse(event.data);
-          if (input.type === 'input' && input.key !== undefined) {
-            // Forward to emulator iframe
-            const emulatorElement = document.querySelector('iframe') as HTMLIFrameElement;
-            if (emulatorElement?.contentWindow) {
-              emulatorElement.contentWindow.postMessage({
-                type: 'remote-input',
-                payload: { key: input.key, pressed: input.pressed }
-              }, window.location.origin);
-            }
-          }
-        } catch (err) {
-          console.error('[MultiplayerSession] Failed to parse data channel message:', err);
-        }
-      };
-
-      // Store the peer connection with data channel
-      peerConnectionsRef.current.set(guestPubkey, {
-        pubkey: guestPubkey,
-        connection: peerConnection,
-        dataChannel
-      });
+  // Ensure the offer has an m=video
+  if (isHostNow) {
+    const stream = hostVideoStreamRef.current;
+    if (stream && stream.getTracks().length) {
+      stream.getTracks().forEach(t => peerConnection.addTrack(t, stream));
     } else {
-      // Guest side - just store the connection
-      peerConnectionsRef.current.set(guestPubkey, {
-        pubkey: guestPubkey,
-        connection: peerConnection
-      });
+      // SDP must still advertise video even if the track isn't ready yet
+      peerConnection.addTransceiver('video', { direction: 'sendonly' });
     }
+  }
 
     // Handle ICE candidates
     peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
+      const c = event.candidate;
+      if (c && event.candidate) {
         publishSignal('candidate', guestPubkey, event.candidate);
       }
     };
@@ -270,34 +266,37 @@ export function useMultiplayerSession(gameId: string) {
     // Handle connection state changes
     peerConnection.onconnectionstatechange = () => {
       console.log('[MultiplayerSession] Connection state for guest:', guestPubkey, peerConnection.connectionState);
+      const state = peerConnection.connectionState;
 
       setConnectedPlayers(prev =>
         prev.map(player =>
           player.pubkey === guestPubkey
-            ? { ...player, status: peerConnection.connectionState === 'connected' ? 'connected' : 'connecting' }
+            ? { ...player, status: state === 'connected' ? 'connected' : 'connecting' }
             : player
         )
       );
+      
+      if (isHostNow && state === 'connected') {
+        publishSessionState(currentValuesRef.current.sessionId, buildSnapshot());
+      }
     };
 
-    // Guest side: handle incoming data channel
-    if (!isHost) {
-      peerConnection.ondatachannel = (event) => {
-        const dataChannel = event.channel;
-        dataChannel.onopen = () => {
-          console.log('[MultiplayerSession] Guest data channel opened');
-        };
-
-        // Store data channel reference
-        const existing = peerConnectionsRef.current.get(guestPubkey);
-        if (existing) {
-          existing.dataChannel = dataChannel;
-        }
-      };
-    }
+ if (isHostNow) {
+    const dc = peerConnection.createDataChannel('inputs', { ordered: true });
+    dc.onopen = () => console.log('[Host] datachannel open ->', guestPubkey);
+    peerConnectionsRef.current.set(guestPubkey, { pubkey: guestPubkey, connection: peerConnection, dataChannel: dc });
+  } else {
+    peerConnectionsRef.current.set(guestPubkey, { pubkey: guestPubkey, connection: peerConnection });
+    peerConnection.ondatachannel = (evt) => {
+      const dc = evt.channel;
+      dc.onopen = () => console.log('[Guest] datachannel open');
+      const existing = peerConnectionsRef.current.get(guestPubkey);
+      if (existing) existing.dataChannel = dc;
+    };
+  }
 
     return peerConnection;
-  }, [isHost, publishSignal]);
+  }, [publishSignal, publishSessionState]);
 
 
 
@@ -341,24 +340,29 @@ export function useMultiplayerSession(gameId: string) {
       switch (parsed.type) {
         case 'join':
           if (parsed.from && parsed.to === currentUser.pubkey) {
-            console.log('[MultiplayerSession] Guest joined:', parsed.from);
+            if (!peerConnectionsRef.current.get(parsed.from)) {
+              console.log('[MultiplayerSession] Guest joined:', parsed.from);
 
-            // Create peer connection for this guest
-            const peerConnection = createPeerConnection(parsed.from);
+              // Create peer connection for this guest
+              const peerConnection = createPeerConnection(parsed.from);
 
-            // Add to connected players
-            setConnectedPlayers(prev => [
-              ...prev.filter(p => p.pubkey !== parsed.from),
-              { pubkey: parsed.from!, status: 'connecting' }
-            ]);
+              // Add to connected players
+              setConnectedPlayers(prev => [
+                ...prev.filter(p => p.pubkey !== parsed.from),
+                { pubkey: parsed.from!, status: 'connecting' }
+              ]);
 
-            // Create and send offer
-            try {
-              const offer = await peerConnection.createOffer();
-              await peerConnection.setLocalDescription(offer);
-              publishSignal('offer', parsed.from, offer);
-            } catch (err) {
-              console.error('[MultiplayerSession] Failed to create offer:', err);
+              // Create and send offer
+              try {
+                const offer = await peerConnection.createOffer();
+                await peerConnection.setLocalDescription(offer);
+                await publishSignal('offer', parsed.from, offer);
+                console.log('[Host] OFFER sent to', parsed.from);
+
+                await publishSessionState(currentValuesRef.current.sessionId, buildSnapshot());
+              } catch (err) {
+                console.error('[MultiplayerSession] Failed to create offer:', err);
+              }
             }
           }
           break;
@@ -371,6 +375,21 @@ export function useMultiplayerSession(gameId: string) {
               try {
                 const answer = JSON.parse(atob(parsed.signal));
                 await peer.connection.setRemoteDescription(answer);
+
+                // mark that remote SDP is set
+                remoteDescSetRef.current.set(parsed.from, true);
+
+                // flush queued remote candidates (if any)
+                const queued = pendingRemoteCandidatesRef.current.get(parsed.from) || [];
+                for (const cand of queued) {
+                  try {
+                    await peer.connection.addIceCandidate(new RTCIceCandidate(cand));
+                  } catch (e) {
+                    console.warn('[Host] Failed to add queued candidate:', e);
+                  }
+                }
+                pendingRemoteCandidatesRef.current.delete(parsed.from);
+
               } catch (err) {
                 console.error('[MultiplayerSession] Failed to set remote answer:', err);
               }
@@ -380,14 +399,22 @@ export function useMultiplayerSession(gameId: string) {
 
         case 'candidate':
           if (parsed.from && parsed.to === currentUser.pubkey && parsed.signal) {
-            console.log('[MultiplayerSession] Received candidate from:', parsed.from);
             const peer = peerConnectionsRef.current.get(parsed.from);
             if (peer) {
               try {
-                const candidate = JSON.parse(atob(parsed.signal));
-                await peer.connection.addIceCandidate(new RTCIceCandidate(candidate));
+                const cand: RTCIceCandidateInit = JSON.parse(atob(parsed.signal));
+
+                // if remote SDP not set yet, queue
+                if (!remoteDescSetRef.current.get(parsed.from) || !peer.connection.remoteDescription) {
+                  const q = pendingRemoteCandidatesRef.current.get(parsed.from) || [];
+                  q.push(cand);
+                  pendingRemoteCandidatesRef.current.set(parsed.from, q);
+                  return;
+                }
+
+                await peer.connection.addIceCandidate(new RTCIceCandidate(cand));
               } catch (err) {
-                console.error('[MultiplayerSession] Failed to add ICE candidate:', err);
+                console.error('[Host] Failed to add ICE candidate:', err);
               }
             }
           }
@@ -409,6 +436,19 @@ export function useMultiplayerSession(gameId: string) {
               const offer = JSON.parse(atob(parsed.signal));
               await peerConnection.setRemoteDescription(offer);
 
+              remoteDescSetRef.current.set(parsed.from, true);
+
+              const queued = pendingRemoteCandidatesRef.current.get(parsed.from) || [];
+
+              for (const cand of queued) {
+                try {
+                  await peerConnection.addIceCandidate(new RTCIceCandidate(cand));
+                } catch (e) {
+                  console.warn('[Guest] Failed to add queued candidate:', e);
+                }
+              }
+              pendingRemoteCandidatesRef.current.delete(parsed.from);
+
               const answer = await peerConnection.createAnswer();
               await peerConnection.setLocalDescription(answer);
               publishSignal('answer', parsed.from, answer);
@@ -418,20 +458,29 @@ export function useMultiplayerSession(gameId: string) {
           }
           break;
 
-        case 'candidate':
-          if (parsed.to === currentUser.pubkey && parsed.signal && parsed.from) {
-            console.log('[MultiplayerSession] Received candidate from host');
-            const peer = peerConnectionsRef.current.get(parsed.from);
-            if (peer) {
-              try {
-                const candidate = JSON.parse(atob(parsed.signal));
-                await peer.connection.addIceCandidate(new RTCIceCandidate(candidate));
-              } catch (err) {
-                console.error('[MultiplayerSession] Failed to add ICE candidate:', err);
+          case 'candidate':
+            if (parsed.to === currentUser.pubkey && parsed.signal && parsed.from) {
+              const peer = peerConnectionsRef.current.get(parsed.from);
+              if (peer) {
+                try {
+                  const cand: RTCIceCandidateInit = JSON.parse(atob(parsed.signal));
+
+                  // If we haven't set the host's offer yet, queue
+                  const key = parsed.from; // host pubkey as key
+                  if (!remoteDescSetRef.current.get(key) || !peer.connection.remoteDescription) {
+                    const q = pendingRemoteCandidatesRef.current.get(key) || [];
+                    q.push(cand);
+                    pendingRemoteCandidatesRef.current.set(key, q);
+                    return;
+                  }
+
+                  await peer.connection.addIceCandidate(new RTCIceCandidate(cand));
+                } catch (err) {
+                  console.error('[Guest] Failed to add ICE candidate:', err);
+                }
               }
             }
-          }
-          break;
+            break;
       }
     }
   }, [parseSessionEvent, createPeerConnection, publishSignal]);
@@ -626,6 +675,10 @@ export function useMultiplayerSession(gameId: string) {
       connection.close();
     });
     peerConnectionsRef.current.clear();
+
+    // Clear the bookkeeping for ICE/SDP
+    remoteDescSetRef.current.clear();
+    pendingRemoteCandidatesRef.current.clear();
 
     // Reset state
     setSessionId('');
