@@ -105,7 +105,7 @@ export function useMultiplayerSession(gameId: string) {
   };
 
   /**
-   * 
+   *
    */
   const buildSnapshot = (): {
     status: SessionStatus;
@@ -135,38 +135,30 @@ export function useMultiplayerSession(gameId: string) {
    */
   const parseSessionEvent = useCallback((event: NostrEvent): ParsedSessionEvent | null => {
     const tags = event.tags || [];
-
-    const getTag = (name: string) => tags.find(t => t[0] === name)?.[1];
-    const getTagValues = (name: string) => tags.filter(t => t[0] === name).map(t => t[1]);
+    const getTag = (n: string) => tags.find(t => t[0] === n)?.[1];
+    const getVals = (n: string) => tags.filter(t => t[0] === n).map(t => t[1]);
 
     const type = getTag('type') as SignalEventType;
     if (!type) return null;
 
-    const parsed: ParsedSessionEvent = {
+    let signal = getTag('signal');
+    if ((!signal || signal === 'content') && event.content) {
+      // keep downstream compatibility: `parsed.signal` stays base64
+      signal = btoa(unescape(encodeURIComponent(event.content)));
+    }
+
+    return {
       type,
       sessionId: getTag('d') || '',
+      from: getTag('from'),
+      to: getTag('to'),
+      signal,
+      host: getTag('host'),
+      players: getTag('players'),
+      status: getTag('status') as SessionStatus,
+      guests: getVals('guest'),
+      connected: getVals('connected'),
     };
-
-    // Optional fields
-    const from = getTag('from');
-    const to = getTag('to');
-    const signal = getTag('signal');
-    const host = getTag('host');
-    const players = getTag('players');
-    const status = getTag('status') as SessionStatus;
-    const guests = getTagValues('guest');
-    const connected = getTagValues('connected');
-
-    if (from) parsed.from = from;
-    if (to) parsed.to = to;
-    if (signal) parsed.signal = signal;
-    if (host) parsed.host = host;
-    if (players) parsed.players = players;
-    if (status) parsed.status = status;
-    if (guests.length > 0) parsed.guests = guests;
-    if (connected.length > 0) parsed.connected = connected;
-
-    return parsed;
   }, []);
 
   /**
@@ -208,27 +200,41 @@ export function useMultiplayerSession(gameId: string) {
   const publishSignal = useCallback(async (
     type: 'offer' | 'answer' | 'candidate' | 'join',
     to: string,
-    payload?: any
+    payload?: RTCSessionDescriptionInit | RTCIceCandidateInit
   ) => {
     if (!user || !sessionId) return;
 
-    const tags = [
+    const signalJson = payload ? JSON.stringify(payload) : '';
+    const signalB64 = signalJson ? btoa(unescape(encodeURIComponent(signalJson))) : undefined;
+    const useContent = !!signalJson && (type === 'offer' || type === 'answer' || type === 'candidate');
+
+    const baseTags: string[][] = [
       ['d', sessionId],
       ['type', type],
       ['from', user.pubkey],
       ['to', to],
     ];
+    const tags = useContent
+      ? [...baseTags, ['signal', 'content']]
+      : (signalB64 ? [...baseTags, ['signal', signalB64]] : baseTags);
 
-    if (payload) {
-      tags.push(['signal', btoa(JSON.stringify(payload))]);
-    }
-
-    publishEvent({
-      kind: 31997,
-      content: '',
-      tags,
-      relays: [config.relayUrl]
+    console.log('[SIG/PUB] ->', {
+      type, to, sessionId,
+      mode: useContent ? 'content' : 'tag',
+      jsonLen: signalJson.length, b64Len: signalB64?.length
     });
+
+    try {
+      await publishEvent({
+        kind: 31997,
+        content: useContent ? signalJson : '',
+        tags,
+        relays: [config.relayUrl]
+      });
+      console.log('[SIG/OK]', type, '->', to, 'mode=', useContent ? 'content' : 'tag');
+    } catch (e) {
+      console.error('[SIG/ERR]', type, e);
+    }
   }, [user, sessionId, publishEvent, config.relayUrl]);
 
   /**
@@ -275,7 +281,7 @@ export function useMultiplayerSession(gameId: string) {
             : player
         )
       );
-      
+
       if (isHostNow && state === 'connected') {
         publishSessionState(currentValuesRef.current.sessionId, buildSnapshot());
       }
@@ -359,7 +365,12 @@ export function useMultiplayerSession(gameId: string) {
                 await publishSignal('offer', parsed.from, offer);
                 console.log('[Host] OFFER sent to', parsed.from);
 
-                await publishSessionState(currentValuesRef.current.sessionId, buildSnapshot());
+                // Publish session snapshot that includes the new guest
+                await publishSessionState(currentValuesRef.current.sessionId, {
+                  status: 'available',
+                  guests: [ ...(session?.guests ?? []), parsed.from! ],
+                  connected: [ ...(session?.connected ?? []) ],
+                });
               } catch (err) {
                 console.error('[MultiplayerSession] Failed to create offer:', err);
               }

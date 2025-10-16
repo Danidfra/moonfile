@@ -78,24 +78,29 @@ export default function MultiplayerGuestRoom() {
    */
   const parseSessionEvent = useCallback((event: NostrEvent) => {
     const tags = event.tags || [];
-
-    const getTag = (name: string) => tags.find(t => t[0] === name)?.[1];
-    const getTagValues = (name: string) => tags.filter(t => t[0] === name).map(t => t[1]);
+    const getTag = (n: string) => tags.find(t => t[0] === n)?.[1];
+    const getVals = (n: string) => tags.filter(t => t[0] === n).map(t => t[1]);
 
     const type = getTag('type');
     if (!type) return null;
+
+    let signal = getTag('signal');
+    if ((!signal || signal === 'content') && event.content) {
+      // keep downstream compatibility: `parsed.signal` stays base64
+      signal = btoa(unescape(encodeURIComponent(event.content)));
+    }
 
     return {
       type,
       sessionId: getTag('d') || '',
       from: getTag('from'),
       to: getTag('to'),
-      signal: getTag('signal'),
+      signal,
       host: getTag('host'),
       players: getTag('players'),
       status: getTag('status') as SessionStatus,
-      guests: getTagValues('guest'),
-      connected: getTagValues('connected')
+      guests: getVals('guest'),
+      connected: getVals('connected')
     } as {
       type: string;
       sessionId: string;
