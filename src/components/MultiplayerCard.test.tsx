@@ -104,7 +104,7 @@ describe('MultiplayerCard', () => {
     const joinConfirmButton = screen.getByRole('button', { name: /join/i });
     fireEvent.click(joinConfirmButton);
 
-    // Verify navigation was called with correct path
+    // Verify navigation was called with correct path (encoded)
     expect(mockNavigate).toHaveBeenCalledWith('/multiplayer/guest/test123');
   });
 

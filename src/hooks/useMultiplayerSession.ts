@@ -141,16 +141,19 @@ export function useMultiplayerSession(gameId: string) {
   /**
    * Publish session state update
    */
-  const publishSessionState = useCallback(async (updates: {
-    status?: SessionStatus;
-    guests?: string[];
-    connected?: string[];
-    maxPlayers?: number;
-  }) => {
-    if (!user || !sessionId) return;
+  const publishSessionState = useCallback(async (
+    targetSessionId: string,
+    updates: {
+      status?: SessionStatus;
+      guests?: string[];
+      connected?: string[];
+      maxPlayers?: number;
+    }
+  ) => {
+    if (!user || !targetSessionId) return;
 
     const tags = [
-      ['d', sessionId],
+      ['d', targetSessionId],
       ['type', 'session'],
       ['host', user.pubkey],
       ['players', (updates.maxPlayers || session?.maxPlayers || 2).toString()],
@@ -166,7 +169,7 @@ export function useMultiplayerSession(gameId: string) {
       tags,
       relays: [config.relayUrl]
     });
-  }, [user, sessionId, session, publishEvent, config.relayUrl]);
+  }, [user, session, publishEvent, config.relayUrl]);
 
   /**
    * Publish signal message
@@ -504,17 +507,21 @@ export function useMultiplayerSession(gameId: string) {
       setSessionId(newSessionId);
       setIsHost(true);
 
+      // Start subscription early to prevent missing early join/offer events
+      startUnifiedSessionSubscription(newSessionId);
+
       // Store the video stream
       hostVideoStreamRef.current = videoStream;
 
-      // Publish initial session state (no offer yet)
-      await publishSessionState({
+      // Publish initial session state using the newSessionId directly
+      await publishSessionState(newSessionId, {
         status: 'available',
         maxPlayers,
         guests: [],
         connected: []
       });
 
+      // Set local session state for UI consistency
       setStatus('available');
       console.log('[MultiplayerSession] Session started:', newSessionId);
 
@@ -523,7 +530,7 @@ export function useMultiplayerSession(gameId: string) {
       setError(err instanceof Error ? err.message : 'Failed to start session');
       setStatus('error');
     }
-  }, [user, gameId, publishSessionState]);
+  }, [user, gameId, publishSessionState, startUnifiedSessionSubscription]);
 
   /**
    * Join existing session as guest
@@ -540,19 +547,32 @@ export function useMultiplayerSession(gameId: string) {
       setSessionId(sessionId);
       setIsHost(false);
 
-      // Fetch the latest session event to get host pubkey
-      const events = await nostr.query([{
+      // Use the same relay for query to avoid cross-relay races
+      const mainRelay = nostr.relay(config.relayUrl);
+
+      // Fetch the latest session events with small since window and filter for type=session
+      const events = await mainRelay.query([{
         kinds: [31997],
         '#d': [sessionId],
-        limit: 1
+        limit: 3,
+        since: Math.floor(Date.now() / 1000) - 300 // 5 minutes window
       }], { signal: AbortSignal.timeout(10000) });
 
       if (events.length === 0) {
-        throw new Error('Session not found');
+        throw new Error('Session not found or expired');
       }
 
-      const sessionEvent = events[0] as NostrEvent;
-      const parsed = parseSessionEvent(sessionEvent);
+      // Filter for session events and get the newest one
+      const sessionEvents = events
+        .map(event => ({ event, parsed: parseSessionEvent(event) }))
+        .filter(({ parsed }) => parsed?.type === 'session')
+        .sort((a, b) => b.event.created_at - a.event.created_at);
+
+      if (sessionEvents.length === 0) {
+        throw new Error('Session not found or expired');
+      }
+
+      const { parsed } = sessionEvents[0];
 
       if (!parsed || !parsed.host || parsed.status === 'full') {
         throw new Error('Invalid session or session is full');
@@ -569,7 +589,7 @@ export function useMultiplayerSession(gameId: string) {
       setError(err instanceof Error ? err.message : 'Failed to join session');
       setStatus('error');
     }
-  }, [user, nostr, publishSignal, parseSessionEvent]);
+  }, [user, nostr, config.relayUrl, publishSignal, parseSessionEvent]);
 
   /**
    * Subscribe to session updates

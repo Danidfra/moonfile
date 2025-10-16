@@ -45,7 +45,8 @@ interface GameMetadata {
 }
 
 export default function MultiplayerGuestRoom() {
-  const { sessionId } = useParams<{ sessionId: string }>();
+  const { sessionId: raw } = useParams<{ sessionId: string }>();
+  const sessionId = raw ? decodeURIComponent(raw) : '';
   const navigate = useNavigate();
   const { nostr } = useNostr();
   const { user } = useCurrentUser();

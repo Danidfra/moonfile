@@ -166,7 +166,7 @@ export default function MultiplayerCard({
     }
 
     // Navigate to the guest room with the entered session ID
-    navigate(`/multiplayer/guest/${joinSessionId.trim()}`);
+    navigate(`/multiplayer/guest/${encodeURIComponent(joinSessionId.trim())}`);
   };
 
   const handleStartGame = () => {
@@ -179,7 +179,7 @@ export default function MultiplayerCard({
    * Copy invite link to clipboard
    */
   const handleCopyLink = async () => {
-    const inviteLink = `/multiplayer/guest/${sessionId}`;
+    const inviteLink = `/multiplayer/guest/${encodeURIComponent(sessionId)}`;
     try {
       await navigator.clipboard.writeText(window.location.origin + inviteLink);
       toast({
@@ -403,7 +403,7 @@ export default function MultiplayerCard({
               <div className="flex gap-2">
                 <Input
                   id="invite-link"
-                  value={`/multiplayer/guest/${sessionId}`}
+                  value={`/multiplayer/guest/${encodeURIComponent(sessionId)}`}
                   readOnly
                   className="flex-1 bg-gray-800 border-gray-700 text-gray-300 font-mono text-sm"
                 />
