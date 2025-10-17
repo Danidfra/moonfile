@@ -28,6 +28,7 @@ export interface PeerConnection {
   pubkey: string;
   connection: RTCPeerConnection;
   dataChannel?: RTCDataChannel;
+  chatChannel?: RTCDataChannel;
 }
 
 // Constants for event kinds
@@ -92,6 +93,19 @@ export interface ParsedSessionEvent {
   connected?: string[];
 }
 
+function waitForIceGatheringComplete(pc: RTCPeerConnection) {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const onChange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', onChange);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', onChange);
+  });
+}
+
 export function useMultiplayerSession(gameId: string) {
   const { nostr } = useNostr();
   const { user } = useCurrentUser();
@@ -123,6 +137,15 @@ export function useMultiplayerSession(gameId: string) {
   // For guest: single peer connection to host
   const guestPeerConnectionRef = useRef<RTCPeerConnection | null>(null);
   const guestDataChannelRef = useRef<RTCDataChannel | null>(null);
+  const guestChatChannelRef = useRef<RTCDataChannel | null>(null);
+
+  const isStartingRef = useRef(false);
+  const hasStartedRef = useRef(false);
+
+  const storageKey = useCallback(
+    (pk?: string) => (pk ? `mp:${pk}:${ensureGamePrefix(gameId)}` : ''),
+    [gameId]
+  );
 
   // Stable reference to current values for use in subscription
   const currentValuesRef = useRef({
@@ -142,7 +165,29 @@ export function useMultiplayerSession(gameId: string) {
     gameId
   };
 
-
+  /**
+   * Attach/replace host video track on all existing peers
+   */
+  const attachStreamToAllPeers = useCallback((stream: MediaStream) => {
+    const videoTrack = stream.getVideoTracks()[0];
+    if (!videoTrack) return;
+    peerConnectionsRef.current.forEach(({ connection }) => {
+      const sender = connection.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) {
+        sender.replaceTrack(videoTrack).catch(err => console.error('[HOST] replaceTrack fail:', err));
+      } else {
+        try {
+          connection.addTrack(videoTrack, stream);
+        } catch (e) {
+          // fallback via existing transceiver
+          const tx = connection.getTransceivers().find(t =>
+            (t.sender && t.sender.track?.kind === 'video') || t.receiver.track?.kind === 'video'
+          );
+          try { tx?.sender?.replaceTrack?.(videoTrack); } catch {}
+        }
+      }
+    });
+  }, []);
 
   /**
    * Publish session state (type=session) to relay
@@ -317,7 +362,9 @@ export function useMultiplayerSession(gameId: string) {
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
-          await publishSignalEphemeral(from, 'answer', { sdp: answer });
+          await waitForIceGatheringComplete(pc);
+
+          await publishSignalEphemeral(from, 'answer', { sdp: pc.localDescription! });
           console.log(`[SIG/RECV] Sent answer to host ${from.substring(0, 8)}...`);
 
           // Flush queued ICE candidates
@@ -346,12 +393,10 @@ export function useMultiplayerSession(gameId: string) {
   /**
    * Start per-peer signaling subscription
    */
-  const startPeerSignalingSubscription = useCallback(async (remotePubkey: string) => {
+  const startPeerSignalingSubscription = useCallback((remotePubkey: string) => {
     if (!user || !sessionId || !nostr) return;
 
     const peerKey = getPeerKey(user.pubkey, remotePubkey);
-
-    // Don't reuse existing subscription
     if (peerSubscriptionsRef.current.has(peerKey)) {
       console.log(`[SIG/SUB] Already subscribed to peer ${remotePubkey.substring(0, 8)}...`);
       return;
@@ -360,36 +405,37 @@ export function useMultiplayerSession(gameId: string) {
     const controller = new AbortController();
     peerSubscriptionsRef.current.set(peerKey, controller);
 
-    try {
-      const relay = nostr.relay(config.relayUrl);
-      const filter = {
-        kinds: [KIND_SIGNAL],
-        '#d': [sessionId],
-        '#p': [user.pubkey],
-        authors: [remotePubkey],
-        since: Math.floor(Date.now() / 1000) - 2 // Small cushion
-      };
+    (async () => {
+      try {
+        const relay = nostr.relay(config.relayUrl);
+        const filter = {
+          kinds: [KIND_SIGNAL],
+          '#d': [sessionId],
+          '#p': [user.pubkey],
+          authors: [remotePubkey],
+          since: Math.floor(Date.now() / 1000) - 2,
+        };
 
-      console.log(`[SIG/SUB] Starting per-peer subscription for ${remotePubkey.substring(0, 8)}...`);
+        console.log(`[SIG/SUB] Starting per-peer subscription for ${remotePubkey.substring(0, 8)}...`);
 
-      for await (const msg of relay.req([filter], { signal: controller.signal })) {
-        if (msg[0] === 'EVENT') {
-          const event = msg[2];
-          if (processedEventIdsRef.current.has(event.id)) continue;
+        for await (const msg of relay.req([filter], { signal: controller.signal })) {
+          if (msg[0] === 'EVENT') {
+            const event = msg[2];
+            if (processedEventIdsRef.current.has(event.id)) continue;
+            processedEventIdsRef.current.add(event.id);
 
-          processedEventIdsRef.current.add(event.id);
-          const parsed = parseSignalEvent(event);
-
-          if (parsed && parsed.to === user.pubkey) {
-            await handleSignalEvent(parsed);
+            const parsed = parseSignalEvent(event);
+            if (parsed && parsed.to === user.pubkey) {
+              await handleSignalEvent(parsed);
+            }
           }
         }
+      } catch (error: any) {
+        if (error.name !== 'AbortError') {
+          console.error(`[SIG/SUB] Error in peer subscription for ${remotePubkey.substring(0, 8)}...`, error);
+        }
       }
-    } catch (error) {
-      if (error.name !== 'AbortError') {
-        console.error(`[SIG/SUB] Error in peer subscription for ${remotePubkey.substring(0, 8)}...`, error);
-      }
-    }
+    })();
   }, [user, sessionId, nostr, config.relayUrl, getPeerKey, parseSignalEvent, handleSignalEvent]);
 
   /**
@@ -449,10 +495,41 @@ export function useMultiplayerSession(gameId: string) {
       }
     };
 
+    // Create data channel for chat
+    const chatChannel = peerConnection.createDataChannel('chat', { ordered: true });
+    chatChannel.onopen = () => {
+      console.log(`[ChatDC] Opened for guest ${guestPubkey.substring(0, 8)}...`);
+    };
+    chatChannel.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data);
+        if (msg?.type === 'chat') {
+          // rebroadcast to other guests
+          peerConnectionsRef.current.forEach((peer, pk) => {
+            if (pk !== guestPubkey && peer.chatChannel?.readyState === 'open') {
+              peer.chatChannel.send(JSON.stringify(msg));
+            }
+          });
+          // deliver to local UI
+          window.dispatchEvent(new CustomEvent('chat:incoming', { detail: msg }));
+        }
+      } catch (err) {
+        console.error('[ChatDC] parse fail:', err);
+      }
+    };
+
     // Handle ICE candidates
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate) {
-        publishSignalEphemeral(guestPubkey, 'candidate', { candidate: event.candidate });
+    peerConnection.onicecandidate = () => { /* no-op: sem trickle */ };
+
+    peerConnection.onnegotiationneeded = async () => {
+      try {
+        const offer = await peerConnection.createOffer();
+        await peerConnection.setLocalDescription(offer);
+        await waitForIceGatheringComplete(peerConnection);
+        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: peerConnection.localDescription! });
+        console.log(`[HOST] Renegotiation offer sent to ${guestPubkey.substring(0,8)}...`);
+      } catch (err) {
+        console.error('[HOST] onnegotiationneeded failed:', err);
       }
     };
 
@@ -474,7 +551,8 @@ export function useMultiplayerSession(gameId: string) {
     peerConnectionsRef.current.set(guestPubkey, {
       pubkey: guestPubkey,
       connection: peerConnection,
-      dataChannel
+      dataChannel,
+      chatChannel
     });
 
     return peerConnection;
@@ -505,19 +583,28 @@ export function useMultiplayerSession(gameId: string) {
       console.log('[DataChannel] Received from host:', dataChannel.label);
 
       // Store reference for sending inputs
-      guestDataChannelRef.current = dataChannel;
-
-      dataChannel.onopen = () => {
-        console.log('[DataChannel] Guest channel opened');
-      };
+      if (dataChannel.label === 'inputs') {
+        guestDataChannelRef.current = dataChannel;
+        dataChannel.onopen = () => console.log('[DataChannel] Guest inputs opened');
+        return;
+      }
+      if (dataChannel.label === 'chat') {
+        guestChatChannelRef.current = dataChannel;
+        dataChannel.onopen = () => console.log('[DataChannel] Guest chat opened');
+        dataChannel.onmessage = (ev) => {
+          try {
+            const msg = JSON.parse(ev.data);
+            if (msg?.type === 'chat') {
+              window.dispatchEvent(new CustomEvent('chat:incoming', { detail: msg }));
+            }
+          } catch {}
+        };
+        return;
+      }
     };
 
     // Handle ICE candidates - need to get host pubkey from session
-    peerConnection.onicecandidate = (event) => {
-      if (event.candidate && session?.hostPubkey) {
-        publishSignalEphemeral(session.hostPubkey, 'candidate', { candidate: event.candidate });
-      }
-    };
+    peerConnection.onicecandidate = () => { /* no-op: sem trickle */ };
 
     // Connection state monitoring
     peerConnection.onconnectionstatechange = () => {
@@ -557,8 +644,12 @@ export function useMultiplayerSession(gameId: string) {
       // Host received join request - start per-peer signaling
       const guestPubkey = parsed.from;
 
+      if (peerConnectionsRef.current.has(guestPubkey)) {
+        console.warn('[HOST] Duplicate join for', guestPubkey.substring(0, 8), '... ignored');
+        return;
+      }
       // Start per-peer signaling subscription for this guest
-      await startPeerSignalingSubscription(guestPubkey);
+      startPeerSignalingSubscription(guestPubkey);
 
       // Create peer connection
       const pc = createHostPeerConnection(guestPubkey);
@@ -573,7 +664,8 @@ export function useMultiplayerSession(gameId: string) {
         // Create and send offer
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
-        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: offer });
+        await waitForIceGatheringComplete(pc);
+        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: pc.localDescription! });
 
         console.log(`[HOST] Offer sent to guest ${guestPubkey.substring(0, 8)}...`);
       } catch (error) {
@@ -627,18 +719,68 @@ export function useMultiplayerSession(gameId: string) {
       return;
     }
 
+    if (hasStartedRef.current || isStartingRef.current) {
+      console.warn('[HOST] startSession ignored (already starting/started).');
+      return;
+    }
+    isStartingRef.current = true;
+
     try {
-      setStatus('creating');
       setError(null);
+
+      if (sessionId && (status === 'creating' || status === 'available')) {
+        console.log('[HOST] Reusing in-memory session:', sessionId);
+        hostVideoStreamRef.current = videoStream;
+        attachStreamToAllPeers(videoStream);
+        await publishSessionState(sessionId, {
+          status: 'available',
+          maxPlayers,
+          guests: [],
+          connected: []
+        });
+        hasStartedRef.current = true;
+        isStartingRef.current = false;
+        return;
+      }
+
+      const saved = sessionStorage.getItem(storageKey(user.pubkey));
+      if (saved) {
+        try {
+          const parsed = JSON.parse(saved);
+          if (parsed?.sessionId && parsed?.owner === user.pubkey) {
+            setSessionId(parsed.sessionId);
+            setIsHost(true);
+            hostVideoStreamRef.current = videoStream;
+            attachStreamToAllPeers(videoStream);
+            setStatus('available');
+            console.log('[HOST] Reattached to existing session:', parsed.sessionId);
+            await publishSessionState(parsed.sessionId, {
+              status: 'available',
+              maxPlayers,
+              guests: [],
+              connected: []
+            });
+            hasStartedRef.current = true;
+            isStartingRef.current = false;
+            return;
+          }
+        } catch { /* ignore JSON error */ }
+      }
+
+      setStatus('creating');
 
       const newSessionId = generateSessionId(gameId);
       setSessionId(newSessionId);
       setIsHost(true);
 
-      // Store the video stream for later use when guests join
-      hostVideoStreamRef.current = videoStream;
+      sessionStorage.setItem(storageKey(user.pubkey), JSON.stringify({
+        owner: user.pubkey,
+        sessionId: newSessionId
+      }));
 
-      // Publish initial session state (no offers created yet)
+      hostVideoStreamRef.current = videoStream;
+      attachStreamToAllPeers(videoStream);
+
       await publishSessionState(newSessionId, {
         status: 'available',
         maxPlayers,
@@ -647,14 +789,17 @@ export function useMultiplayerSession(gameId: string) {
       });
 
       setStatus('available');
+      hasStartedRef.current = true;
       console.log('[HOST] Session started:', newSessionId);
-
     } catch (err) {
       console.error('[HOST] Failed to start session:', err);
       setError(err instanceof Error ? err.message : 'Failed to start session');
       setStatus('error');
+      hasStartedRef.current = false;
+    } finally {
+      isStartingRef.current = false;
     }
-  }, [user, gameId, generateSessionId, publishSessionState]);
+  }, [user, gameId, sessionId, status, publishSessionState, storageKey]);
 
   /**
    * Join existing session as guest
@@ -697,7 +842,7 @@ export function useMultiplayerSession(gameId: string) {
       const hostPubkey = parsed.host;
 
       // Start per-peer signaling subscription BEFORE sending join
-      await startPeerSignalingSubscription(hostPubkey);
+      startPeerSignalingSubscription(hostPubkey);
 
       // Create guest peer connection
       createGuestPeerConnection();
@@ -764,6 +909,12 @@ export function useMultiplayerSession(gameId: string) {
       guestDataChannelRef.current = null;
     }
 
+    // Close guest chat channel
+    if (guestChatChannelRef.current) {
+      guestChatChannelRef.current.close();
+      guestChatChannelRef.current = null;
+    }
+
     // Stop video tracks
     if (hostVideoStreamRef.current) {
       hostVideoStreamRef.current.getTracks().forEach(track => track.stop());
@@ -791,7 +942,14 @@ export function useMultiplayerSession(gameId: string) {
     iceCandidateQueuesRef.current.clear();
 
     console.log('[SESSION] Left and cleaned up');
-  }, []);
+    if (user?.pubkey) {
+      sessionStorage.removeItem(storageKey(user.pubkey));
+    }
+    hasStartedRef.current = false;
+    isStartingRef.current = false;
+
+    console.log('[SESSION] Left and cleaned up');
+  }, [user, storageKey]);
 
   /**
    * Get peer connection for a guest (host only)
@@ -817,6 +975,32 @@ export function useMultiplayerSession(gameId: string) {
     }
   }, [isHost]);
 
+
+  /**
+   * Chat: host broadcasts via per-peer chatChannel; guest uses guestChatChannelRef
+   */
+  const sendChatMessage = useCallback((text: string) => {
+    const t = (text || '').trim();
+    if (!t) return;
+    const msg = { type: 'chat', text: t, from: user?.pubkey, ts: Date.now() };
+    if (isHost) {
+      peerConnectionsRef.current.forEach(({ chatChannel }) => {
+        if (chatChannel?.readyState === 'open') {
+          chatChannel.send(JSON.stringify(msg));
+        }
+      });
+      // echo local
+      window.dispatchEvent(new CustomEvent('chat:incoming', { detail: msg }));
+    } else {
+      const dc = guestChatChannelRef.current;
+      if (dc?.readyState === 'open') {
+        dc.send(JSON.stringify(msg));
+        // echo local
+        window.dispatchEvent(new CustomEvent('chat:incoming', { detail: msg }));
+      }
+    }
+  }, [isHost, user?.pubkey]);
+
   return {
     sessionId,
     session,
@@ -828,6 +1012,7 @@ export function useMultiplayerSession(gameId: string) {
     joinSession,
     leaveSession,
     getPeerConnection,
-    sendGameInput
+    sendGameInput,
+    sendChatMessage
   };
 }

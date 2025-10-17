@@ -45,6 +45,19 @@ const parseSessionId = (sessionId: string): { gameId: string; roomId: string } =
   return { gameId, roomId };
 };
 
+const waitForIceGatheringComplete = (pc: RTCPeerConnection) => {
+  if (pc.iceGatheringState === 'complete') return Promise.resolve();
+  return new Promise<void>((resolve) => {
+    const onChange = () => {
+      if (pc.iceGatheringState === 'complete') {
+        pc.removeEventListener('icegatheringstatechange', onChange);
+        resolve();
+      }
+    };
+    pc.addEventListener('icegatheringstatechange', onChange);
+  });
+}
+
 type ConnectionState = 'connecting' | 'connected' | 'receiving' | 'error' | 'disconnected';
 
 interface GameMetadata {
@@ -86,8 +99,9 @@ export default function MultiplayerGuestRoom() {
 
   // WebRTC connection ref
   const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const abortControllerRef = useRef<AbortController | null>(null);
   const processedEventIdsRef = useRef<Set<string>>(new Set());
+
+  const signalingAbortControllerRef = useRef<AbortController | null>(null);
 
   // Get host author info
   const hostAuthor = useAuthor(hostPubkey);
@@ -97,119 +111,65 @@ export default function MultiplayerGuestRoom() {
   /**
    * Parse session event according to new protocol
    */
-  const parseSessionEvent = useCallback((event: NostrEvent) => {
-    const tags = event.tags || [];
-    const getTag = (n: string) => tags.find(t => t[0] === n)?.[1];
-    const getVals = (n: string) => tags.filter(t => t[0] === n).map(t => t[1]);
+  const parseSignalEvent = useCallback((event: NostrEvent) => {
+    const type = event.tags.find(t => t[0] === 'type')?.[1] as 'offer'|'answer'|'candidate'|undefined;
+    const d = event.tags.find(t => t[0] === 'd')?.[1] || '';
+    const to = event.tags.find(t => t[0] === 'p')?.[1] || null;
+    if (!type || !d) return null;
 
-    const type = getTag('type');
-    if (!type) return null;
-
-    let signal = getTag('signal');
-    if ((!signal || signal === 'content') && event.content) {
-      // keep downstream compatibility: `parsed.signal` stays base64
-      signal = btoa(unescape(encodeURIComponent(event.content)));
-    }
-
-    return {
-      type,
-      sessionId: getTag('d') || '',
-      from: getTag('from'),
-      to: getTag('to'),
-      signal,
-      host: getTag('host'),
-      players: getTag('players'),
-      status: getTag('status') as SessionStatus,
-      guests: getVals('guest'),
-      connected: getVals('connected')
-    } as {
-      type: string;
+    let payload: any = {};
+    try { payload = JSON.parse(event.content || '{}'); } catch {}
+    return { type, sessionId: d, from: event.pubkey, to, payload } as {
+      type: 'offer'|'answer'|'candidate';
       sessionId: string;
-      from?: string;
-      to?: string;
-      signal?: string;
-      host?: string;
-      players?: string;
-      status?: SessionStatus;
-      guests: string[];
-      connected: string[];
+      from: string;
+      to: string|null;
+      payload: any;
     };
   }, []);
+
 
   /**
    * Handle signaling events
    */
-  const handleSignalingEvent = useCallback(async (event: NostrEvent) => {
-    if (processedEventIdsRef.current.has(event.id)) {
-      return;
-    }
+  const handleSignalEvent = useCallback(async (event: NostrEvent) => {
+    if (processedEventIdsRef.current.has(event.id)) return;
     processedEventIdsRef.current.add(event.id);
 
-    const parsed = parseSessionEvent(event);
-    if (!parsed || !user || !peerConnectionRef.current) {
-      return;
+    const parsed = parseSignalEvent(event);
+    if (!parsed || !user || !peerConnectionRef.current) return;
+    if (parsed.to !== user.pubkey) return;
+
+    const pc = peerConnectionRef.current;
+
+    try {
+      if (parsed.type === 'offer' && parsed.payload?.sdp) {
+        await pc.setRemoteDescription(parsed.payload.sdp);
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+        await waitForIceGatheringComplete(pc);
+
+        await publishEvent({
+          kind: KIND_SIGNAL,
+          content: JSON.stringify({ sdp: pc.localDescription! }),
+          tags: [
+            ['d', sessionId],
+            ['type', 'answer'],
+            ['p', parsed.from], // host
+            ['expiration', String(Math.floor(Date.now()/1000) + 60)]
+          ],
+          relays: [config.relayUrl]
+        });
+        console.log('[GuestRoom] Sent answer to host (no-trickle)');
+
+      } else if (parsed.type === 'candidate' && parsed.payload?.candidate) {
+        await pc.addIceCandidate(parsed.payload.candidate);
+        console.log('[GuestRoom] Added ICE candidate from host');
+      }
+    } catch (err) {
+      console.error('[GuestRoom] handleSignalEvent error:', err);
     }
-
-    console.log('[GuestRoom] Handling signaling event:', parsed);
-
-    // Only handle events directed to this guest
-    if (parsed.to !== user?.pubkey) {
-      return;
-    }
-
-    switch (parsed.type) {
-      case 'offer':
-        if (parsed.signal && parsed.from) {
-          console.log('[GuestRoom] Received offer from host');
-          try {
-            const offer = JSON.parse(atob(parsed.signal));
-            await peerConnectionRef.current.setRemoteDescription(offer);
-
-            const answer = await peerConnectionRef.current.createAnswer();
-            await peerConnectionRef.current.setLocalDescription(answer);
-
-            // Publish answer
-            const fromPubkey = parsed.from;
-            if (fromPubkey && user?.pubkey && sessionId) {
-              publishEvent({
-                kind: 31997,
-                content: '',
-                tags: [
-                  ['d', sessionId],
-                  ['type', 'answer'],
-                  ['from', user.pubkey],
-                  ['to', fromPubkey],
-                  ['signal', btoa(JSON.stringify(answer))]
-                ],
-                relays: [config.relayUrl]
-              });
-            }
-          } catch (err) {
-            console.error('[GuestRoom] Failed to handle offer:', err);
-          }
-        }
-        break;
-
-      case 'candidate':
-        if (parsed.signal && parsed.from) {
-          console.log('[GuestRoom] Received ICE candidate from host');
-          try {
-            const candidate = JSON.parse(atob(parsed.signal));
-            await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(candidate));
-          } catch (err) {
-            console.error('[GuestRoom] Failed to add ICE candidate:', err);
-          }
-        }
-        break;
-
-      case 'session':
-        // Update session state
-        if (parsed.connected) {
-          setConnectedPlayers(parsed.connected.length + 1); // +1 for host
-        }
-        break;
-    }
-  }, [parseSessionEvent, user, sessionId, publishEvent, config.relayUrl]);
+  }, [parseSignalEvent, user, sessionId, publishEvent, config.relayUrl]);
 
   /**
    * Initialize WebRTC connection and join session
@@ -227,17 +187,18 @@ export default function MultiplayerGuestRoom() {
         setConnectionState('connecting');
         setError(null);
 
+        const mainRelay = nostr.relay(config.relayUrl);
+
         // Parse session ID to extract game ID
-        const { gameId } = parseSessionId(sessionId);
-        setGameId(gameId);
+        const { gameId: parsedGameId } = parseSessionId(sessionId);
+        setGameId(parsedGameId);
 
         // 1. Fetch game metadata in parallel (best-effort, non-blocking)
         const fetchGameMetadata = async () => {
           try {
-            const mainRelay = nostr.relay(config.relayUrl);
             const gameEvents = await mainRelay.query([{
               kinds: [31996],
-              '#d': [gameId],
+              '#d': [parsedGameId],
               limit: 1
             }], { signal: AbortSignal.timeout(10000) });
 
@@ -251,7 +212,7 @@ export default function MultiplayerGuestRoom() {
               };
 
               setGameMeta({
-                id: gameId,
+                id: parsedGameId,
                 title: getTagValue('name') || 'Unknown Game',
                 summary: getTagValue('summary'),
                 genres: gameEvent.tags.filter(t => t[0] === 't').map(t => t[1]).filter(Boolean),
@@ -275,7 +236,7 @@ export default function MultiplayerGuestRoom() {
 
         // 2. Fetch the latest session event from main relay only
         const sessionEvents = await mainRelay.query([{
-          kinds: [31997],
+          kinds: [KIND_SESSION],
           '#d': [sessionId],
           limit: 1
         }], { signal: AbortSignal.timeout(10000) });
@@ -287,40 +248,6 @@ export default function MultiplayerGuestRoom() {
         const sessionEvent = sessionEvents[0] as NostrEvent;
 
         // Start signaling subscription BEFORE sending join
-        if (user) {
-          const signalingController = new AbortController();
-          const mainRelay = nostr.relay(config.relayUrl);
-
-          // Subscribe to signaling events addressed to this guest
-          const handleSignalingSubscription = async () => {
-            try {
-              for await (const ev of mainRelay.req([{
-                kinds: [KIND_SIGNAL],
-                '#d': [sessionId],
-                '#p': [user.pubkey],
-                since: Math.floor(Date.now() / 1000) - 2
-              }], { signal: signalingController.signal })) {
-                if (ev[0] === 'EVENT') {
-                  const event = ev[2];
-                  handleSignalingEvent(event);
-                } else if (ev[0] === 'EOSE') {
-                  console.log('[GuestRoom] Signaling subscription EOSE');
-                }
-              }
-            } catch (err) {
-              if (err.name === 'AbortError') {
-                console.log('[GuestRoom] Signaling subscription aborted');
-              } else {
-                console.error('[GuestRoom] Signaling subscription error:', err);
-              }
-            }
-          };
-
-          handleSignalingSubscription();
-
-          // Store controller for cleanup
-          signalingAbortControllerRef.current = signalingController;
-        }
 
         // Parse session data
         const getTag = (name: string) => sessionEvent.tags.find(t => t[0] === name)?.[1];
@@ -341,9 +268,9 @@ export default function MultiplayerGuestRoom() {
         }
 
         setHostPubkey(hostTag);
-        setConnectedPlayers(connectedTags.length + 1); // +1 for host
+        setConnectedPlayers(connectedTags.length + 1); // +1 para host
 
-        // 3. Set up WebRTC connection
+        // 3. Set up WebRTC connection (ANTES da assinatura 21997!)
         const peerConnection = new RTCPeerConnection({
           iceServers: [
             { urls: 'stun:stun.l.google.com:19302' },
@@ -392,14 +319,42 @@ export default function MultiplayerGuestRoom() {
         };
 
         // Handle ICE candidates
-        peerConnection.onicecandidate = (event) => {
-          if (event.candidate) {
-            // Candidate will be sent via the new signaling protocol
-            console.log('[GuestRoom] Generated ICE candidate:', event.candidate);
-          }
+         peerConnection.onicecandidate = () => { /* no-op (no-trickle) */ };
+
+        peerConnection.ondatachannel = (e) => {
+          const ch = e.channel;
+          ch.onopen = () => console.log('[GuestRoom] Data channel open:', ch.label);
+          ch.onmessage = (msg) => {
+            // por enquanto só loga
+            console.log('[GuestRoom] Data from host:', msg.data);
+          };
         };
 
-        // 4. Publish join intent to main relay only
+        if (user) {
+          const signalingController = new AbortController();
+          (async () => {
+            try {
+              for await (const ev of mainRelay.req([{
+                kinds: [KIND_SIGNAL],
+                '#d': [sessionId],
+                '#p': [user.pubkey],       // endereçadas a este guest
+                authors: [hostTag],        // emitidas pelo host
+                since: Math.floor(Date.now()/1000) - 60
+              }], { signal: signalingController.signal })) {
+                if (ev[0] === 'EVENT') {
+                  await handleSignalEvent(ev[2]);
+                } else if (ev[0] === 'EOSE') {
+                  console.log('[GuestRoom] Signaling subscription EOSE');
+                }
+              }
+            } catch (err:any) {
+              if (err.name !== 'AbortError') console.error('[GuestRoom] 21997 sub error:', err);
+            }
+          })();
+          signalingAbortControllerRef.current = signalingController;
+        }
+
+        // 4. Publish join intent
         if (sessionId && user?.pubkey) {
           publishEvent({
             kind: 31997,
@@ -414,7 +369,6 @@ export default function MultiplayerGuestRoom() {
           });
         }
 
-        setConnectionState('connected');
         console.log('[GuestRoom] Join intent sent, waiting for offer from host');
 
       } catch (err) {
@@ -430,60 +384,16 @@ export default function MultiplayerGuestRoom() {
 
     // Cleanup function
     return () => {
+      signalingAbortControllerRef.current?.abort();
+      signalingAbortControllerRef.current = null;
+
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
         peerConnectionRef.current = null;
       }
       processedEventIdsRef.current.clear();
     };
-  }, [sessionId, user, nostr, publishEvent]);
-
-  /**
-   * Subscribe to signaling events
-   */
-  useEffect(() => {
-    if (!sessionId || !nostr || !user) {
-      return;
-    }
-
-    console.log('[GuestRoom] Setting up signaling subscription for:', sessionId);
-
-    const mainRelay = nostr.relay(config.relayUrl);
-    abortControllerRef.current = new AbortController();
-
-    const handleSubscription = async () => {
-      try {
-        for await (const ev of mainRelay.req([{
-          kinds: [31997],
-          '#d': [sessionId],
-          since: Math.floor(Date.now() / 1000) - 60
-        }], { signal: abortControllerRef.current!.signal })) {
-          if (ev[0] === 'EVENT') {
-            const event = ev[2];
-            handleSignalingEvent(event);
-          } else if (ev[0] === 'EOSE') {
-            console.log('[GuestRoom] Signaling subscription EOSE');
-          }
-        }
-      } catch (err) {
-        if (err.name === 'AbortError') {
-          console.log('[GuestRoom] Signaling subscription aborted');
-        } else {
-          console.error('[GuestRoom] Signaling subscription error:', err);
-        }
-      }
-    };
-
-    handleSubscription();
-
-    return () => {
-      if (abortControllerRef.current) {
-        abortControllerRef.current.abort();
-        abortControllerRef.current = null;
-      }
-      processedEventIdsRef.current.clear();
-    };
-  }, [sessionId, nostr, user, handleSignalingEvent]);
+  }, [sessionId, user, nostr, publishEvent, config.relayUrl, handleSignalEvent]);
 
   /**
    * Retry connection
