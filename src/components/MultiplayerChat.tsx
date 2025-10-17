@@ -25,6 +25,7 @@ interface MultiplayerChatProps {
   onlineCount?: number;
   currentUser?: string;
   onSendMessage?: (message: string) => void;
+  onSend?: (message: string) => void;
   messages?: ChatMessage[];
   isHost?: boolean;
 }
@@ -34,6 +35,7 @@ export default function MultiplayerChat({
   onlineCount = 0,
   currentUser = 'You',
   onSendMessage,
+  onSend,
   messages = [],
   isHost = false
 }: MultiplayerChatProps) {
@@ -87,7 +89,9 @@ export default function MultiplayerChat({
   const handleSendMessage = () => {
     if (!message.trim()) return;
 
-    if (onSendMessage) {
+    if (onSend) {
+      onSend(message);
+    } else if (onSendMessage) {
       onSendMessage(message);
     } else {
       // Mock sending message

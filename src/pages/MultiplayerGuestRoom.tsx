@@ -6,9 +6,8 @@
  * the host room while providing a spectator/guest experience.
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, Link } from 'react-router-dom';
-import { useNostr } from '@jsr/nostrify__react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
@@ -16,17 +15,9 @@ import { ArrowLeft, RefreshCw, Users, Wifi, WifiOff, Play } from 'lucide-react';
 import MultiplayerChat from '@/components/MultiplayerChat';
 import GameControls from '@/components/GameControls';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
 import { useAuthor } from '@/hooks/useAuthor';
-import { useAppContext } from '@/hooks/useAppContext';
+import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 import { genUserName } from '@/lib/genUserName';
-
-import type { NostrEvent } from '@jsr/nostrify__nostrify';
-import type { SessionStatus } from '@/hooks/useMultiplayerSession';
-
-// Constants for event kinds
-const KIND_SESSION = 31997;  // replaceable snapshot
-const KIND_SIGNAL = 21997;   // ephemeral signaling
 
 /**
  * Session ID helpers to ensure consistent format: "game:gameId:room:roomId"
@@ -44,19 +35,6 @@ const parseSessionId = (sessionId: string): { gameId: string; roomId: string } =
   const gameId = ensureGamePrefix(stripGamePrefix(left));
   return { gameId, roomId };
 };
-
-const waitForIceGatheringComplete = (pc: RTCPeerConnection) => {
-  if (pc.iceGatheringState === 'complete') return Promise.resolve();
-  return new Promise<void>((resolve) => {
-    const onChange = () => {
-      if (pc.iceGatheringState === 'complete') {
-        pc.removeEventListener('icegatheringstatechange', onChange);
-        resolve();
-      }
-    };
-    pc.addEventListener('icegatheringstatechange', onChange);
-  });
-}
 
 type ConnectionState = 'connecting' | 'connected' | 'receiving' | 'error' | 'disconnected';
 
@@ -82,318 +60,151 @@ export default function MultiplayerGuestRoom() {
   const { sessionId: raw } = useParams<{ sessionId: string }>();
   const sessionId = raw ? decodeURIComponent(raw) : '';
   const navigate = useNavigate();
-  const { nostr } = useNostr();
   const { user } = useCurrentUser();
-  const { mutate: publishEvent } = useNostrPublish();
-  const { config } = useAppContext();
   const videoRef = useRef<HTMLVideoElement>(null);
+
+  // Parse session ID to get game ID
+  const { gameId: parsedGameId } = parseSessionId(sessionId);
+
+  // Use the multiplayer session hook
+  const {
+    status,
+    connectedPlayers,
+    error: mpError,
+    joinSession,
+    leaveSession,
+    sendChatMessage,
+  } = useMultiplayerSession(parsedGameId);
 
   // State management
   const [connectionState, setConnectionState] = useState<ConnectionState>('connecting');
   const [error, setError] = useState<string | null>(null);
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [isStreamActive, setIsStreamActive] = useState(false);
-  const [connectedPlayers, setConnectedPlayers] = useState(0);
+  const [messages, setMessages] = useState<Array<{ text: string; from?: string; ts: number }>>([]);
   const [hostPubkey, setHostPubkey] = useState<string>('');
-  const [gameId, setGameId] = useState<string>('');
-
-  // WebRTC connection ref
-  const peerConnectionRef = useRef<RTCPeerConnection | null>(null);
-  const processedEventIdsRef = useRef<Set<string>>(new Set());
-
-  const signalingAbortControllerRef = useRef<AbortController | null>(null);
+  const [gameId, setGameId] = useState<string>(parsedGameId);
 
   // Get host author info
   const hostAuthor = useAuthor(hostPubkey);
   const hostMetadata = hostAuthor.data?.metadata;
   const hostDisplayName = hostMetadata?.name ?? genUserName(hostPubkey);
 
-  /**
-   * Parse session event according to new protocol
-   */
-  const parseSignalEvent = useCallback((event: NostrEvent) => {
-    const type = event.tags.find(t => t[0] === 'type')?.[1] as 'offer'|'answer'|'candidate'|undefined;
-    const d = event.tags.find(t => t[0] === 'd')?.[1] || '';
-    const to = event.tags.find(t => t[0] === 'p')?.[1] || null;
-    if (!type || !d) return null;
-
-    let payload: any = {};
-    try { payload = JSON.parse(event.content || '{}'); } catch {}
-    return { type, sessionId: d, from: event.pubkey, to, payload } as {
-      type: 'offer'|'answer'|'candidate';
-      sessionId: string;
-      from: string;
-      to: string|null;
-      payload: any;
+  // Join session on mount, leave on unmount
+  useEffect(() => {
+    if (sessionId) {
+      joinSession(sessionId);
+    }
+    return () => {
+      leaveSession();
     };
+  }, [sessionId, joinSession, leaveSession]);
+
+  // Handle host video stream
+  useEffect(() => {
+    const onStream = (e: CustomEvent<MediaStream>) => {
+      const stream = e.detail;
+      if (videoRef.current) {
+        videoRef.current.srcObject = stream;
+        setIsStreamActive(true);
+        setConnectionState('receiving');
+      }
+    };
+    window.addEventListener('hostVideoStream', onStream as EventListener);
+    return () => window.removeEventListener('hostVideoStream', onStream as EventListener);
   }, []);
 
-
-  /**
-   * Handle signaling events
-   */
-  const handleSignalEvent = useCallback(async (event: NostrEvent) => {
-    if (processedEventIdsRef.current.has(event.id)) return;
-    processedEventIdsRef.current.add(event.id);
-
-    const parsed = parseSignalEvent(event);
-    if (!parsed || !user || !peerConnectionRef.current) return;
-    if (parsed.to !== user.pubkey) return;
-
-    const pc = peerConnectionRef.current;
-
-    try {
-      if (parsed.type === 'offer' && parsed.payload?.sdp) {
-        await pc.setRemoteDescription(parsed.payload.sdp);
-        const answer = await pc.createAnswer();
-        await pc.setLocalDescription(answer);
-        await waitForIceGatheringComplete(pc);
-
-        await publishEvent({
-          kind: KIND_SIGNAL,
-          content: JSON.stringify({ sdp: pc.localDescription! }),
-          tags: [
-            ['d', sessionId],
-            ['type', 'answer'],
-            ['p', parsed.from], // host
-            ['expiration', String(Math.floor(Date.now()/1000) + 60)]
-          ],
-          relays: [config.relayUrl]
-        });
-        console.log('[GuestRoom] Sent answer to host (no-trickle)');
-
-      } else if (parsed.type === 'candidate' && parsed.payload?.candidate) {
-        await pc.addIceCandidate(parsed.payload.candidate);
-        console.log('[GuestRoom] Added ICE candidate from host');
-      }
-    } catch (err) {
-      console.error('[GuestRoom] handleSignalEvent error:', err);
-    }
-  }, [parseSignalEvent, user, sessionId, publishEvent, config.relayUrl]);
-
-  /**
-   * Initialize WebRTC connection and join session
-   */
+  // Handle incoming chat messages
   useEffect(() => {
-    const joinSession = async () => {
-      if (!sessionId || !user || !nostr) {
-        setError('Missing session ID, user login, or Nostr connection');
+    const onIncoming = (e: CustomEvent<{ text: string; from?: string; ts: number }>) => {
+      setMessages(prev => [...prev, e.detail]); // {type:'chat', text, from, ts}
+    };
+    window.addEventListener('chat:incoming', onIncoming as EventListener);
+    return () => window.removeEventListener('chat:incoming', onIncoming as EventListener);
+  }, []);
+
+  // Map hook status to UI connection state
+  useEffect(() => {
+    if (mpError) {
+      setError(mpError);
+      setConnectionState('error');
+      return;
+    }
+    switch (status) {
+      case 'creating':
+        setConnectionState('connecting');
+        break;
+      case 'available':
+        if (!isStreamActive) setConnectionState('connected'); // waiting for stream
+        break;
+      case 'full':
+        setError('Session is full');
         setConnectionState('error');
-        return;
-      }
+        break;
+      case 'idle':
+        setConnectionState('connecting');
+        break;
+      default:
+        break;
+    }
+  }, [status, mpError, isStreamActive]);
+
+  // Fetch game metadata
+  useEffect(() => {
+    const fetchGameMetadata = async () => {
+      if (!parsedGameId) return;
 
       try {
-        console.log('[GuestRoom] Joining session:', sessionId);
-        setConnectionState('connecting');
-        setError(null);
+        // Import dynamically for metadata fetch only
+        const { nostr } = await import('@jsr/nostrify__react').then(mod => mod.useNostr());
+        const { config } = await import('@/hooks/useAppContext').then(mod => mod.useAppContext());
+
+        if (!nostr) return;
 
         const mainRelay = nostr.relay(config.relayUrl);
-
-        // Parse session ID to extract game ID
-        const { gameId: parsedGameId } = parseSessionId(sessionId);
-        setGameId(parsedGameId);
-
-        // 1. Fetch game metadata in parallel (best-effort, non-blocking)
-        const fetchGameMetadata = async () => {
-          try {
-            const gameEvents = await mainRelay.query([{
-              kinds: [31996],
-              '#d': [parsedGameId],
-              limit: 1
-            }], { signal: AbortSignal.timeout(10000) });
-
-            if (gameEvents.length > 0) {
-              const gameEvent = gameEvents[0] as NostrEvent;
-
-              // Parse game metadata
-              const getTagValue = (tagName: string): string | undefined => {
-                const tag = gameEvent.tags.find(t => t[0] === tagName);
-                return tag?.[1];
-              };
-
-              setGameMeta({
-                id: parsedGameId,
-                title: getTagValue('name') || 'Unknown Game',
-                summary: getTagValue('summary'),
-                genres: gameEvent.tags.filter(t => t[0] === 't').map(t => t[1]).filter(Boolean),
-                modes: gameEvent.tags.filter(t => t[0] === 'mode').map(t => t[1]).filter(Boolean),
-                status: getTagValue('status'),
-                platforms: gameEvent.tags.filter(t => t[0] === 'platform').map(t => t[1]).filter(Boolean),
-                assets: {
-                  cover: gameEvent.tags.find(t => t[0] === 'image' && t[1] === 'cover')?.[2],
-                  screenshots: []
-                }
-              });
-            }
-          } catch (err) {
-            console.warn('[GuestRoom] Failed to fetch game metadata:', err);
-            // Game metadata fetch failure doesn't block join
-          }
-        };
-
-        // Start game metadata fetch in parallel (non-blocking)
-        fetchGameMetadata();
-
-        // 2. Fetch the latest session event from main relay only
-        const sessionEvents = await mainRelay.query([{
-          kinds: [KIND_SESSION],
-          '#d': [sessionId],
+        const gameEvents = await mainRelay.query([{
+          kinds: [31996],
+          '#d': [parsedGameId],
           limit: 1
         }], { signal: AbortSignal.timeout(10000) });
 
-        if (sessionEvents.length === 0) {
-          throw new Error('Session not found or expired');
-        }
+        if (gameEvents.length > 0) {
+          const gameEvent = gameEvents[0];
 
-        const sessionEvent = sessionEvents[0] as NostrEvent;
-
-        // Start signaling subscription BEFORE sending join
-
-        // Parse session data
-        const getTag = (name: string) => sessionEvent.tags.find(t => t[0] === name)?.[1];
-        const getTagValues = (name: string) => sessionEvent.tags.filter(t => t[0] === name).map(t => t[1]);
-
-        const typeTag = getTag('type');
-        const hostTag = getTag('host');
-        const statusTag = getTag('status');
-        const playersTag = getTag('players');
-        const connectedTags = getTagValues('connected');
-
-        if (typeTag !== 'session' || !hostTag) {
-          throw new Error('Invalid session data');
-        }
-
-        if (statusTag === 'full') {
-          throw new Error('Session is full');
-        }
-
-        setHostPubkey(hostTag);
-        setConnectedPlayers(connectedTags.length + 1); // +1 para host
-
-        // 3. Set up WebRTC connection (ANTES da assinatura 21997!)
-        const peerConnection = new RTCPeerConnection({
-          iceServers: [
-            { urls: 'stun:stun.l.google.com:19302' },
-            { urls: 'stun:stun1.l.google.com:19302' }
-          ]
-        });
-
-        peerConnectionRef.current = peerConnection;
-
-        // Handle incoming video stream
-        peerConnection.ontrack = (event) => {
-          console.log('[GuestRoom] Received remote stream');
-          const [remoteStream] = event.streams;
-
-          if (videoRef.current) {
-            videoRef.current.srcObject = remoteStream;
-            setIsStreamActive(true);
-            setConnectionState('receiving');
-          }
-        };
-
-        // Handle connection state changes
-        peerConnection.onconnectionstatechange = () => {
-          const state = peerConnection.connectionState;
-          console.log('[GuestRoom] Connection state:', state);
-
-          switch (state) {
-            case 'connected':
-              setConnectionState('connected');
-              break;
-            case 'disconnected':
-            case 'failed':
-              setConnectionState('disconnected');
-              setIsStreamActive(false);
-              break;
-            case 'closed':
-              setConnectionState('disconnected');
-              setIsStreamActive(false);
-              break;
-          }
-        };
-
-        // Handle ICE connection state changes
-        peerConnection.oniceconnectionstatechange = () => {
-          console.log('[GuestRoom] ICE connection state:', peerConnection.iceConnectionState);
-        };
-
-        // Handle ICE candidates
-         peerConnection.onicecandidate = () => { /* no-op (no-trickle) */ };
-
-        peerConnection.ondatachannel = (e) => {
-          const ch = e.channel;
-          ch.onopen = () => console.log('[GuestRoom] Data channel open:', ch.label);
-          ch.onmessage = (msg) => {
-            // por enquanto só loga
-            console.log('[GuestRoom] Data from host:', msg.data);
+          // Parse game metadata
+          const getTagValue = (tagName: string): string | undefined => {
+            const tag = gameEvent.tags.find(t => t[0] === tagName);
+            return tag?.[1];
           };
-        };
 
-        if (user) {
-          const signalingController = new AbortController();
-          (async () => {
-            try {
-              for await (const ev of mainRelay.req([{
-                kinds: [KIND_SIGNAL],
-                '#d': [sessionId],
-                '#p': [user.pubkey],       // endereçadas a este guest
-                authors: [hostTag],        // emitidas pelo host
-                since: Math.floor(Date.now()/1000) - 60
-              }], { signal: signalingController.signal })) {
-                if (ev[0] === 'EVENT') {
-                  await handleSignalEvent(ev[2]);
-                } else if (ev[0] === 'EOSE') {
-                  console.log('[GuestRoom] Signaling subscription EOSE');
-                }
-              }
-            } catch (err:any) {
-              if (err.name !== 'AbortError') console.error('[GuestRoom] 21997 sub error:', err);
+          setGameMeta({
+            id: parsedGameId,
+            title: getTagValue('name') || 'Unknown Game',
+            summary: getTagValue('summary'),
+            genres: gameEvent.tags.filter(t => t[0] === 't').map(t => t[1]).filter(Boolean),
+            modes: gameEvent.tags.filter(t => t[0] === 'mode').map(t => t[1]).filter(Boolean),
+            status: getTagValue('status'),
+            platforms: gameEvent.tags.filter(t => t[0] === 'platform').map(t => t[1]).filter(Boolean),
+            assets: {
+              cover: gameEvent.tags.find(t => t[0] === 'image' && t[1] === 'cover')?.[2],
+              screenshots: []
             }
-          })();
-          signalingAbortControllerRef.current = signalingController;
-        }
-
-        // 4. Publish join intent
-        if (sessionId && user?.pubkey) {
-          publishEvent({
-            kind: 31997,
-            content: '',
-            tags: [
-              ['d', sessionId],
-              ['type', 'join'],
-              ['from', user.pubkey],
-              ['to', hostTag]
-            ],
-            relays: [config.relayUrl]
           });
+
+          // Set host pubkey from the session event
+          const hostTag = getTagValue('host');
+          if (hostTag) {
+            setHostPubkey(hostTag);
+          }
         }
-
-        console.log('[GuestRoom] Join intent sent, waiting for offer from host');
-
       } catch (err) {
-        console.error('[GuestRoom] Failed to join session:', err);
-        setError(err instanceof Error ? err.message : 'Failed to join session');
-        setConnectionState('error');
+        console.warn('[GuestRoom] Failed to fetch game metadata:', err);
       }
     };
 
-    if (sessionId) {
-      joinSession();
-    }
-
-    // Cleanup function
-    return () => {
-      signalingAbortControllerRef.current?.abort();
-      signalingAbortControllerRef.current = null;
-
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-        peerConnectionRef.current = null;
-      }
-      processedEventIdsRef.current.clear();
-    };
-  }, [sessionId, user, nostr, publishEvent, config.relayUrl, handleSignalEvent]);
+    setGameId(parsedGameId);
+    fetchGameMetadata();
+  }, [parsedGameId]);
 
   /**
    * Retry connection
@@ -402,16 +213,16 @@ export default function MultiplayerGuestRoom() {
     setError(null);
     setIsStreamActive(false);
     setConnectionState('connecting');
-    // Re-trigger the effect by updating a dependency or manually call initializeWebRTC
+    if (sessionId) {
+      joinSession(sessionId);
+    }
   };
 
   /**
    * Leave session and go back
    */
   const handleLeave = () => {
-    if (peerConnectionRef.current) {
-      peerConnectionRef.current.close();
-    }
+    leaveSession();
     navigate('/games');
   };
 
@@ -553,10 +364,10 @@ export default function MultiplayerGuestRoom() {
                       Host: {hostDisplayName}
                     </span>
                   )}
-                  {connectedPlayers > 0 && (
+                  {(connectedPlayers?.length ?? 0) > 0 && (
                     <span className="flex items-center gap-1">
                       <Users className="w-3 h-3" />
-                      {connectedPlayers} players
+                      {(connectedPlayers?.length ?? 0) + 1} players
                     </span>
                   )}
                 </div>
@@ -656,9 +467,17 @@ export default function MultiplayerGuestRoom() {
           <div className="lg:col-span-1 space-y-6">
             {/* Player Chat */}
             <MultiplayerChat
-              onlineCount={connectedPlayers}
+              onlineCount={(connectedPlayers?.length ?? 0) + 1}
               currentUser="Guest"
               isHost={false}
+              messages={messages.map(msg => ({
+                id: `msg-${msg.ts}`,
+                user: msg.from === user?.pubkey ? 'You' : (msg.from?.substring(0, 8) + '...' || 'Unknown'),
+                message: msg.text,
+                time: 'Just now',
+                isCurrentUser: msg.from === user?.pubkey
+              }))}
+              onSend={sendChatMessage}
             />
 
             {/* Session Info Card */}
