@@ -100,41 +100,60 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const containerRef = useRef<HTMLDivElement>(null);
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [romUrl, setRomUrl] = useState('');
+  const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const focusedOnceRef = useRef(false);
 
   // Map NES button names to DOM key names
-  const toDomKey = useCallback((k: string): string => {
+  const toDomKey = useCallback((k: string): { key: string; code: string; keyCode: number } => {
     switch (k) {
-      case 'Up': return 'ArrowUp';
-      case 'Down': return 'ArrowDown';
-      case 'Left': return 'ArrowLeft';
-      case 'Right': return 'ArrowRight';
-      case 'Start': return 'Enter';
-      case 'Select': return 'Shift';
-      case 'A': return 'z';
-      case 'B': return 'x';
-      default: return k;
+      case 'Up':    return { key: 'ArrowUp',    code: 'ArrowUp', keyCode: 38 };
+      case 'Down':  return { key: 'ArrowDown',  code: 'ArrowDown', keyCode: 40 };
+      case 'Left':  return { key: 'ArrowLeft',  code: 'ArrowLeft', keyCode: 37 };
+      case 'Right': return { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 };
+      case 'Start': return { key: 'Enter',      code: 'Enter',     keyCode: 13 };
+      case 'Select':return { key: 'Shift',      code: 'ShiftLeft', keyCode: 16 };
+      case 'A':     return { key: 'z',          code: 'KeyZ',      keyCode: 90 };
+      case 'B':     return { key: 'x',          code: 'KeyX',      keyCode: 88 };
+      default:      return { key: k, code: k, keyCode: 0 };
     }
   }, []);
 
   // Listen for remote input events and dispatch to iframe
   useEffect(() => {
-    const onRemoteInput = (e: CustomEvent<{ key: string; pressed: boolean }>) => {
-      const { key, pressed } = e.detail;
-      const domKey = toDomKey(key);
+  const onRemoteInput = (e: CustomEvent<{ key: string; pressed: boolean }>) => {
       const win = iframeRef.current?.contentWindow;
-      const doc = win?.document;
-      if (!doc) return;
+      const doc = iframeRef.current?.contentDocument;
+      if (!win || !doc) return;
 
+      const { key, pressed } = e.detail;
+      const { key: domKey, code, keyCode } = toDomKey(key);
       const type = pressed ? 'keydown' : 'keyup';
+
+      // Build event with legacy shims (keyCode/which) for emscripten listeners
       const ev = new KeyboardEvent(type, {
         key: domKey,
-        code: domKey.startsWith('Arrow') ? domKey : undefined,
+        code,
         bubbles: true,
         cancelable: true,
-        repeat: false
+        repeat: false,
       });
+      // Shim keyCode/which (read-only) via getters
+      try {
+        Object.defineProperty(ev, 'keyCode', { get: () => keyCode });
+        Object.defineProperty(ev, 'which',   { get: () => keyCode });
+      } catch {}
 
+      // ensure canvas focused
+      try {
+        if (canvasRef.current && doc.activeElement !== canvasRef.current) {
+          canvasRef.current.focus();
+        }
+      } catch {}
+
+      // Dispatch to all likely targets
+      win.dispatchEvent(ev);
       doc.dispatchEvent(ev);
+      canvasRef.current?.dispatchEvent(ev);
     };
 
     window.addEventListener('remoteInput', onRemoteInput as EventListener);
@@ -239,6 +258,19 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
         setIsReady(true);
         setIsLoading(false);
         setError(null);
+
+        try {
+          const doc = iframeRef.current?.contentDocument;
+          const canvas = doc?.querySelector('canvas') as HTMLCanvasElement | null;
+          if (canvas) {
+            canvasRef.current = canvas;
+            if (!canvas.hasAttribute('tabindex')) canvas.setAttribute('tabindex', '0');
+            if (!focusedOnceRef.current) {
+              canvas.focus();
+              focusedOnceRef.current = true;
+            }
+          }
+        } catch {}
       } else if (data.type === 'ejs:error') {
         console.error('[EmulatorIFrame] Emulator error:', data.message);
         setError(String(data.message ?? 'Unknown error'));

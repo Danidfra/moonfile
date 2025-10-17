@@ -494,19 +494,23 @@ export default function MultiplayerGuestRoom() {
             {/* Video Stream */}
             <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
               {/* Video element - hidden until stream is received */}
-              <div className="relative">
+              <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
                 <video
                   ref={videoRef}
                   autoPlay
                   playsInline
-                  muted={true}
-                  className={`w-full h-full object-contain ${isStreamActive ? 'block' : 'hidden'}`}
-                  style={{ display: isStreamActive ? 'block' : 'none' }}
+                  muted
                   onClick={requestFocus}
+                  className={`absolute inset-0 w-full h-full object-contain ${isStreamActive ? 'opacity-100' : 'opacity-0'}`}
                 />
 
-                {/* Focus overlay */}
-                {focused && (
+                {!isStreamActive && (
+                  <div className="absolute inset-0 flex items-center justify-center">
+                    {/* your waiting UI */}
+                  </div>
+                )}
+
+                {focused && isStreamActive && (
                   <div className="absolute top-2 left-2 text-xs bg-black/60 px-2 py-1 rounded">
                     Focused — press ESC to exit
                   </div>
