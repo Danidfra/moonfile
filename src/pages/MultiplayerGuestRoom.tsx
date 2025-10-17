@@ -79,6 +79,7 @@ export default function MultiplayerGuestRoom() {
     joinSession,
     leaveSession,
     sendChatMessage,
+    sendGameInput,
   } = useMultiplayerSession(parsedGameId);
 
   // State management
@@ -89,6 +90,88 @@ export default function MultiplayerGuestRoom() {
   const [messages, setMessages] = useState<Array<{ text: string; from?: string; ts: number }>>([]);
   const hostPubkey = session?.hostPubkey ?? '';
   const [gameId, setGameId] = useState<string>(parsedGameId);
+
+  // Guest input focus state
+  const [focused, setFocused] = useState(false);
+  const pressedRef = useRef<Set<string>>(new Set());
+
+  // Scroll lock functions
+  const lockScroll = () => document.body.classList.add('overflow-hidden');
+  const unlockScroll = () => document.body.classList.remove('overflow-hidden');
+
+  // Map keyboard events to NES buttons
+  const mapKey = (e: KeyboardEvent): string | null => {
+    const { code, key } = e;
+    if (key.startsWith('Arrow')) return key.replace('Arrow', '');
+    if (code === 'Enter') return 'Start';
+    if (code === 'ShiftLeft' || code === 'ShiftRight') return 'Select';
+    if (code === 'KeyZ') return 'A';
+    if (code === 'KeyX') return 'B';
+    if (code === 'Space') return 'Start';
+    return null;
+  };
+
+  // Handle input focus and event listeners
+  useEffect(() => {
+    if (!focused) return;
+
+    const onKeyDown = (e: KeyboardEvent) => {
+      const k = mapKey(e);
+      if (!k) return;
+      if ([' ', 'ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.key)) e.preventDefault();
+      if (pressedRef.current.has(k)) return;
+      pressedRef.current.add(k);
+      sendGameInput({ key: k, pressed: true });
+    };
+
+    const onKeyUp = (e: KeyboardEvent) => {
+      const k = mapKey(e);
+      if (!k) return;
+      e.preventDefault();
+      pressedRef.current.delete(k);
+      sendGameInput({ key: k, pressed: false });
+    };
+
+    const onWheel = (e: WheelEvent) => { e.preventDefault(); };
+
+    const onContext = (e: MouseEvent) => {
+      e.preventDefault(); // right click → B
+      sendGameInput({ key: 'B', pressed: true });
+      setTimeout(() => sendGameInput({ key: 'B', pressed: false }), 10);
+    };
+
+    const onBlur = () => releaseFocus();
+
+    window.addEventListener('keydown', onKeyDown, { passive: false });
+    window.addEventListener('keyup', onKeyUp, { passive: false });
+    window.addEventListener('wheel', onWheel, { passive: false });
+    window.addEventListener('contextmenu', onContext);
+    window.addEventListener('blur', onBlur);
+
+    lockScroll();
+
+    return () => {
+      window.removeEventListener('keydown', onKeyDown as any);
+      window.removeEventListener('keyup', onKeyUp as any);
+      window.removeEventListener('wheel', onWheel as any);
+      window.removeEventListener('contextmenu', onContext as any);
+      window.removeEventListener('blur', onBlur as any);
+      unlockScroll();
+      const currentPressed = pressedRef.current;
+      currentPressed.clear();
+    };
+  }, [focused, sendGameInput]);
+
+  // Handle ESC key to exit focus
+  useEffect(() => {
+    if (!focused) return;
+    const onEsc = (e: KeyboardEvent) => { if (e.code === 'Escape') releaseFocus(); };
+    window.addEventListener('keydown', onEsc);
+    return () => window.removeEventListener('keydown', onEsc);
+  }, [focused]);
+
+  const requestFocus = () => setFocused(true);
+  const releaseFocus = () => setFocused(false);
 
   // Get host author info
   const hostAuthor = useAuthor(hostPubkey);
@@ -411,14 +494,24 @@ export default function MultiplayerGuestRoom() {
             {/* Video Stream */}
             <div className="relative bg-gray-900 rounded-lg overflow-hidden aspect-video">
               {/* Video element - hidden until stream is received */}
-              <video
-                ref={videoRef}
-                autoPlay
-                playsInline
-                muted={true}
-                className={`w-full h-full object-contain ${isStreamActive ? 'block' : 'hidden'}`}
-                style={{ display: isStreamActive ? 'block' : 'none' }}
-              />
+              <div className="relative">
+                <video
+                  ref={videoRef}
+                  autoPlay
+                  playsInline
+                  muted={true}
+                  className={`w-full h-full object-contain ${isStreamActive ? 'block' : 'hidden'}`}
+                  style={{ display: isStreamActive ? 'block' : 'none' }}
+                  onClick={requestFocus}
+                />
+
+                {/* Focus overlay */}
+                {focused && (
+                  <div className="absolute top-2 left-2 text-xs bg-black/60 px-2 py-1 rounded">
+                    Focused — press ESC to exit
+                  </div>
+                )}
+              </div>
 
               {/* Placeholder when no stream */}
               {!isStreamActive && (

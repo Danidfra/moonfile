@@ -101,6 +101,46 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const iframeRef = useRef<HTMLIFrameElement>(null);
   const [romUrl, setRomUrl] = useState('');
 
+  // Map NES button names to DOM key names
+  const toDomKey = useCallback((k: string): string => {
+    switch (k) {
+      case 'Up': return 'ArrowUp';
+      case 'Down': return 'ArrowDown';
+      case 'Left': return 'ArrowLeft';
+      case 'Right': return 'ArrowRight';
+      case 'Start': return 'Enter';
+      case 'Select': return 'Shift';
+      case 'A': return 'z';
+      case 'B': return 'x';
+      default: return k;
+    }
+  }, []);
+
+  // Listen for remote input events and dispatch to iframe
+  useEffect(() => {
+    const onRemoteInput = (e: CustomEvent<{ key: string; pressed: boolean }>) => {
+      const { key, pressed } = e.detail;
+      const domKey = toDomKey(key);
+      const win = iframeRef.current?.contentWindow;
+      const doc = win?.document;
+      if (!doc) return;
+
+      const type = pressed ? 'keydown' : 'keyup';
+      const ev = new KeyboardEvent(type, {
+        key: domKey,
+        code: domKey.startsWith('Arrow') ? domKey : undefined,
+        bubbles: true,
+        cancelable: true,
+        repeat: false
+      });
+
+      doc.dispatchEvent(ev);
+    };
+
+    window.addEventListener('remoteInput', onRemoteInput as EventListener);
+    return () => window.removeEventListener('remoteInput', onRemoteInput as EventListener);
+  }, [toDomKey]);
+
   // Use the fullscreen hook
   const {
     isFullscreenUI,

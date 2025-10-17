@@ -21,6 +21,7 @@ import GameInteractionCard from '@/components/GameInteractionCard';
 import MultiplayerCard from '@/components/MultiplayerCard';
 import MultiplayerChat from '@/components/MultiplayerChat';
 import GameControls from '@/components/GameControls';
+import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
 
 import type { NostrEvent } from '@jsr/nostrify__nostrify';
 
@@ -104,6 +105,24 @@ export default function GamePage() {
     }
     return null;
   };
+
+  // Multiplayer session hook for host chat functionality
+  const {
+    isHost,
+    status: multiplayerStatus,
+    connectedPlayers,
+    sendChatMessage
+  } = useMultiplayerSession(id || '');
+  const [messages, setMessages] = useState<Array<{ text: string; from?: string; ts: number }>>([]);
+
+  // Listen for incoming chat messages
+  useEffect(() => {
+    const onIncoming = (e: CustomEvent<{ text: string; from?: string; ts: number }>) => {
+      setMessages(prev => [...prev, e.detail]);
+    };
+    window.addEventListener('chat:incoming', onIncoming as EventListener);
+    return () => window.removeEventListener('chat:incoming', onIncoming as EventListener);
+  }, []);
 
   /**
    * Fetch game event and prepare ROM
@@ -394,9 +413,6 @@ export default function GamePage() {
   const isMultiplayer = isMultiplayerGame(gameEvent);
   const maxPlayers = getMaxPlayers(gameEvent);
 
-  // Show chat when session is available or full
-  const showMultiplayerChat = isMultiplayer && ['available', 'full'].includes(multiplayerSessionStatus);
-
   // Create pretty platform label for UI
   const prettyPlatform = platform.endsWith('-rom') ? platform.replace('-rom', '').toUpperCase() : platform.toUpperCase();
 
@@ -480,11 +496,20 @@ export default function GamePage() {
               )}
 
               {/* Show chat panel for multiplayer when session is active */}
-              {showMultiplayerChat && (
+              {isHost && (multiplayerStatus === 'available' || multiplayerStatus === 'creating') && (
                 <MultiplayerChat
-                  onlineCount={3}
-                  currentUser="You"
-                  isHost={true}
+                  onlineCount={(connectedPlayers?.length ?? 0) + 1}
+                  currentUser="Host"
+                  isHost
+                  messages={messages.map(msg => ({
+                    id: `msg-${msg.ts}`,
+                    user: msg.from ? `${msg.from.substring(0, 8)}...` : 'Guest',
+                    message: msg.text,
+                    time: 'now',
+                    isCurrentUser: false
+                  }))}
+                  onSend={sendChatMessage}
+                  useMockFallback={false}
                 />
               )}
 
