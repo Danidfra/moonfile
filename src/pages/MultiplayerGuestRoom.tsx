@@ -17,6 +17,8 @@ import GameControls from '@/components/GameControls';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthor } from '@/hooks/useAuthor';
 import { useMultiplayerSession } from '@/hooks/useMultiplayerSession';
+import { useNostr } from '@jsr/nostrify__react';
+import { useAppContext } from '@/hooks/useAppContext';
 import { genUserName } from '@/lib/genUserName';
 
 /**
@@ -62,12 +64,15 @@ export default function MultiplayerGuestRoom() {
   const navigate = useNavigate();
   const { user } = useCurrentUser();
   const videoRef = useRef<HTMLVideoElement>(null);
+  const { nostr } = useNostr();
+  const { config } = useAppContext();
 
   // Parse session ID to get game ID
   const { gameId: parsedGameId } = parseSessionId(sessionId);
 
   // Use the multiplayer session hook
   const {
+    session,
     status,
     connectedPlayers,
     error: mpError,
@@ -82,7 +87,7 @@ export default function MultiplayerGuestRoom() {
   const [gameMeta, setGameMeta] = useState<GameMetadata | null>(null);
   const [isStreamActive, setIsStreamActive] = useState(false);
   const [messages, setMessages] = useState<Array<{ text: string; from?: string; ts: number }>>([]);
-  const [hostPubkey, setHostPubkey] = useState<string>('');
+  const hostPubkey = session?.hostPubkey ?? '';
   const [gameId, setGameId] = useState<string>(parsedGameId);
 
   // Get host author info
@@ -90,12 +95,21 @@ export default function MultiplayerGuestRoom() {
   const hostMetadata = hostAuthor.data?.metadata;
   const hostDisplayName = hostMetadata?.name ?? genUserName(hostPubkey);
 
+  const joinedRef = useRef<string | null>(null);
+  const firstCleanupSkipRef = useRef(true);
+
   // Join session on mount, leave on unmount
   useEffect(() => {
-    if (sessionId) {
-      joinSession(sessionId);
-    }
+    if (!sessionId) return;
+    if (joinedRef.current === sessionId) return;
+    joinedRef.current = sessionId;
+    joinSession(sessionId);
+
     return () => {
+      if (firstCleanupSkipRef.current) {
+        firstCleanupSkipRef.current = false;
+        return;
+      }
       leaveSession();
     };
   }, [sessionId, joinSession, leaveSession]);
@@ -104,10 +118,27 @@ export default function MultiplayerGuestRoom() {
   useEffect(() => {
     const onStream = (e: CustomEvent<MediaStream>) => {
       const stream = e.detail;
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        setIsStreamActive(true);
-        setConnectionState('receiving');
+
+      const s = e.detail as MediaStream;
+      console.log('[GuestRoom] incoming tracks:', s.getTracks().map(t => ({kind: t.kind, enabled: t.enabled, readyState: t.readyState})));
+
+      const el = videoRef.current;
+      if (!el) return;
+      el.muted = true;
+      el.srcObject = stream;
+
+      const tryPlay = () => {
+        el.play().then(() => {
+          setIsStreamActive(true);
+          setConnectionState('receiving');
+        }).catch((err) => {
+          console.warn('[GuestRoom] video.play() blocked/deferred', err);
+        });
+      };
+      if (el.readyState >= 2) {
+        tryPlay();
+      } else {
+        el.onloadedmetadata = () => tryPlay();
       }
     };
     window.addEventListener('hostVideoStream', onStream as EventListener);
@@ -149,18 +180,12 @@ export default function MultiplayerGuestRoom() {
     }
   }, [status, mpError, isStreamActive]);
 
-  // Fetch game metadata
+  // Fetch game metadata (read-only, now using top-level hooks)
   useEffect(() => {
     const fetchGameMetadata = async () => {
       if (!parsedGameId) return;
 
       try {
-        // Import dynamically for metadata fetch only
-        const { nostr } = await import('@jsr/nostrify__react').then(mod => mod.useNostr());
-        const { config } = await import('@/hooks/useAppContext').then(mod => mod.useAppContext());
-
-        if (!nostr) return;
-
         const mainRelay = nostr.relay(config.relayUrl);
         const gameEvents = await mainRelay.query([{
           kinds: [31996],
@@ -190,12 +215,6 @@ export default function MultiplayerGuestRoom() {
               screenshots: []
             }
           });
-
-          // Set host pubkey from the session event
-          const hostTag = getTagValue('host');
-          if (hostTag) {
-            setHostPubkey(hostTag);
-          }
         }
       } catch (err) {
         console.warn('[GuestRoom] Failed to fetch game metadata:', err);
@@ -204,7 +223,7 @@ export default function MultiplayerGuestRoom() {
 
     setGameId(parsedGameId);
     fetchGameMetadata();
-  }, [parsedGameId]);
+  }, [parsedGameId, nostr, config.relayUrl]);
 
   /**
    * Retry connection
@@ -396,7 +415,7 @@ export default function MultiplayerGuestRoom() {
                 ref={videoRef}
                 autoPlay
                 playsInline
-                muted={false}
+                muted={true}
                 className={`w-full h-full object-contain ${isStreamActive ? 'block' : 'hidden'}`}
                 style={{ display: isStreamActive ? 'block' : 'none' }}
               />
@@ -478,6 +497,7 @@ export default function MultiplayerGuestRoom() {
                 isCurrentUser: msg.from === user?.pubkey
               }))}
               onSend={sendChatMessage}
+              useMockFallback={false}
             />
 
             {/* Session Info Card */}

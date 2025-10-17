@@ -28,6 +28,7 @@ interface MultiplayerChatProps {
   onSend?: (message: string) => void;
   messages?: ChatMessage[];
   isHost?: boolean;
+  useMockFallback?: boolean;
 }
 
 export default function MultiplayerChat({
@@ -37,7 +38,8 @@ export default function MultiplayerChat({
   onSendMessage,
   onSend,
   messages = [],
-  isHost = false
+  isHost = false,
+  useMockFallback = true
 }: MultiplayerChatProps) {
   const [message, setMessage] = useState('');
   const scrollAreaRef = useRef<HTMLDivElement>(null);
@@ -74,7 +76,9 @@ export default function MultiplayerChat({
     },
   ];
 
-  const displayMessages = messages.length > 0 ? messages : mockMessages;
+  const displayMessages = useMockFallback
+    ? (messages.length > 0 ? messages : mockMessages)
+    : messages;
 
   // Auto-scroll to bottom when new messages arrive
   useEffect(() => {

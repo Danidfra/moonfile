@@ -172,20 +172,9 @@ export function useMultiplayerSession(gameId: string) {
     const videoTrack = stream.getVideoTracks()[0];
     if (!videoTrack) return;
     peerConnectionsRef.current.forEach(({ connection }) => {
-      const sender = connection.getSenders().find(s => s.track?.kind === 'video');
-      if (sender) {
-        sender.replaceTrack(videoTrack).catch(err => console.error('[HOST] replaceTrack fail:', err));
-      } else {
-        try {
-          connection.addTrack(videoTrack, stream);
-        } catch (e) {
-          // fallback via existing transceiver
-          const tx = connection.getTransceivers().find(t =>
-            (t.sender && t.sender.track?.kind === 'video') || t.receiver.track?.kind === 'video'
-          );
-          try { tx?.sender?.replaceTrack?.(videoTrack); } catch {}
-        }
-      }
+      const tx = connection.getTransceivers().find(t => t.sender?.track?.kind === 'video' || t.receiver?.track?.kind === 'video');
+      const sender = tx?.sender ?? connection.getSenders().find(s => s.track?.kind === 'video');
+      if (sender) sender.replaceTrack(videoTrack).catch(err => console.error('[HOST] replaceTrack fail:', err));
     });
   }, []);
 
@@ -272,9 +261,13 @@ export function useMultiplayerSession(gameId: string) {
   /**
    * Generate peer key for subscription management
    */
-  const getPeerKey = useCallback((localPk: string, remotePk: string): string => {
-    return `${sessionId}:${localPk}:${remotePk}`;
-  }, [sessionId]);
+  const getPeerKey = useCallback(
+    (localPk: string, remotePk: string, sidOverride?: string): string => {
+      const sid = sidOverride ?? sessionId;
+      return `${sid}:${localPk}:${remotePk}`;
+    },
+    [sessionId]
+  );
 
   /**
    * Publish ephemeral signaling message with robust logging
@@ -282,16 +275,21 @@ export function useMultiplayerSession(gameId: string) {
   const publishSignalEphemeral = useCallback(async (
     to: string,
     type: SignalEventType,
-    payload: SignalPayload
+    payload: SignalPayload,
+    sidOverride?: string
   ): Promise<void> => {
-    if (!user || !sessionId) return;
+    const sid = sidOverride ?? sessionId;
+    if (!user || !sid) {
+      console.warn(`[SIG/PUB] skip (missing user/sid). type=${type} to=${to.substring(0,8)}... sid=${sid}`);
+      return;
+    }
 
     try {
       const event = {
         kind: KIND_SIGNAL,
         content: JSON.stringify(payload),
         tags: [
-          ['d', sessionId],
+          ['d', sid],
           ['type', type],
           ['p', to],
           ['expiration', String(Math.floor(Date.now() / 1000) + 60)] // 1 minute TTL
@@ -302,7 +300,7 @@ export function useMultiplayerSession(gameId: string) {
       await publishEvent(event);
 
       // Robust logging as requested
-      console.log(`[SIG/PUB] kind=${KIND_SIGNAL} type=${type} d=${sessionId} to=${to.substring(0, 8)}... ok=true`);
+      console.log(`[SIG/PUB] kind=${KIND_SIGNAL} type=${type} d=${sid} to=${to.substring(0, 8)}... ok=true`);
     } catch (error) {
       console.error(`[SIG/PUB] kind=${KIND_SIGNAL} type=${type} d=${sessionId} to=${to.substring(0, 8)}... ok=false error:`, error);
       throw error; // Don't proceed as if published
@@ -364,7 +362,7 @@ export function useMultiplayerSession(gameId: string) {
 
           await waitForIceGatheringComplete(pc);
 
-          await publishSignalEphemeral(from, 'answer', { sdp: pc.localDescription! });
+          await publishSignalEphemeral(from, 'answer', { sdp: pc.localDescription! }, parsed.sessionId);
           console.log(`[SIG/RECV] Sent answer to host ${from.substring(0, 8)}...`);
 
           // Flush queued ICE candidates
@@ -393,10 +391,11 @@ export function useMultiplayerSession(gameId: string) {
   /**
    * Start per-peer signaling subscription
    */
-  const startPeerSignalingSubscription = useCallback((remotePubkey: string) => {
-    if (!user || !sessionId || !nostr) return;
+  const startPeerSignalingSubscription = useCallback((remotePubkey: string, sidOverride?: string) => {
+    const sid = sidOverride ?? sessionId;
+    if (!user || !sid || !nostr) return;
 
-    const peerKey = getPeerKey(user.pubkey, remotePubkey);
+    const peerKey = getPeerKey(user.pubkey, remotePubkey, sid);
     if (peerSubscriptionsRef.current.has(peerKey)) {
       console.log(`[SIG/SUB] Already subscribed to peer ${remotePubkey.substring(0, 8)}...`);
       return;
@@ -410,7 +409,7 @@ export function useMultiplayerSession(gameId: string) {
         const relay = nostr.relay(config.relayUrl);
         const filter = {
           kinds: [KIND_SIGNAL],
-          '#d': [sessionId],
+          '#d': [sid],
           '#p': [user.pubkey],
           authors: [remotePubkey],
           since: Math.floor(Date.now() / 1000) - 2,
@@ -441,10 +440,9 @@ export function useMultiplayerSession(gameId: string) {
   /**
    * Stop per-peer signaling subscription
    */
-  const stopPeerSignalingSubscription = useCallback((remotePubkey: string) => {
+  const stopPeerSignalingSubscription = useCallback((remotePubkey: string, sidOverride?: string) => {
     if (!user) return;
-
-    const peerKey = getPeerKey(user.pubkey, remotePubkey);
+    const peerKey = getPeerKey(user.pubkey, remotePubkey, sidOverride);
     const controller = peerSubscriptionsRef.current.get(peerKey);
 
     if (controller) {
@@ -465,29 +463,29 @@ export function useMultiplayerSession(gameId: string) {
       ]
     });
 
-    // Add video track if available
-    const stream = hostVideoStreamRef.current;
-    if (stream && stream.getTracks().length) {
-      stream.getTracks().forEach(t => peerConnection.addTrack(t, stream));
-    } else {
-      // SDP must still advertise video even if the track isn't ready yet
-      peerConnection.addTransceiver('video', { direction: 'sendonly' });
+    peerConnection.onnegotiationneeded = () => {};
+
+    // 🔧 sempre crie o transceiver de vídeo (ordem estável das m-lines)
+    const vtx = peerConnection.addTransceiver('video', { direction: 'sendonly' });
+
+    // se já tem stream, substitui o track sem renegociação
+    const track = hostVideoStreamRef.current?.getVideoTracks?.()[0];
+    if (track) {
+      vtx.sender.replaceTrack(track).catch(err => console.error('[HOST] replaceTrack fail:', err));
     }
 
-    // Create data channel for input handling
+    // DataChannel para inputs
     const dataChannel = peerConnection.createDataChannel('inputs', { ordered: true });
-
     dataChannel.onopen = () => {
       console.log(`[DataChannel] Opened for guest ${guestPubkey.substring(0, 8)}...`);
     };
-
     dataChannel.onmessage = (event) => {
       try {
         const input = JSON.parse(event.data);
         console.log(`[DataChannel] Received input from guest ${guestPubkey.substring(0, 8)}...`, input);
 
         if (input.type === 'input') {
-          // Emit custom event that EmulatorIFrame can listen for
+          // avisa o EmulatorIFrame
           window.dispatchEvent(new CustomEvent('remoteInput', { detail: input }));
         }
       } catch (err) {
@@ -495,7 +493,7 @@ export function useMultiplayerSession(gameId: string) {
       }
     };
 
-    // Create data channel for chat
+    // DataChannel para chat
     const chatChannel = peerConnection.createDataChannel('chat', { ordered: true });
     chatChannel.onopen = () => {
       console.log(`[ChatDC] Opened for guest ${guestPubkey.substring(0, 8)}...`);
@@ -504,13 +502,13 @@ export function useMultiplayerSession(gameId: string) {
       try {
         const msg = JSON.parse(event.data);
         if (msg?.type === 'chat') {
-          // rebroadcast to other guests
+          // rebroadcast para os outros convidados
           peerConnectionsRef.current.forEach((peer, pk) => {
             if (pk !== guestPubkey && peer.chatChannel?.readyState === 'open') {
               peer.chatChannel.send(JSON.stringify(msg));
             }
           });
-          // deliver to local UI
+          // entrega para a UI local
           window.dispatchEvent(new CustomEvent('chat:incoming', { detail: msg }));
         }
       } catch (err) {
@@ -518,22 +516,10 @@ export function useMultiplayerSession(gameId: string) {
       }
     };
 
-    // Handle ICE candidates
-    peerConnection.onicecandidate = () => { /* no-op: sem trickle */ };
+    // Sem trickle ICE
+    peerConnection.onicecandidate = () => { /* no-op */ };
 
-    peerConnection.onnegotiationneeded = async () => {
-      try {
-        const offer = await peerConnection.createOffer();
-        await peerConnection.setLocalDescription(offer);
-        await waitForIceGatheringComplete(peerConnection);
-        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: peerConnection.localDescription! });
-        console.log(`[HOST] Renegotiation offer sent to ${guestPubkey.substring(0,8)}...`);
-      } catch (err) {
-        console.error('[HOST] onnegotiationneeded failed:', err);
-      }
-    };
-
-    // Handle connection state changes
+    // Estado de conexão
     peerConnection.onconnectionstatechange = () => {
       const state = peerConnection.connectionState;
       console.log(`[PeerConnection] State for guest ${guestPubkey.substring(0, 8)}...`, state);
@@ -547,7 +533,7 @@ export function useMultiplayerSession(gameId: string) {
       );
     };
 
-    // Store the peer connection
+    // Guarda a conexão
     peerConnectionsRef.current.set(guestPubkey, {
       pubkey: guestPubkey,
       connection: peerConnection,
@@ -556,7 +542,7 @@ export function useMultiplayerSession(gameId: string) {
     });
 
     return peerConnection;
-  }, [publishSignalEphemeral]);
+  }, []);
 
   /**
    * Create WebRTC peer connection for guest
@@ -568,13 +554,20 @@ export function useMultiplayerSession(gameId: string) {
         { urls: 'stun:stun1.l.google.com:19302' }
       ]
     });
-
+ 
     // Handle incoming video stream
+    const inbound = new MediaStream();
     peerConnection.ontrack = (event) => {
       console.log('[PeerConnection] Received host video stream');
-      const [remoteStream] = event.streams;
-      // Emit custom event for components to handle stream
-      window.dispatchEvent(new CustomEvent('hostVideoStream', { detail: remoteStream }));
+      try {
+        if (!inbound.getTracks().includes(event.track)) {
+          inbound.addTrack(event.track);
+        }
+        // Entrega um único stream consistente pra UI
+        window.dispatchEvent(new CustomEvent('hostVideoStream', { detail: inbound }));
+      } catch (e) {
+        console.warn('[PeerConnection] Failed to build inbound stream', e);
+      }
     };
 
     // Handle data channel from host
@@ -613,7 +606,7 @@ export function useMultiplayerSession(gameId: string) {
 
     guestPeerConnectionRef.current = peerConnection;
     return peerConnection;
-  }, [session?.hostPubkey, publishSignalEphemeral]);
+  }, []);
 
   /**
    * Handle session events (kind 31997)
@@ -665,7 +658,7 @@ export function useMultiplayerSession(gameId: string) {
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await waitForIceGatheringComplete(pc);
-        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: pc.localDescription! });
+        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: pc.localDescription! }, sessionId);
 
         console.log(`[HOST] Offer sent to guest ${guestPubkey.substring(0, 8)}...`);
       } catch (error) {
@@ -842,7 +835,7 @@ export function useMultiplayerSession(gameId: string) {
       const hostPubkey = parsed.host;
 
       // Start per-peer signaling subscription BEFORE sending join
-      startPeerSignalingSubscription(hostPubkey);
+      startPeerSignalingSubscription(hostPubkey, sessionIdToJoin);
 
       // Create guest peer connection
       createGuestPeerConnection();
