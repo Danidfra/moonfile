@@ -286,27 +286,6 @@ export default function MultiplayerGuestRoom() {
 
         const sessionEvent = sessionEvents[0] as NostrEvent;
 
-        // Parse session data
-        const getTag = (name: string) => sessionEvent.tags.find(t => t[0] === name)?.[1];
-        const getTagValues = (name: string) => sessionEvent.tags.filter(t => t[0] === name).map(t => t[1]);
-
-        const typeTag = getTag('type');
-        const hostTag = getTag('host');
-        const statusTag = getTag('status');
-        const playersTag = getTag('players');
-        const connectedTags = getTagValues('connected');
-
-        if (typeTag !== 'session' || !hostTag) {
-          throw new Error('Invalid session data');
-        }
-
-        if (statusTag === 'full') {
-          throw new Error('Session is full');
-        }
-
-        setHostPubkey(hostTag);
-        setConnectedPlayers(connectedTags.length + 1); // +1 for host
-
         // Start signaling subscription BEFORE sending join
         if (user) {
           const signalingController = new AbortController();
