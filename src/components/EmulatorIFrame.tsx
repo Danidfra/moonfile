@@ -103,30 +103,67 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const focusedOnceRef = useRef(false);
 
-  // Map NES button names to DOM key names
-  const toDomKey = useCallback((k: string): { key: string; code: string; keyCode: number } => {
-    switch (k) {
-      case 'Up':    return { key: 'ArrowUp',    code: 'ArrowUp', keyCode: 38 };
-      case 'Down':  return { key: 'ArrowDown',  code: 'ArrowDown', keyCode: 40 };
-      case 'Left':  return { key: 'ArrowLeft',  code: 'ArrowLeft', keyCode: 37 };
-      case 'Right': return { key: 'ArrowRight', code: 'ArrowRight', keyCode: 39 };
-      case 'Start': return { key: 'Enter',      code: 'Enter',     keyCode: 13 };
-      case 'Select':return { key: 'Shift',      code: 'ShiftLeft', keyCode: 16 };
-      case 'A':     return { key: 'z',          code: 'KeyZ',      keyCode: 90 };
-      case 'B':     return { key: 'x',          code: 'KeyX',      keyCode: 88 };
-      default:      return { key: k, code: k, keyCode: 0 };
-    }
-  }, []);
+  // Map logical button names to DOM keys per player
+  const DOM_KEYS = useMemo(() => ({
+    1: { Up:'ArrowUp', Down:'ArrowDown', Left:'ArrowLeft', Right:'ArrowRight', A:'z', B:'x', Start:'Enter', Select:'v' },
+    2: { Up:'i', Down:'k', Left:'j', Right:'l', A:'m', B:'n', Start:'p',   Select:'o' },
+    3: { Up:'t', Down:'g', Left:'f', Right:'h', A:'y', B:'u', Start:']',   Select:'[' },
+    4: { Up:'Numpad8', Down:'Numpad5', Left:'Numpad4', Right:'Numpad6', A:'Numpad1', B:'Numpad2', Start:'NumpadEnter', Select:'Numpad0' },
+  }), []);
 
   // Listen for remote input events and dispatch to iframe
   useEffect(() => {
-  const onRemoteInput = (e: CustomEvent<{ key: string; pressed: boolean }>) => {
+  const onRemoteInput = (e: CustomEvent<{ key: string; pressed: boolean; player?: number }>) => {
       const win = iframeRef.current?.contentWindow;
       const doc = iframeRef.current?.contentDocument;
       if (!win || !doc) return;
 
-      const { key, pressed } = e.detail;
-      const { key: domKey, code, keyCode } = toDomKey(key);
+      const { key, pressed, player = 1 } = e.detail;
+
+      // Map logical key to DOM key based on player
+      const playerKeyMap = DOM_KEYS[player] || DOM_KEYS[1];
+      const domKey = playerKeyMap[key] || key;
+
+      // Get code and keyCode for the DOM key
+      const codeToKeyMap: Record<string, { code: string; keyCode: number }> = {
+        'ArrowUp': { code: 'ArrowUp', keyCode: 38 },
+        'ArrowDown': { code: 'ArrowDown', keyCode: 40 },
+        'ArrowLeft': { code: 'ArrowLeft', keyCode: 37 },
+        'ArrowRight': { code: 'ArrowRight', keyCode: 39 },
+        'Enter': { code: 'Enter', keyCode: 13 },
+        'Shift': { code: 'ShiftLeft', keyCode: 16 },
+        'z': { code: 'KeyZ', keyCode: 90 },
+        'x': { code: 'KeyX', keyCode: 88 },
+        'i': { code: 'KeyI', keyCode: 73 },
+        'k': { code: 'KeyK', keyCode: 75 },
+        'j': { code: 'KeyJ', keyCode: 74 },
+        'l': { code: 'KeyL', keyCode: 76 },
+        'm': { code: 'KeyM', keyCode: 77 },
+        'n': { code: 'KeyN', keyCode: 78 },
+        'p': { code: 'KeyP', keyCode: 80 },
+        'o': { code: 'KeyO', keyCode: 79 },
+        't': { code: 'KeyT', keyCode: 84 },
+        'g': { code: 'KeyG', keyCode: 71 },
+        'f': { code: 'KeyF', keyCode: 70 },
+        'h': { code: 'KeyH', keyCode: 72 },
+        'y': { code: 'KeyY', keyCode: 89 },
+        'u': { code: 'KeyU', keyCode: 85 },
+        ']': { code: 'BracketRight', keyCode: 221 },
+        '[': { code: 'BracketLeft', keyCode: 219 },
+        'v': { code: 'KeyV', keyCode: 86 },
+        'Numpad8': { code: 'Numpad8', keyCode: 104 },
+        'Numpad5': { code: 'Numpad5', keyCode: 101 },
+        'Numpad4': { code: 'Numpad4', keyCode: 100 },
+        'Numpad6': { code: 'Numpad6', keyCode: 102 },
+        'Numpad1': { code: 'Numpad1', keyCode: 97 },
+        'Numpad2': { code: 'Numpad2', keyCode: 98 },
+        'Numpad7': { code: 'Numpad7', keyCode: 103 },
+        'Numpad3': { code: 'Numpad3', keyCode: 99 },
+        'Numpad0': { code: 'Numpad0', keyCode: 96 },
+        'NumpadEnter': { code: 'NumpadEnter', keyCode: 13 },
+      };
+
+      const { code, keyCode } = codeToKeyMap[domKey] || { code: domKey, keyCode: 0 };
       const type = pressed ? 'keydown' : 'keyup';
 
       // Build event with legacy shims (keyCode/which) for emscripten listeners
@@ -141,14 +178,18 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
       try {
         Object.defineProperty(ev, 'keyCode', { get: () => keyCode });
         Object.defineProperty(ev, 'which',   { get: () => keyCode });
-      } catch {}
+      } catch (err) {
+        console.warn('[EmulatorIFrame] keyCode/which shim error:', err);
+      }
 
       // ensure canvas focused
       try {
         if (canvasRef.current && doc.activeElement !== canvasRef.current) {
           canvasRef.current.focus();
         }
-      } catch {}
+      } catch (err) {
+        console.warn('[EmulatorIFrame] Canvas focus error:', err);
+      }
 
       // Dispatch to all likely targets
       win.dispatchEvent(ev);
@@ -158,7 +199,7 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
 
     window.addEventListener('remoteInput', onRemoteInput as EventListener);
     return () => window.removeEventListener('remoteInput', onRemoteInput as EventListener);
-  }, [toDomKey]);
+  }, [DOM_KEYS]);
 
   // Use the fullscreen hook
   const {
@@ -270,7 +311,9 @@ const EmulatorIFrame = forwardRef<EmulatorJSRef, EmulatorIFrameProps>(({
               focusedOnceRef.current = true;
             }
           }
-        } catch {}
+        } catch (err) {
+          console.warn('[EmulatorIFrame] Canvas setup error:', err);
+        }
       } else if (data.type === 'ejs:error') {
         console.error('[EmulatorIFrame] Emulator error:', data.message);
         setError(String(data.message ?? 'Unknown error'));

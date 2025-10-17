@@ -22,6 +22,7 @@ export interface ConnectedPlayer {
   name?: string;
   avatar?: string;
   status: 'connecting' | 'connected' | 'ready';
+  playerIndex?: number; // 1-4 (1=host, 2-4=guests)
 }
 
 export interface PeerConnection {
@@ -71,6 +72,7 @@ export type SignalEventType = 'offer' | 'answer' | 'candidate';
 export interface SignalPayload {
   sdp?: RTCSessionDescriptionInit;
   candidate?: RTCIceCandidateInit;
+  playerIndex?: number;
 }
 
 export interface SignalParsed {
@@ -357,6 +359,14 @@ export function useMultiplayerSession(gameId: string) {
 
         if (type === 'offer' && payload.sdp) {
           await pc.setRemoteDescription(payload.sdp);
+
+          // Store player index from offer
+          if (payload.playerIndex) {
+            console.log(`[GUEST] Received player index: ${payload.playerIndex}`);
+            // Store player index for this guest
+            localStorage.setItem(`playerIndex_${sessionId}`, payload.playerIndex.toString());
+          }
+
           const answer = await pc.createAnswer();
           await pc.setLocalDescription(answer);
 
@@ -554,7 +564,7 @@ export function useMultiplayerSession(gameId: string) {
         { urls: 'stun:stun1.l.google.com:19302' }
       ]
     });
- 
+
     // Handle incoming video stream
     const inbound = new MediaStream();
     peerConnection.ontrack = (event) => {
@@ -641,26 +651,49 @@ export function useMultiplayerSession(gameId: string) {
         console.warn('[HOST] Duplicate join for', guestPubkey.substring(0, 8), '... ignored');
         return;
       }
+
+      // Check if session is full (max 4 players total: 1 host + 3 guests)
+      const currentPlayers = connectedPlayers.length + 1; // +1 for host
+      if (currentPlayers >= 4) {
+        console.warn('[HOST] Session full (4 players max), rejecting join from', guestPubkey.substring(0, 8), '...');
+
+        // Send session full status
+        await publishSessionState(sessionId, {
+          status: 'full',
+          maxPlayers: 4,
+          guests: connectedPlayers.map(p => p.pubkey).concat([guestPubkey]),
+          connected: connectedPlayers.filter(p => p.status === 'connected').map(p => p.pubkey)
+        });
+        return;
+      }
+
+      // Assign player index (2, 3, or 4 - 1 is host)
+      const existingPlayerIndices = connectedPlayers.map(p => p.playerIndex).filter(Boolean);
+      const availablePlayerIndex = [2, 3, 4].find(index => !existingPlayerIndices.includes(index)) || 2;
+
       // Start per-peer signaling subscription for this guest
       startPeerSignalingSubscription(guestPubkey);
 
       // Create peer connection
       const pc = createHostPeerConnection(guestPubkey);
 
-      // Add to UI
+      // Add to UI with assigned player index
       setConnectedPlayers(prev => [
         ...prev.filter(p => p.pubkey !== guestPubkey),
-        { pubkey: guestPubkey, status: 'connecting' as const }
+        { pubkey: guestPubkey, status: 'connecting' as const, playerIndex: availablePlayerIndex }
       ]);
 
       try {
-        // Create and send offer
+        // Create and send offer with player index info
         const offer = await pc.createOffer();
         await pc.setLocalDescription(offer);
         await waitForIceGatheringComplete(pc);
-        await publishSignalEphemeral(guestPubkey, 'offer', { sdp: pc.localDescription! }, sessionId);
+        await publishSignalEphemeral(guestPubkey, 'offer', {
+          sdp: pc.localDescription!,
+          playerIndex: availablePlayerIndex
+        }, sessionId);
 
-        console.log(`[HOST] Offer sent to guest ${guestPubkey.substring(0, 8)}...`);
+        console.log(`[HOST] Offer sent to guest ${guestPubkey.substring(0, 8)}... as Player ${availablePlayerIndex}`);
       } catch (error) {
         console.error(`[HOST] Failed to create/send offer to ${guestPubkey.substring(0, 8)}...`, error);
       }
@@ -958,15 +991,19 @@ export function useMultiplayerSession(gameId: string) {
   const sendGameInput = useCallback((inputData: { key: string; pressed: boolean }) => {
     if (isHost || !guestDataChannelRef.current) return;
 
+    // Get player index from localStorage
+    const playerIndex = parseInt(localStorage.getItem(`playerIndex_${sessionId}`) || '2');
+
     if (guestDataChannelRef.current.readyState === 'open') {
       guestDataChannelRef.current.send(JSON.stringify({
         type: 'input',
         timestamp: Date.now(),
+        player: playerIndex,
         ...inputData
       }));
-      console.log('[GUEST] Sent input:', inputData);
+      console.log(`[GUEST] Sent input (Player ${playerIndex}):`, inputData);
     }
-  }, [isHost]);
+  }, [isHost, sessionId]);
 
 
   /**

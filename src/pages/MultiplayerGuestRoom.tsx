@@ -93,23 +93,57 @@ export default function MultiplayerGuestRoom() {
 
   // Guest input focus state
   const [focused, setFocused] = useState(false);
+  const [playerIndex, setPlayerIndex] = useState<number>(2); // Default to P2
   const pressedRef = useRef<Set<string>>(new Set());
 
   // Scroll lock functions
   const lockScroll = () => document.body.classList.add('overflow-hidden');
   const unlockScroll = () => document.body.classList.remove('overflow-hidden');
 
-  // Map keyboard events to NES buttons
+  // Key mappings per player
+  const playerKeyMaps: Record<number, Record<string, string>> = {
+    2: {
+      'ArrowUp': 'Up', 'ArrowDown': 'Down', 'ArrowLeft': 'Left', 'ArrowRight': 'Right',
+      'KeyI': 'Up', 'KeyK': 'Down', 'KeyJ': 'Left', 'KeyL': 'Right',
+      'KeyM': 'A', 'KeyN': 'B', 'Period': 'A', 'Comma': 'B',
+      'KeyO': 'Select', 'KeyP': 'Start'
+    },
+    3: {
+      'ArrowUp': 'Up', 'ArrowDown': 'Down', 'ArrowLeft': 'Left', 'ArrowRight': 'Right',
+      'KeyT': 'Up', 'KeyG': 'Down', 'KeyF': 'Left', 'KeyH': 'Right',
+      'KeyY': 'A', 'KeyU': 'B', 'KeyV': 'A', 'KeyB': 'B',
+      'BracketLeft': 'Select', 'BracketRight': 'Start'
+    },
+    4: {
+      'ArrowUp': 'Up', 'ArrowDown': 'Down', 'ArrowLeft': 'Left', 'ArrowRight': 'Right',
+      'Numpad8': 'Up', 'Numpad5': 'Down', 'Numpad4': 'Left', 'Numpad6': 'Right',
+      'Numpad1': 'A', 'Numpad2': 'B', 'Numpad7': 'A', 'Numpad3': 'B',
+      'Numpad0': 'Select', 'NumpadEnter': 'Start'
+    }
+  };
+
+  // Map keyboard events to NES buttons based on player index
   const mapKey = (e: KeyboardEvent): string | null => {
     const { code, key } = e;
-    if (key.startsWith('Arrow')) return key.replace('Arrow', '');
-    if (code === 'Enter') return 'Start';
-    if (code === 'ShiftLeft' || code === 'ShiftRight') return 'Select';
-    if (code === 'KeyZ') return 'A';
-    if (code === 'KeyX') return 'B';
-    if (code === 'Space') return 'Start';
-    return null;
+    const keyMap = playerKeyMaps[playerIndex] || playerKeyMaps[2];
+
+    // Try both code and key for maximum compatibility
+    return keyMap[code] || keyMap[key] || null;
   };
+
+  // Update player index when session is established
+  useEffect(() => {
+    if (sessionId) {
+      const storedIndex = localStorage.getItem(`playerIndex_${sessionId}`);
+      if (storedIndex) {
+        const index = parseInt(storedIndex);
+        if (index >= 2 && index <= 4) {
+          setPlayerIndex(index);
+          console.log(`[GuestRoom] Set to Player ${index}`);
+        }
+      }
+    }
+  }, [sessionId]);
 
   // Handle input focus and event listeners
   useEffect(() => {
@@ -160,7 +194,7 @@ export default function MultiplayerGuestRoom() {
       const currentPressed = pressedRef.current;
       currentPressed.clear();
     };
-  }, [focused, sendGameInput]);
+  }, [focused, sendGameInput, playerIndex]);
 
   // Handle ESC key to exit focus
   useEffect(() => {
@@ -418,18 +452,31 @@ export default function MultiplayerGuestRoom() {
 
   // Error state
   if (connectionState === 'error') {
+    const isRoomFull = error?.toLowerCase().includes('full') || status === 'full';
+
     return (
       <div className="min-h-screen bg-black text-white flex items-center justify-center">
         <Card className="w-full max-w-2xl border-red-500 bg-gray-900">
           <CardContent className="p-8 text-center">
-            <div className="text-red-400 text-6xl mb-4">⚠️</div>
-            <h3 className="text-xl font-semibold text-white mb-2">Connection Failed</h3>
-            <p className="text-gray-400 mb-4">{error}</p>
+            <div className="text-red-400 text-6xl mb-4">
+              {isRoomFull ? '👥' : '⚠️'}
+            </div>
+            <h3 className="text-xl font-semibold text-white mb-2">
+              {isRoomFull ? 'Room Full' : 'Connection Failed'}
+            </h3>
+            <p className="text-gray-400 mb-4">
+              {isRoomFull
+                ? 'Room full (4 players max). Please try another session or create your own.'
+                : error
+              }
+            </p>
             <div className="space-y-2">
-              <Button onClick={handleRetry} className="w-full">
-                <RefreshCw className="w-4 h-4 mr-2" />
-                Try Again
-              </Button>
+              {!isRoomFull && (
+                <Button onClick={handleRetry} className="w-full">
+                  <RefreshCw className="w-4 h-4 mr-2" />
+                  Try Again
+                </Button>
+              )}
               <Button onClick={handleLeave} variant="outline" className="w-full">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 Leave Session
@@ -459,8 +506,11 @@ export default function MultiplayerGuestRoom() {
                 </h1>
                 <div className="flex items-center gap-2 text-sm text-gray-400">
                   <Badge variant="secondary" className="bg-purple-900 text-purple-300 border-purple-700">
-                    Guest View
+                    Player {playerIndex}
                   </Badge>
+                  <span className="text-xs">
+                    You are Player {playerIndex}
+                  </span>
                   {hostDisplayName && (
                     <span className="text-xs">
                       Host: {hostDisplayName}
@@ -505,8 +555,17 @@ export default function MultiplayerGuestRoom() {
                 />
 
                 {!isStreamActive && (
-                  <div className="absolute inset-0 flex items-center justify-center">
-                    {/* your waiting UI */}
+                  <div className="absolute inset-0 flex items-center justify-center bg-gray-900">
+                    <div className="text-center">
+                      <div className="text-4xl mb-4">🎮</div>
+                      <h3 className="text-xl font-semibold text-white mb-2">Waiting for Game Stream</h3>
+                      <p className="text-gray-400">
+                        {connectionState === 'connected'
+                          ? 'Connected - Waiting for host to start streaming...'
+                          : 'Establishing connection to host...'
+                        }
+                      </p>
+                    </div>
                   </div>
                 )}
 
@@ -649,12 +708,47 @@ export default function MultiplayerGuestRoom() {
                   <div className="pt-2 border-t border-gray-800">
                     <span className="text-gray-500">Session:</span>
                     <div className="text-xs text-gray-400 mt-1 space-y-1">
-                      <div>Mode: Guest (View Only)</div>
+                      <div>Mode: Player {playerIndex}</div>
                       <div>Game ID: {gameId}</div>
                       <div>Host: {hostDisplayName}</div>
                       <div>Status: {connectionInfo.text}</div>
                     </div>
                   </div>
+
+                  {playerIndex >= 2 && playerIndex <= 4 && (
+                    <div className="pt-2 border-t border-gray-800">
+                      <span className="text-gray-500">Your Controls:</span>
+                      <div className="text-xs text-gray-400 mt-1 space-y-1">
+                        {playerIndex === 2 && (
+                          <>
+                            <div>D-Pad: I, J, K, L</div>
+                            <div>A Button: M</div>
+                            <div>B Button: N</div>
+                            <div>Select: O</div>
+                            <div>Start: P</div>
+                          </>
+                        )}
+                        {playerIndex === 3 && (
+                          <>
+                            <div>D-Pad: T, F, G, H</div>
+                            <div>A Button: Y</div>
+                            <div>B Button: U</div>
+                            <div>Select: [</div>
+                            <div>Start: ]</div>
+                          </>
+                        )}
+                        {playerIndex === 4 && (
+                          <>
+                            <div>D-Pad: Numpad 8, 4, 5, 6</div>
+                            <div>A Button: Numpad 1</div>
+                            <div>B Button: Numpad 2</div>
+                            <div>Select: Numpad 0</div>
+                            <div>Start: Numpad Enter</div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
 
                   <div className="pt-4 border-t border-gray-800 mt-4">
                     <Link

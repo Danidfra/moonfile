@@ -24,7 +24,8 @@
   const gameId = `game-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
   console.log('[EmulatorJS Embed] Generated game ID:', gameId);
 
-  // Set minimal EmulatorJS configuration
+  // Set EmulatorJS configuration for 4-player support
+  window.EJS_gameName = gameId;
   window.EJS_gameID = gameId;
   window.EJS_pathtodata = 'https://cdn.emulatorjs.org/stable/data/';
   window.EJS_gameUrl = url;
@@ -33,6 +34,144 @@
   window.EJS_mute = mute;
   window.EJS_volume = mute ? 0 : volume;
   window.EJS_player = '#game';
+
+  // Configure 4-player support
+  window.EJS_joypadType = ['standard', 'standard', 'standard', 'standard'];
+
+  // Default controls for 4 players (P1 exactly as provided, P2-P4 added)
+  window.EJS_defaultControls = {
+    0: {
+      0: { 'value': 'x',          'value2': 'BUTTON_2' },
+      1: { 'value': 's',          'value2': 'BUTTON_4' },
+      2: { 'value': 'v',          'value2': 'SELECT' },
+      3: { 'value': 'enter',      'value2': 'START' },
+      4: { 'value': 'up arrow',   'value2': 'DPAD_UP' },
+      5: { 'value': 'down arrow', 'value2': 'DPAD_DOWN' },
+      6: { 'value': 'left arrow', 'value2': 'DPAD_LEFT' },
+      7: { 'value': 'right arrow','value2': 'DPAD_RIGHT' },
+      8: { 'value': 'z',          'value2': 'BUTTON_1' },
+      9: { 'value': 'a',          'value2': 'BUTTON_3' },
+      10:{ 'value': 'q',          'value2': 'LEFT_TOP_SHOULDER' },
+      11:{ 'value': 'e',          'value2': 'RIGHT_TOP_SHOULDER' },
+      12:{ 'value': 'tab',        'value2': 'LEFT_BOTTOM_SHOULDER' },
+      13:{ 'value': 'r',          'value2': 'RIGHT_BOTTOM_SHOULDER' },
+      14:{ 'value': '',           'value2': 'LEFT_STICK' },
+      15:{ 'value': '',           'value2': 'RIGHT_STICK' },
+      16:{ 'value': 'h',          'value2': 'LEFT_STICK_X:+1' },
+      17:{ 'value': 'f',          'value2': 'LEFT_STICK_X:-1' },
+      18:{ 'value': 'g',          'value2': 'LEFT_STICK_Y:+1' },
+      19:{ 'value': 't',          'value2': 'LEFT_STICK_Y:-1' },
+      20:{ 'value': 'l',          'value2': 'RIGHT_STICK_X:+1' },
+      21:{ 'value': 'j',          'value2': 'RIGHT_STICK_X:-1' },
+      22:{ 'value': 'k',          'value2': 'RIGHT_STICK_Y:+1' },
+      23:{ 'value': 'i',          'value2': 'RIGHT_STICK_Y:-1' },
+      24:{ 'value': '1' },
+      25:{ 'value': '2' },
+      26:{ 'value': '3' },
+      27:{ 'value': 'add' },
+      28:{ 'value': 'space' },
+      29:{ 'value': 'subtract' },
+    },
+    // Player 2: IJKL d-pad, M/N face buttons, O=Select, P=Start
+    1: {
+      0:  { value:'n',         value2:'BUTTON_2' },
+      1:  { value:',',         value2:'BUTTON_4' },
+      2:  { value:'o',         value2:'SELECT' },
+      3:  { value:'p',         value2:'START' },
+      4:  { value:'i',         value2:'DPAD_UP' },
+      5:  { value:'k',         value2:'DPAD_DOWN' },
+      6:  { value:'j',         value2:'DPAD_LEFT' },
+      7:  { value:'l',         value2:'DPAD_RIGHT' },
+      8:  { value:'m',         value2:'BUTTON_1' },
+      9:  { value:'.',         value2:'BUTTON_3' },
+      10: { value:'',          value2:'LEFT_TOP_SHOULDER' },
+      11: { value:'',          value2:'RIGHT_TOP_SHOULDER' },
+      12: { value:'',          value2:'LEFT_BOTTOM_SHOULDER' },
+      13: { value:'',          value2:'RIGHT_BOTTOM_SHOULDER' },
+      14: { value:'',          value2:'LEFT_STICK' },
+      15: { value:'',          value2:'RIGHT_STICK' },
+      16: { value:'',          value2:'LEFT_STICK_X:+1' },
+      17: { value:'',          value2:'LEFT_STICK_X:-1' },
+      18: { value:'',          value2:'LEFT_STICK_Y:+1' },
+      19: { value:'',          value2:'LEFT_STICK_Y:-1' },
+      20: { value:'',          value2:'RIGHT_STICK_X:+1' },
+      21: { value:'',          value2:'RIGHT_STICK_X:-1' },
+      22: { value:'',          value2:'RIGHT_STICK_Y:+1' },
+      23: { value:'',          value2:'RIGHT_STICK_Y:-1' },
+      24: { value:'', },
+      25: { value:'', },
+      26: { value:'', },
+      27: { value:'', },
+      28: { value:'', },
+      29: { value:'', },
+    },
+    // Player 3: T/G/F/H d-pad, Y/U face buttons, [=Select, ]=Start, V/B as extra buttons
+    2: {
+      0:  { value:'u',         value2:'BUTTON_2' },
+      1:  { value:'b',         value2:'BUTTON_4' },
+      2:  { value:'[',         value2:'SELECT' },
+      3:  { value:']',         value2:'START' },
+      4:  { value:'t',         value2:'DPAD_UP' },
+      5:  { value:'g',         value2:'DPAD_DOWN' },
+      6:  { value:'f',         value2:'DPAD_LEFT' },
+      7:  { value:'h',         value2:'DPAD_RIGHT' },
+      8:  { value:'y',         value2:'BUTTON_1' },
+      9:  { value:'v',         value2:'BUTTON_3' },
+      10: { value:'',          value2:'LEFT_TOP_SHOULDER' },
+      11: { value:'',          value2:'RIGHT_TOP_SHOULDER' },
+      12: { value:'',          value2:'LEFT_BOTTOM_SHOULDER' },
+      13: { value:'',          value2:'RIGHT_BOTTOM_SHOULDER' },
+      14: { value:'',          value2:'LEFT_STICK' },
+      15: { value:'',          value2:'RIGHT_STICK' },
+      16: { value:'',          value2:'LEFT_STICK_X:+1' },
+      17: { value:'',          value2:'LEFT_STICK_X:-1' },
+      18: { value:'',          value2:'LEFT_STICK_Y:+1' },
+      19: { value:'',          value2:'LEFT_STICK_Y:-1' },
+      20: { value:'',          value2:'RIGHT_STICK_X:+1' },
+      21: { value:'',          value2:'RIGHT_STICK_X:-1' },
+      22: { value:'',          value2:'RIGHT_STICK_Y:+1' },
+      23: { value:'',          value2:'RIGHT_STICK_Y:-1' },
+      24: { value:'', },
+      25: { value:'', },
+      26: { value:'', },
+      27: { value:'', },
+      28: { value:'', },
+      29: { value:'', },
+    },
+    // Player 4: Numpad cluster
+    3: {
+      0:  { value:'numpad2',      value2:'BUTTON_2' },
+      1:  { value:'numpad3',      value2:'BUTTON_4' },
+      2:  { value:'numpad0',      value2:'SELECT' },
+      3:  { value:'numpadenter',  value2:'START' },
+      4:  { value:'numpad8',      value2:'DPAD_UP' },
+      5:  { value:'numpad5',      value2:'DPAD_DOWN' },
+      6:  { value:'numpad4',      value2:'DPAD_LEFT' },
+      7:  { value:'numpad6',      value2:'DPAD_RIGHT' },
+      8:  { value:'numpad1',      value2:'BUTTON_1' },
+      9:  { value:'numpad7',      value2:'BUTTON_3' },
+      10: { value:'',             value2:'LEFT_TOP_SHOULDER' },
+      11: { value:'',             value2:'RIGHT_TOP_SHOULDER' },
+      12: { value:'',             value2:'LEFT_BOTTOM_SHOULDER' },
+      13: { value:'',             value2:'RIGHT_BOTTOM_SHOULDER' },
+      14: { value:'',             value2:'LEFT_STICK' },
+      15: { value:'',             value2:'RIGHT_STICK' },
+      16: { value:'',             value2:'LEFT_STICK_X:+1' },
+      17: { value:'',             value2:'LEFT_STICK_X:-1' },
+      18: { value:'',             value2:'LEFT_STICK_Y:+1' },
+      19: { value:'',             value2:'LEFT_STICK_Y:-1' },
+      20: { value:'',             value2:'RIGHT_STICK_X:+1' },
+      21: { value:'',             value2:'RIGHT_STICK_X:-1' },
+      22: { value:'',             value2:'RIGHT_STICK_Y:+1' },
+      23: { value:'',             value2:'RIGHT_STICK_Y:-1' },
+      24: { value:'', },
+      25: { value:'', },
+      26: { value:'', },
+      27: { value:'', },
+      28: { value:'', },
+      29: { value:'', },
+    }
+  };
 
   console.log('[EmulatorJS Embed] Configuration set:', {
     EJS_gameID: window.EJS_gameID,
